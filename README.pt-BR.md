@@ -253,4 +253,4 @@ DESIGN.md                 Notas do design system
 
 - Links de torrent e compartilhamento de tela aparecem no menu como "Em breve"; precisam de um motor de torrent e de WebRTC no servidor.
 - Arquivos enviados ficam em `.uploads/` até você apagá-los.
-- O ban vale para a identidade da aba do navegador; uma aba nova ou outro navegador recebe uma identidade nova.
+- O ban vale para a identidade do navegador (guardada no `localStorage`): uma aba nova mantém a identidade, mas outro navegador, janela anônima ou dados do site apagados geram uma identidade nova. Não há contas, então é até aí que vai.

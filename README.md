@@ -253,4 +253,4 @@ DESIGN.md                 Design system notes
 
 - Torrent links and screen sharing appear in the menu as "Coming soon"; they need a torrent engine and WebRTC on the server.
 - Uploaded files stay in `.uploads/` until you delete them.
-- A ban applies to the browser tab's identity; a new tab or another browser gets a new identity.
+- A ban applies to the browser's identity (kept in `localStorage`): a new tab keeps it, but another browser, a private window or cleared site data gets a new identity. There are no accounts, so that is as far as it goes.
