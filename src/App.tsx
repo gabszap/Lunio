@@ -130,6 +130,17 @@ export default function App() {
     [joinRoom, withName, goHome]
   );
 
+  // Rich Presence do Discord: título do vídeo e quantas pessoas estão na sala
+  const presenceTitle = view === 'player' ? currentPayload.title : '';
+  useEffect(() => {
+    if (!discordState.isEmbedded || !discordState.user) return;
+    const push = () => {
+      void discordManager.setPresence({ title: presenceTitle, people: syncManager.getStatus().membersCount });
+    };
+    push();
+    return syncManager.subscribeState(push);
+  }, [discordState.isEmbedded, discordState.user, presenceTitle]);
+
   useEffect(() => {
     const unsubDiscord = discordManager.subscribe((st) => {
       setDiscordState({ ...st });

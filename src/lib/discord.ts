@@ -125,7 +125,7 @@ class DiscordActivityManager {
           response_type: 'code',
           state: '',
           prompt: 'none',
-          scope: ['identify', 'guilds'],
+          scope: ['identify', 'guilds', 'rpc.activities.write'],
         });
 
         if (code) {
@@ -186,6 +186,28 @@ class DiscordActivityManager {
 
   public getState(): DiscordContextState {
     return this.state;
+  }
+
+  private lastPresence = '';
+  private presenceStart = Math.floor(Date.now() / 1000);
+
+  /** Rich Presence ("Jogando Lunio"): título do vídeo e quantas pessoas estão na sala. Falha em silêncio (scope não concedido). */
+  public async setPresence(opts: { title?: string; people: number }): Promise<void> {
+    if (!this.sdk || !this.state.user || this.state.user.id === 'mock_discord_user') return;
+    const key = JSON.stringify(opts);
+    if (key === this.lastPresence) return;
+    this.lastPresence = key;
+    const activity = {
+      type: 0,
+      details: opts.title ? `Assistindo ${opts.title}`.slice(0, 128) : 'Escolhendo um vídeo',
+      state: opts.people > 1 ? `Em sala com ${opts.people} pessoas` : 'Sozinho na sala',
+      timestamps: { start: this.presenceStart },
+    };
+    try {
+      await this.sdk.commands.setActivity({ activity: activity as never });
+    } catch (e: any) {
+      logger.warn('[Discord] Não deu pra atualizar a Rich Presence:', e?.message);
+    }
   }
 
   public getSdk(): DiscordSDK | null {
