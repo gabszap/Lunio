@@ -1,5 +1,6 @@
 import { ResolvedMediaRef, SubtitleTrackRef } from '../types/media';
 import { logger } from './logger';
+import { buildMediaFingerprint } from './media';
 
 export interface PlaybackState {
   currentTime: number;
@@ -175,7 +176,8 @@ class MediaSessionManager {
     const regionId = `region_${Date.now()}_g${gen}`;
 
     const fingerprint: MediaFingerprint = {
-      hash: source.infoHash || source.videoHash || this.generateFallbackHash(source.mediaUrl),
+      // Mesma identidade usada pelo cache de legendas e fontes (ver buildMediaFingerprint)
+      hash: source.mediaFingerprint || buildMediaFingerprint({ url: source.mediaUrl, ...source }),
       title: source.title,
       duration: source.duration,
       size: source.size,
@@ -404,14 +406,6 @@ class MediaSessionManager {
     }
   }
 
-  private generateFallbackHash(url: string): string {
-    let hash = 0;
-    for (let i = 0; i < url.length; i++) {
-      hash = (hash << 5) - hash + url.charCodeAt(i);
-      hash |= 0;
-    }
-    return Math.abs(hash).toString(16);
-  }
 }
 
 export const sessionManager = new MediaSessionManager();

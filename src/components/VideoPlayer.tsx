@@ -104,6 +104,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       ready: true,
     },
   });
+  const readinessRef = useRef(readiness);
+  readinessRef.current = readiness;
   const [isPreparingSubtitle, setIsPreparingSubtitle] = useState<boolean>(false);
 
   // Player state
@@ -181,7 +183,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     error: string;
     code?: string;
   } | null>(null);
-  const failedSubtitleSrcsRef = useRef<Set<string>>(new Set());
+  // Faixas que já falharam (por ID da candidata, não por URL) e a ordem do ranking da resolução atual
+  const failedSubtitleIdsRef = useRef<Set<string>>(new Set());
+  const rankedSubtitleIdsRef = useRef<string[]>([]);
+  const subtitleKey = (s: SubtitleTrack) => s.id || s.src;
 
   // Prompt flutuante para retomar reprodução do momento anterior
   const [resumePrompt, setResumePrompt] = useState<{ time: number; formatted: string } | null>(null);
@@ -296,11 +301,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     );
 
-    // Faixas de áudio e legendas são individuais para cada membro da sala
-    const unsubTracks = syncManager.subscribeTracks(() => {
-      // Intencionalmente mantido local: cada membro pode escolher seu áudio (japonês, português) e legendas de forma independente
-    });
-
     const unsubMedia = syncManager.subscribeMedia((media, generation, triggeredBy, username) => {
       if (media && !syncManager.isRoomHost()) {
         setSyncToast(`${username} carregou: ${media.title || 'novo vídeo'}`);
@@ -340,7 +340,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       syncManager.registerTimeGetter(null as any);
       unsubState();
       unsubPlayback();
-      unsubTracks();
       unsubMedia();
       unsubChat();
       unsubError();
@@ -399,7 +398,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const isSubReady =
       !readiness.selectedSubtitle.enabled ||
       !readiness.selectedSubtitle.required ||
-      readiness.selectedSubtitle.ready;
+      (readiness.selectedSubtitle.ready && !readiness.selectedSubtitle.failed);
     const isReady = readiness.video && readiness.audio && isSubReady;
     syncManager.emitReadiness(
       isReady,
@@ -450,7 +449,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     let isCancelled = false;
     setPlaybackError(null);
     setSubtitleFailurePrompt(null);
-    failedSubtitleSrcsRef.current.clear();
+    failedSubtitleIdsRef.current.clear();
+    rankedSubtitleIdsRef.current = [];
     currentChapterRef.current = null;
     pendingPlayRef.current = false;
 
@@ -562,7 +562,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           }
 
           // Resolução desacoplada de legendas via SubtitleResolver (descoberta paralela + ranking determinístico v8)
-          const { candidates, topCandidate } = await subtitleResolver.resolveCandidates(resolvedMedia, {
+          const { candidates, rankedCandidates, topCandidate } = await subtitleResolver.resolveCandidates(resolvedMedia, {
             preferredLanguages: ['pt-br', 'por', 'pt', 'en'],
             preferAssForAnime: true,
             requireSubtitle: true,
@@ -574,6 +574,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             // Preserva a ordem original das faixas do container (stream index) na lista do menu
             const subs: SubtitleTrack[] = candidates.map((c) => subtitleResolver.candidateToTrack(c));
             setDetectedSubtitles(subs);
+            // O "Tentar a próxima" segue o ranking, não a ordem das faixas no container
+            rankedSubtitleIdsRef.current = rankedCandidates.map((c) => c.id);
 
             const topTrack = topCandidate
               ? (subs.find((s) => s.id === topCandidate.id) || subs[0])
@@ -709,6 +711,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           .applyTrack(videoEl, activeSubtitle, audioOffsetRef.current, abortController.signal)
           .then(() => {
             if (isCancelled) return;
+            failedSubtitleIdsRef.current.delete(subtitleKey(activeSubtitle));
             setIsPreparingSubtitle(false);
             setSubtitleFailurePrompt(null);
             setReadiness((prev) => ({
@@ -721,14 +724,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             setIsPreparingSubtitle(false);
             logger.error(`[Legenda] Falha ao preparar "${activeSubtitle.label}":`, err);
 
-            // Requisito 3: Gating de legenda obrigatória e propagação de erros
-            const isRequired = readiness.selectedSubtitle.required;
+            failedSubtitleIdsRef.current.add(subtitleKey(activeSubtitle));
+
+            // ready = preparação concluída; failed = preparação falhou. Obrigatória ou não, falhou é ready:false + failed:true;
+            // quem decide se bloqueia a reprodução é o gating (só a obrigatória bloqueia).
+            setReadiness((prev) => ({
+              ...prev,
+              selectedSubtitle: { ...prev.selectedSubtitle, ready: false, failed: true },
+            }));
+            const isRequired = readinessRef.current.selectedSubtitle.required;
             if (isRequired) {
-              // Legenda obrigatória: NÃO marcar ready: true; bloquear playback e exibir banner de UX
-              setReadiness((prev) => ({
-                ...prev,
-                selectedSubtitle: { ...prev.selectedSubtitle, ready: false, failed: true },
-              }));
               let friendlyMessage = err.message || 'Falha ao renderizar a faixa de legenda.';
               if (err.code === 'BITMAP_NOT_SUPPORTED') {
                 friendlyMessage = 'Formato de legenda baseado em imagem (PGS/VobSub) não é suportado pelo renderizador.';
@@ -740,13 +745,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 error: friendlyMessage,
                 code: err.code,
               });
-            } else {
-              // Legenda opcional: não bloqueia a reprodução global
-              setReadiness((prev) => ({
-                ...prev,
-                selectedSubtitle: { ...prev.selectedSubtitle, ready: true, failed: true },
-              }));
             }
+            // Legenda opcional: o estado failed fica registrado, mas o gating não bloqueia a reprodução
           });
       }
     } else {
@@ -1155,12 +1155,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   // Ação de tentar próxima legenda disponível ao falhar a legenda obrigatória
+  // Próxima legenda do ranking que ainda não falhou (sem ranking, cai na ordem das faixas)
+  const findNextSubtitle = (): SubtitleTrack | null => {
+    const failed = failedSubtitleIdsRef.current;
+    const byId = new Map(detectedSubtitles.map((s) => [subtitleKey(s), s]));
+    for (const id of rankedSubtitleIdsRef.current) {
+      const track = byId.get(id);
+      if (track && !failed.has(id)) return track;
+    }
+    return detectedSubtitles.find((s) => !failed.has(subtitleKey(s)) && !rankedSubtitleIdsRef.current.includes(subtitleKey(s))) || null;
+  };
+
   const handleTryNextSubtitle = () => {
     if (!activeSubtitle) return;
-    failedSubtitleSrcsRef.current.add(activeSubtitle.src);
-    const remaining = detectedSubtitles.filter((s) => !failedSubtitleSrcsRef.current.has(s.src));
-    if (remaining.length > 0) {
-      const nextTrack = remaining[0];
+    failedSubtitleIdsRef.current.add(subtitleKey(activeSubtitle));
+    const nextTrack = findNextSubtitle();
+    if (nextTrack) {
       setSubtitleFailurePrompt(null);
       setReadiness((prev) => ({
         ...prev,
@@ -1179,7 +1189,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         prev
           ? {
               ...prev,
-              error: 'Nenhuma outra legenda disponível para este vídeo.',
+              error: 'Nenhuma legenda compatível pôde ser carregada.',
             }
           : null
       );
@@ -1963,9 +1973,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               </div>
             </div>
             <div className="flex flex-wrap justify-end gap-2">
-              {detectedSubtitles.some(
-                (s) => !failedSubtitleSrcsRef.current.has(s.src) && s.src !== subtitleFailurePrompt.track.src
-              ) && (
+              {findNextSubtitle() && (
                 <PrimaryButton onClick={handleTryNextSubtitle}>
                   <RefreshCw size={16} />
                   <span>Tentar a próxima</span>
@@ -2160,12 +2168,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           onFullscreenToggle={handleFullscreenToggle}
           onPipToggle={handlePipToggle}
           onToggleAspect={handleToggleAspect}
-          onSubtitleChange={(sub) => {
-            setActiveSubtitle(sub);
-            if (!syncManager.isApplyingRemoteUpdate && syncManager.isRoomHost()) {
-              syncManager.emitSubtitleTrack(sub ? sub.src : '');
-            }
-          }}
+          // Legenda selecionada é estado local: nada é enviado à sala
+          onSubtitleChange={(sub) => setActiveSubtitle(sub)}
           onAudioTrackChange={handleAudioTrackChange}
           onWatchPartyToggle={handleToggleWatchParty}
           watchPartyMembersCount={syncStatus.membersCount}

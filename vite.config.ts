@@ -943,6 +943,7 @@ function mediaProxyPlugin(): Plugin {
       try {
         const reqUrl = new URL(req.url || '', 'http://localhost');
         const targetUrl = reqUrl.searchParams.get('url');
+        const trackFingerprint = (reqUrl.searchParams.get('fingerprint') || '').slice(0, 200) || undefined;
         if (!targetUrl) {
           sendApiError(res, 400, 'bad_request', 'Parâmetro url ausente.');
           return;
@@ -1346,11 +1347,11 @@ function mediaProxyPlugin(): Plugin {
             for (const pSub of subsToPreExtract) {
               if (pSub && pSub.index !== undefined) {
                 const subTrackIdx = String(pSub.index);
-                const subHash = getMediaFingerprint(targetUrl);
+                const subHash = getMediaFingerprint(targetUrl, trackFingerprint);
                 const subCacheFile = path.join(SUB_CACHE_DIR, `${subHash}_s${subTrackIdx}.ass`);
                 if (!fs.existsSync(subCacheFile)) {
                   console.log(`[Tracks] 🚀 Pré-extraindo legenda prioritária #${subTrackIdx} (${pSub.title}) em background para o cache...`);
-                  getOrExtractSubtitle(targetUrl, subTrackIdx).catch((e) => {
+                  getOrExtractSubtitle(targetUrl, subTrackIdx, trackFingerprint).catch((e) => {
                     console.warn(`[Tracks] Pré-extração de legenda deferida:`, e.message);
                   });
                 }

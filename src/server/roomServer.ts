@@ -38,8 +38,6 @@ interface RoomInternal {
     rate: number;
     updatedAt: number;
   };
-  audioTrack?: string;
-  subtitleTrack?: string;
   clients: Map<WebSocket, ClientSession>;
   chatHistory: ChatMessage[];
   cleanupTimer?: NodeJS.Timeout;
@@ -155,8 +153,6 @@ export class RoomManager {
         rate: room.playback.rate,
         updatedAt: Date.now(),
       },
-      audioTrack: room.audioTrack,
-      subtitleTrack: room.subtitleTrack,
       members,
       bannedMembers: Array.from(room.bannedMembers ? room.bannedMembers.values() : []),
     };
@@ -548,9 +544,6 @@ export class RoomManager {
           updatedAt: Date.now(),
         };
 
-        currentRoom.audioTrack = undefined;
-        currentRoom.subtitleTrack = undefined;
-
         console.log(`[WatchParty] 🎬 Nova mídia definida na sala "${currentRoom.roomId}": "${msg.media.title}"`);
         this.sendSystemChat(currentRoom, `🎬 ${clientSession.username} carregou: "${msg.media.title || 'Novo Vídeo'}"`);
 
@@ -565,30 +558,6 @@ export class RoomManager {
         this.broadcast(currentRoom, {
           type: 'room:state',
           state: this.getRoomState(currentRoom),
-        });
-        break;
-      }
-
-      case 'track:audio': {
-        if (!isHost) return;
-        currentRoom.audioTrack = msg.trackId;
-        this.broadcast(currentRoom, {
-          type: 'track:sync',
-          audioTrack: msg.trackId,
-          triggeredBy: clientSession.userId,
-          username: clientSession.username,
-        });
-        break;
-      }
-
-      case 'track:subtitle': {
-        if (!isHost) return;
-        currentRoom.subtitleTrack = msg.trackId;
-        this.broadcast(currentRoom, {
-          type: 'track:sync',
-          subtitleTrack: msg.trackId,
-          triggeredBy: clientSession.userId,
-          username: clientSession.username,
         });
         break;
       }
