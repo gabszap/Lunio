@@ -13,6 +13,11 @@ import { tracksCache } from './tracks';
 const pendingSubtitleExtractions = new Map<string, Promise<string>>();
 const activeSubtitleProcesses = new Map<string, () => void>();
 
+/** A extração remota (HTTP Range) falha por motivos passageiros (CDN lenta, conexão cortada): tenta algumas vezes antes do FFmpeg. */
+const REMOTE_ATTEMPT_TIMEOUT_MS = 40_000;
+const REMOTE_ATTEMPTS = 3;
+const REMOTE_RETRY_DELAY_MS = 1500;
+
 /**
  * Extração de alta performance via mkv_extractor (HTTP Range + EBML Cues)
  * Baixa apenas ~1-2 MB da legenda em 3-8s em vez de GBs pelo FFmpeg.
@@ -66,8 +71,8 @@ async function extractRemoteMkvSubtitle(
 
     const timer = setTimeout(() => {
       killTree(proc);
-      reject(new Error('Tempo limite de 60s excedido no mkv_extractor.'));
-    }, 60000);
+      reject(new Error(`Tempo limite de ${REMOTE_ATTEMPT_TIMEOUT_MS / 1000}s excedido no mkv_extractor.`));
+    }, REMOTE_ATTEMPT_TIMEOUT_MS);
 
     proc.on('close', (code) => {
       clearTimeout(timer);
@@ -135,7 +140,19 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
         try {
           console.log(`[Subtitle] 🚀 Tentando extração remota ultrarrápida (HTTP Range / EBML) para faixa #${track}...`);
           const t0 = Date.now();
-          const content = await extractRemoteMkvSubtitle(streamUrl, track, tmpFile, extractionKey);
+          let content = '';
+          for (let attempt = 1; ; attempt++) {
+            try {
+              content = await extractRemoteMkvSubtitle(streamUrl, track, tmpFile, extractionKey);
+              break;
+            } catch (attemptErr: any) {
+              // Sem Python ou servidor ocupado não melhora tentando de novo
+              if (attempt >= REMOTE_ATTEMPTS || attemptErr?.code === 'busy' || /Python 3\.10\+ não encontrado/.test(attemptErr?.message || '')) throw attemptErr;
+              console.warn(`[Subtitle] ↻ Tentativa ${attempt}/${REMOTE_ATTEMPTS} falhou na faixa #${track} (${attemptErr.message?.slice(0, 100)}). Tentando de novo…`);
+              try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
+              await new Promise((r) => setTimeout(r, REMOTE_RETRY_DELAY_MS * attempt));
+            }
+          }
 
           if (fs.existsSync(tmpFile)) {
             if (fs.existsSync(cacheFile)) fs.unlinkSync(cacheFile);
