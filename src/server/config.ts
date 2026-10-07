@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import crypto from 'node:crypto';
+import path from 'node:path';
 
 // O Vite só expõe variáveis VITE_* ao código do cliente; o servidor lê o `.env` por conta própria.
 // Variáveis já definidas no ambiente (systemd, Docker…) têm prioridade sobre o arquivo.
@@ -26,6 +27,11 @@ function parseOrigins(raw: string | undefined): string[] {
 }
 
 export const config = {
+  /** Raiz do projeto: onde ficam `.env`, `.uploads/`, `.cache/`, `dist/` e `mkv_extractor/`. Rode sempre a partir dela. */
+  rootDir: path.resolve(process.cwd()),
+  /** Porta e endereço do servidor de produção (`npm run serve`). */
+  port: num('PORT', 3000),
+  host: process.env.HOST?.trim() || '0.0.0.0',
   /** Origens extras (além da própria) autorizadas a chamar a API e abrir o WebSocket. */
   allowedOrigins: parseOrigins(process.env.ALLOWED_ORIGINS),
   /** Atrás de proxy reverso (Caddy/nginx): usa X-Forwarded-For para identificar o IP real. */

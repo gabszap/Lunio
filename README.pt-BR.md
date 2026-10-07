@@ -43,7 +43,7 @@ O Lunio é um player de vídeo web feito para assistir junto. Cole um link de st
 ```bash
 npm install
 npm run dev      # desenvolvimento (hot reload)
-npm start        # produção: gera o build e serve a versão otimizada
+npm start        # produção: gera o build e roda o servidor de produção (sem Vite)
 ```
 
 Abra <http://localhost:3000>. O servidor de desenvolvimento também escuta na rede local, então amigos na mesma rede podem entrar usando o IP da sua máquina.
@@ -73,13 +73,14 @@ Copie `.env.example` para `.env`. Localmente nada é obrigatório (só a Ativida
 | Comando | O que faz |
 |---|---|
 | `npm run dev` | Desenvolvimento: app + API + WebSocket na porta 3000, com hot reload |
-| `npm start` | Produção: gera o `dist/` e serve com a API e o WebSocket na porta 3000 |
+| `npm start` | Produção: `npm run build` e depois `npm run serve` |
+| `npm run serve` | Servidor de produção (`src/server/main.ts`): Express servindo `dist/` + API + WebSocket em `PORT` (padrão 3000), sem Vite. Precisa de um `npm run build` antes |
 | `npm run build` | Gera o frontend em `dist/` |
-| `npm run preview` | Serve um `dist/` já gerado com a API e o WebSocket (sem refazer o build) |
+| `npm run preview` | Preview do Vite sobre um `dist/` já gerado, com a API plugada (útil para checagens rápidas; produção usa `serve`) |
 | `npm run lint` | Checagem de tipos (`tsc --noEmit`) |
 | `python -m pytest tests` | Roda os testes do `mkv_extractor` |
 
-> O backend (proxy de mídia, envios, salas) é um plugin do Vite registrado tanto no servidor de desenvolvimento quanto no de preview, então `npm start` roda o app completo a partir do build otimizado: minificado, sem hot reload e sem expor o código-fonte. Use `npm run dev` só enquanto estiver desenvolvendo.
+> O backend mora em `src/server/` e não depende do Vite: `npm run serve` roda como um app Express comum, e `npm run dev` / `npm run preview` só plugam o mesmo router no Vite. Em desenvolvimento, editar um arquivo do servidor reinicia o servidor de dev (e derruba as salas abertas); em produção nada observa o código, então as salas só caem num restart ou deploy.
 
 ## Como funciona
 
@@ -88,7 +89,8 @@ Navegador (React + Vidstack)
    │  HTTP  ── /api/proxy, /api/tracks, /api/subtitle, /api/upload …
    │  WebSocket ── /api/ws (salas, sincronia, chat)
    ▼
-Servidor do Vite, dev ou preview (vite.config.ts)
+Backend: router Express (src/server/app.ts), servido por src/server/main.ts em produção
+ou plugado no servidor de dev/preview do Vite (vite.config.ts)
    ├─ proxy de mídia: repasse com HTTP Range, remux fMP4 via FFmpeg para áudio alternativo
    ├─ inspeção de faixas e extração de legendas/fontes (FFmpeg + mkv_extractor)
    ├─ envios (.uploads/) e resolvedor do Google Drive
@@ -117,7 +119,7 @@ Salas vazias são encerradas cerca de 30 segundos depois que a última pessoa sa
 
 ## Deploy em um servidor Linux (Ubuntu 24.04)
 
-Uma VPS pequena basta. O Lunio roda como um único processo Node (`npm start`); o Caddy fica na frente cuidando de HTTPS e WebSocket, e o systemd mantém tudo de pé. Troque `lunio.exemplo.com` pelo seu domínio (o DNS precisa apontar para o servidor) e libere as portas 80 e 443.
+Uma VPS pequena basta. O Lunio roda como um único processo Node (`npm run serve`); o Caddy fica na frente cuidando de HTTPS e WebSocket, e o systemd mantém tudo de pé. Troque `lunio.exemplo.com` pelo seu domínio (o DNS precisa apontar para o servidor) e libere as portas 80 e 443.
 
 **1. Instalar Node 22, FFmpeg, Python e Caddy**
 
@@ -137,6 +139,7 @@ sudo useradd --system --create-home --home-dir /opt/lunio --shell /usr/sbin/nolo
 sudo -u lunio git clone https://github.com/gabszap/Lunio.git /opt/lunio/app
 cd /opt/lunio/app
 sudo -u lunio npm ci
+sudo -u lunio npm run build
 sudo -u lunio cp .env.example .env
 sudo -u lunio nano .env
 ```
@@ -153,7 +156,7 @@ DISCORD_CLIENT_SECRET=...
 
 Deixe `ALLOW_PRIVATE_URLS` vazio. Ele existe só para testes locais e desliga a proteção que impede o servidor de alcançar a sua rede interna.
 
-**3. Serviço systemd** — `/etc/systemd/system/lunio.service`
+**3. Build e serviço systemd** — `/etc/systemd/system/lunio.service`
 
 ```ini
 [Unit]
@@ -163,7 +166,7 @@ After=network.target
 [Service]
 User=lunio
 WorkingDirectory=/opt/lunio/app
-ExecStart=/usr/bin/npm start
+ExecStart=/usr/bin/npm run serve
 Restart=always
 RestartSec=3
 Environment=NODE_ENV=production
@@ -177,7 +180,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now lunio
 journalctl -u lunio -f      # ao iniciar, mostra qual FFmpeg e qual Python foram encontrados
 ```
 
-O `WorkingDirectory` importa: `.uploads/`, `.cache/` e `.env` ficam nele. O `npm start` refaz o build do frontend a cada início (uns 30 s); para pular isso depois de um deploy, rode `npm run build` uma vez e use `ExecStart=/usr/bin/npx vite preview`.
+O `WorkingDirectory` importa: `.uploads/`, `.cache/`, `dist/` e `.env` ficam nele. O `npm run serve` não faz build, então rode `npm run build` uma vez a cada `git pull` (os restarts ficam instantâneos). `PORT` e `HOST` no `.env` mudam onde ele escuta (padrão `0.0.0.0:3000`).
 
 **4. Caddy (HTTPS + WebSocket)** — `/etc/caddy/Caddyfile`
 
@@ -199,7 +202,7 @@ O Caddy obtém o certificado sozinho e faz proxy de WebSocket sem configuração
 
 Abra `https://lunio.exemplo.com` e vá em **Status**: Servidor, FFmpeg e Python devem estar verdes. Depois crie uma sala, entre por um segundo navegador e troque a faixa de áudio.
 
-**Atualizar:** `cd /opt/lunio/app && sudo -u lunio git pull && sudo -u lunio npm ci && sudo systemctl restart lunio`. Reiniciar encerra as salas abertas.
+**Atualizar:** `cd /opt/lunio/app && sudo -u lunio git pull && sudo -u lunio npm ci && sudo -u lunio npm run build && sudo systemctl restart lunio`. Reiniciar encerra as salas abertas.
 
 ## Desenvolvimento no Windows
 
@@ -218,7 +221,8 @@ src/
     WatchPartyPanel.tsx   Chat e participantes
     ui.tsx                Componentes visuais compartilhados (design system)
   lib/                    Cliente de sincronia, legendas, utilitários de mídia, catálogo, Discord
-  server/                 Servidor de salas e rotas de envio/Drive
+  server/                 Backend: app.ts (router da API), main.ts (entrada de produção), routes/ (um arquivo
+                          por endpoint), media/ (remux FFmpeg, faixas, legendas, cache), roomServer.ts, segurança
 mkv_extractor/            Extrator em Python de legendas de MKV remotos (HTTP Range)
 public/                   Arquivos estáticos: JASSUB (libass), fontes de fallback, exemplo Sintel
 docs/                     Imagens do README
