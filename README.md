@@ -218,7 +218,8 @@ src/
   components/
     home/                 Room menu and source steps (stream, upload, YouTube, Drive, join)
     catalog/              Catalog, search and title details
-    VideoPlayer.tsx       Player core (Vidstack), sync, overlays
+    VideoPlayer.tsx       Player composition (Vidstack): shared state, hook order, rendering
+    player/               The player's hooks (room sync, alternate audio, subtitles, controls, shortcuts…) and overlays
     PlayerControls.tsx    Controls bar and menus
     WatchPartyPanel.tsx   Chat and participants
     ui.tsx                Shared UI primitives (design system)

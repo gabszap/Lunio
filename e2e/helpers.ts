@@ -2,6 +2,8 @@ import { expect, type Browser, type BrowserContext, type Page } from '@playwrigh
 
 /** Vídeo servido pelo fixture (e2e/fixture-server.mjs): MKV de 2 min com 2 faixas de áudio. */
 export const FIXTURE_URL = 'http://127.0.0.1:3101/teste.mkv';
+/** Vídeo curto com áudio japonês/português e legendas ASS en (faixa 3) e pt (faixa 4). */
+export const SUBTITLES_URL = 'http://127.0.0.1:3101/legendas.mkv';
 
 export async function newUser(browser: Browser): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
