@@ -19,8 +19,8 @@ O Lunio é um player de vídeo web feito para assistir junto. Cole um link de st
 - **Suporte a MKV** — as faixas de áudio e legenda são detectadas com o FFmpeg. Trocar de faixa de áudio toca por um **HLS compartilhado**: o vídeo é copiado (sem recodificar) e o áudio escolhido vira AAC em segmentos de ~6 s guardados no servidor. Quem está na sala e escolhe o mesmo áudio divide um único FFmpeg, e o seek leva uma fração de segundo. Arquivos sem índice Matroska ou sem vídeo H.264 caem no remux fMP4 na hora.
 - **Legendas** — ASS/SSA embutidas renderizadas com libass (JASSUB, WebAssembly), incluindo fontes embutidas; `.ass`, `.srt` (convertida para WebVTT) e `.vtt` externas por arquivo ou URL; ajuste de sincronia e tamanho da fonte.
 - **Player** — timeline dividida por capítulos, "Pular abertura/encerramento" nos capítulos detectados, velocidade, atraso do áudio, volume boost, modos de ajuste de tela, picture-in-picture, continuar de onde parou, atalhos de teclado.
-- **Catálogo** — navegue e busque filmes e séries (metadados do addon público Cinemeta, do Stremio), com temporadas, episódios e uma lista pessoal. O catálogo só fornece metadados: para assistir, você ainda escolhe uma fonte de vídeo.
-- **Página de status** — verifica o servidor local, o catálogo e a sua sala atual.
+- **Catálogo** *(experimental)* — navegue e busque filmes e séries (metadados do addon público Cinemeta, do Stremio), com temporadas, episódios e uma lista pessoal. O catálogo só fornece metadados: para assistir, você ainda escolhe uma fonte de vídeo.
+- **Página de status** *(versão inicial)* — verifica o servidor local, o FFmpeg, o Python, o catálogo e a sua sala atual.
 
 ## Capturas de tela
 
@@ -251,6 +251,7 @@ DESIGN.md                 Notas do design system
 
 ## Limitações conhecidas
 
-- Links de torrent e compartilhamento de tela aparecem no menu como "Em breve"; precisam de um motor de torrent e de WebRTC no servidor.
+- **Catálogo** e **Status** são experimentais: funcionam, mas são uma implementação inicial e vão mudar.
+- Links de torrent e compartilhamento de tela aparecem no menu como "Em breve". Torrent precisa de um motor de torrent no servidor. O compartilhamento de tela está planejado sobre **MoQ/WebTransport** (não WebRTC): `getDisplayMedia()` → WebCodecs → MoQ/WebTransport → relay → espectadores, o que exige HTTP/3 e um relay no servidor.
 - Arquivos enviados ficam em `.uploads/` até você apagá-los.
 - O ban vale para a identidade da aba do navegador; uma aba nova ou outro navegador recebe uma identidade nova.
