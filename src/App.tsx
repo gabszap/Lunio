@@ -82,6 +82,8 @@ export default function App() {
     setView('home');
     setHomeTab(tab);
     setHomeStep(step);
+    // A intenção "assistir este título" vale só para o passo aberto pelo catálogo
+    setWatchIntent(null);
     setIsWatchPartyOpen(false);
   }, []);
 
@@ -397,7 +399,10 @@ export default function App() {
       default:
         return (
           <RoomMenu
-            onPick={(step) => setHomeStep(step)}
+            onPick={(step) => {
+              setWatchIntent(null);
+              setHomeStep(step);
+            }}
             onJoin={() => {
               setJoinPrefill({ code: '', error: null });
               setHomeStep('join');
@@ -415,6 +420,7 @@ export default function App() {
           tab={homeTab}
           onTabChange={(tab) => {
             setHomeTab(tab);
+            setWatchIntent(null);
             if (tab !== 'room') setHomeStep('menu');
           }}
           onLogo={() => goHome('room')}
