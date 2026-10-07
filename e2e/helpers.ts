@@ -42,6 +42,20 @@ export async function joinRoom(page: Page, code: string, name: string) {
 
 export const video = (page: Page) => page.locator('video').first();
 
+/** Pedidos de HLS feitos pela página (o hls.js usa MediaSource: o `currentSrc` do <video> vira um blob:, sem pista da URL). */
+export function trackHls(page: Page) {
+  const urls: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('/api/hls/') && !r.url().includes('/api/hls/start')) urls.push(new URL(r.url()).pathname);
+  });
+  return {
+    urls,
+    /** Caminho da playlist (`/api/hls/<id>/<áudio>/index.m3u8`) já pedida, ou ''. */
+    playlist: () => urls.find((u) => u.endsWith('/index.m3u8')) ?? '',
+    segments: () => urls.filter((u) => u.endsWith('.ts')),
+  };
+}
+
 export const state = (page: Page) =>
   video(page).evaluate((v: HTMLVideoElement) => ({ paused: v.paused, t: v.currentTime, rs: v.readyState, ended: v.ended, src: v.currentSrc.replace(/([?&])t=[^&#]+/, '$1t=…') }));
 

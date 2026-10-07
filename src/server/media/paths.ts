@@ -6,7 +6,9 @@ import { config } from '../config';
 export const SUB_CACHE_DIR = path.resolve(config.rootDir, '.cache', 'subtitles');
 export const AUDIO_CACHE_DIR = path.resolve(config.rootDir, '.cache', 'audio');
 export const FONT_CACHE_DIR = path.resolve(config.rootDir, '.cache', 'fonts');
+/** Segmentos HLS (áudio alternativo compartilhado): uma pasta por mídia, apagada inteira pelo LRU de cleanup.ts. */
+export const HLS_CACHE_DIR = path.resolve(config.rootDir, '.cache', 'hls');
 
-for (const dir of [SUB_CACHE_DIR, AUDIO_CACHE_DIR, FONT_CACHE_DIR]) {
+for (const dir of [SUB_CACHE_DIR, AUDIO_CACHE_DIR, FONT_CACHE_DIR, HLS_CACHE_DIR]) {
   fs.mkdirSync(dir, { recursive: true });
 }

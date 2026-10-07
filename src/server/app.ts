@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { apiGate } from './gate';
 import { handleDrive } from './routes/drive';
 import { handleFont } from './routes/font';
+import { handleHls } from './routes/hls';
 import { handleProxy } from './routes/proxy';
 import { handleResolve } from './routes/resolve';
 import { handleRoomInfo } from './routes/room';
@@ -41,6 +42,7 @@ export function createApiRouter(): Router {
   router.use('/api/tracks', (req, res) => void handleTracks(req, res));
   router.use('/api/subtitle', (req, res) => void handleSubtitle(req, res));
   router.use('/api/font', (req, res) => void handleFont(req, res));
+  router.use('/api/hls', (req, res) => void handleHls(req, res));
 
   return router;
 }

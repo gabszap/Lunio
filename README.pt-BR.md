@@ -16,7 +16,7 @@ O Lunio é um player de vídeo web feito para assistir junto. Cole um link de st
   - Envio de arquivo (até 50 GB) — a sala já existe enquanto o arquivo sobe. Assistindo sozinho, o arquivo toca direto do computador, sem enviar.
   - Vídeos e lives do YouTube.
   - Arquivos do Google Drive compartilhados como "Qualquer pessoa com o link".
-- **Suporte a MKV** — faixas de áudio e legenda detectadas com FFmpeg. Trocar para outra faixa de áudio faz remux do stream para fMP4 na hora.
+- **Suporte a MKV** — as faixas de áudio e legenda são detectadas com o FFmpeg. Trocar de faixa de áudio toca por um **HLS compartilhado**: o vídeo é copiado (sem recodificar) e o áudio escolhido vira AAC em segmentos de ~6 s guardados no servidor. Quem está na sala e escolhe o mesmo áudio divide um único FFmpeg, e o seek leva uma fração de segundo. Arquivos sem índice Matroska ou sem vídeo H.264 caem no remux fMP4 na hora.
 - **Legendas** — ASS/SSA embutidas renderizadas com libass (JASSUB, WebAssembly), incluindo fontes embutidas; `.ass`, `.srt` (convertida para WebVTT) e `.vtt` externas por arquivo ou URL; ajuste de sincronia e tamanho da fonte.
 - **Player** — timeline dividida por capítulos, "Pular abertura/encerramento" nos capítulos detectados, velocidade, atraso do áudio, volume boost, modos de ajuste de tela, picture-in-picture, continuar de onde parou, atalhos de teclado.
 - **Catálogo** — navegue e busque filmes e séries (metadados do addon público Cinemeta, do Stremio), com temporadas, episódios e uma lista pessoal. O catálogo só fornece metadados: para assistir, você ainda escolhe uma fonte de vídeo.
@@ -63,7 +63,7 @@ Copie `.env.example` para `.env`. Localmente nada é obrigatório (só a Ativida
 | `PYTHON_PATH` | *(opcional)* Python 3.10+ do extrator de legendas. Senão, `python3`, `python`, `py -3` |
 | `MAX_UPLOAD_DISK_GB` / `MAX_UPLOAD_FILE_GB` | Cota de disco dos envios (padrão 20) e tamanho máximo de um envio (padrão 50) |
 | `UPLOAD_TTL_HOURS` | Horas que um envio fica depois que a sala fecha (padrão 6) |
-| `MAX_CACHE_GB` | Limite de `.cache/` (padrão 2); apaga primeiro o menos usado |
+| `MAX_CACHE_GB` | Limite de `.cache/` (padrão 10, inclui os segmentos HLS); apaga primeiro o menos usado |
 | `MAX_FFMPEG_PROCS` | Processos FFmpeg/Python ao mesmo tempo (padrão 8) |
 | `ALLOW_PRIVATE_URLS` | Só para testes locais: deixa o proxy alcançar endereços de rede privada. Mantenha vazio em produção |
 | `DISABLE_HMR` | *(opcional)* `true` desliga o hot reload do Vite |
@@ -104,6 +104,7 @@ ou plugado no servidor de dev/preview do Vite (vite.config.ts)
 | Rota | Descrição |
 |---|---|
 | `GET /api/proxy?url=` | Faz o stream de um vídeo remoto (com Range). Com `audio=`, faz remux para fMP4 com essa faixa de áudio |
+| `POST /api/hls/start`, `GET /api/hls/<id>/<áudio>/index.m3u8`, `GET /api/hls/<id>/<áudio>/<n>.ts` | HLS compartilhado de uma faixa de áudio alternativa: playlist e segmentos de ~6 s gerados sob demanda e guardados em cache (só MKV com Cues + vídeo H.264; senão o `start` responde 501 e o player usa o remux) |
 | `GET /api/tracks?url=` | Faixas de áudio, legenda, capítulos e fontes de um arquivo |
 | `GET /api/subtitle?url=&track=` | Extrai uma legenda embutida (cache em `.cache/subtitles`) |
 | `GET /api/font?url=&track=` | Extrai uma fonte embutida |

@@ -50,7 +50,7 @@ export const config = {
   /** Quantas horas um envio de sala encerrada continua no disco. */
   uploadTtlMs: num('UPLOAD_TTL_HOURS', 6) * 3600 * 1000,
   /** Limite de `.cache/` (legendas, fontes); acima disso apaga o menos usado. */
-  maxCacheBytes: num('MAX_CACHE_GB', 2) * GB,
+  maxCacheBytes: num('MAX_CACHE_GB', 10) * GB,
   /** FFmpeg/Python simultâneos no servidor inteiro. */
   maxFfmpegProcs: Math.max(1, Math.floor(num('MAX_FFMPEG_PROCS', 8))),
 };

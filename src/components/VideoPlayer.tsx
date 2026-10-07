@@ -2,12 +2,15 @@ import React, { useRef, useState, useEffect } from 'react';
 import {
   MediaPlayer,
   MediaProvider,
+  isHLSProvider,
+  type MediaProviderInstance,
   Track,
   Captions,
   type MediaPlayerInstance,
 } from '@vidstack/react';
 import '@vidstack/react/player/styles/base.css';
 
+import { getVideoElement } from './player/dom';
 import { MediaSource, Chapter, SubtitleTrack, AudioTrackOption } from '../types/media';
 import { PlayerControls } from './PlayerControls';
 import { WatchPartyPanel } from './WatchPartyPanel';
@@ -93,6 +96,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onLeaveRoom,
 }) => {
   const playerRef = useRef<MediaPlayerInstance>(null);
+  const mediaProviderRef = useRef<MediaProviderInstance>(null);
+  const providerReadyRef = useRef<boolean>(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const isSwitchingAudioRef = useRef<boolean>(false);
   const audioOffsetRef = useRef<number>(0);
@@ -156,6 +161,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     isSwitchingAudioRef,
     audioOffsetRef,
     wasPlayingBeforeAudioSwitchRef,
+    lastKnownTimeRef,
     initialAudioTracks,
   });
   const { detectedAudioTracks, activeAudioTrack, resolvedStreamUrl, setResolvedStreamUrl } = audio;
@@ -341,6 +347,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setBuffered,
     setBufferedRanges,
     setControlsVisible: controls.setControlsVisible,
+    hlsModeRef: audio.hlsModeRef,
+    pendingSeekRef: audio.pendingSeekRef,
+    fallbackToRemux: audio.fallbackToRemux,
   });
 
   const { aspectMode } = prefs;
@@ -414,6 +423,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         // a cada play depois de um pause, "reinicia" o trecho do começo. Informar a duração evita isso.
         duration={audio.isRemuxStream && duration > 0 ? duration : undefined}
         autoPlay={autoPlay && (!readiness.selectedSubtitle.required || (readiness.selectedSubtitle.ready && !readiness.selectedSubtitle.failed))}
+        // hls.js vem do próprio pacote (carregado só quando um áudio alternativo usa HLS), nunca de CDN
+        onProviderChange={(provider) => {
+          if (provider) providerReadyRef.current = true;
+          if (isHLSProvider(provider)) provider.library = () => import('hls.js');
+        }}
+        // O MediaProvider do Vidstack (React) só carrega o provedor ao montar o <video>. Ao trocar de "video" para "hls"
+        // (e voltar) o elemento é o mesmo, então pedimos o carregamento do provedor novo à mão.
+        onProviderLoaderChange={(loader) => {
+          if (!loader || !providerReadyRef.current) return;
+          requestAnimationFrame(() => mediaProviderRef.current?.load(getVideoElement(playerRef)));
+        }}
         playsInline
         logLevel="warn"
         playbackRate={playbackRate}
@@ -435,7 +455,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             : 'aspect-fit object-contain [&_video]:!object-contain [&_video]:!w-full [&_video]:!h-full'
         }`}
       >
-        <MediaProvider className="w-full h-full flex items-center justify-center [&_video]:!max-w-none [&_video]:!max-h-none [&_video]:!w-full [&_video]:!h-full">
+        <MediaProvider ref={mediaProviderRef} className="w-full h-full flex items-center justify-center [&_video]:!max-w-none [&_video]:!max-h-none [&_video]:!w-full [&_video]:!h-full">
           {/* Subtitle Tracks: Apenas faixas WebVTT no Track nativo; faixas ASS/SSA são gerenciadas via LibASS/JASSUB */}
           {detectedSubtitles
             .filter((track) => track.type === 'vtt')
