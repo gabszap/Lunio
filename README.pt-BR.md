@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/banner-pt.webp" alt="Lunio — assista junto, no mesmo segundo" width="100%">
+  <img src="assets/readme/banner-pt.webp" alt="Lunio — assista junto, no mesmo segundo" width="100%">
 </p>
 
 # Lunio
@@ -27,7 +27,7 @@ O Lunio é um player de vídeo web feito para assistir junto. Cole um link de st
 
 | Home | Player |
 |---|---|
-| ![Home: crie uma sala a partir de um arquivo, YouTube, Google Drive ou link de stream](docs/home.webp) | ![Player com timeline de capítulos e controles](docs/player.webp) |
+| ![Home: crie uma sala a partir de um arquivo, YouTube, Google Drive ou link de stream](assets/readme/home.webp) | ![Player com timeline de capítulos e controles](assets/readme/player.webp) |
 
 <sub>Vídeo nas capturas: *Sintel* © Blender Foundation, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).</sub>
 
@@ -230,7 +230,7 @@ src/
                           por endpoint), media/ (remux FFmpeg, faixas, legendas, cache), roomServer.ts, segurança
 mkv_extractor/            Extrator em Python de legendas de MKV remotos (HTTP Range)
 public/                   Arquivos estáticos: JASSUB (libass), fontes de fallback, exemplo Sintel
-docs/                     Imagens do README
+assets/                   Imagens do README (readme/) e arte do Discord (discord/)
 DESIGN.md                 Notas do design system
 ```
 

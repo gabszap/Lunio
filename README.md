@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/banner-en.webp" alt="Lunio — watch together, perfectly in sync" width="100%">
+  <img src="assets/readme/banner-en.webp" alt="Lunio — watch together, perfectly in sync" width="100%">
 </p>
 
 # Lunio
@@ -27,7 +27,7 @@ Lunio is a web video player built for watching together. Paste a stream link, up
 
 | Home | Player |
 |---|---|
-| ![Home: create a room from a file, YouTube, Google Drive or a stream link](docs/home.webp) | ![Player with chapter timeline and controls](docs/player.webp) |
+| ![Home: create a room from a file, YouTube, Google Drive or a stream link](assets/readme/home.webp) | ![Player with chapter timeline and controls](assets/readme/player.webp) |
 
 <sub>Video in the screenshots: *Sintel* © Blender Foundation, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).</sub>
 
@@ -230,7 +230,7 @@ src/
                           endpoint), media/ (FFmpeg remux, tracks, subtitles, cache), roomServer.ts, security
 mkv_extractor/            Python extractor for subtitles inside remote MKV files (HTTP Range)
 public/                   Static files: JASSUB (libass), fallback fonts, Sintel sample
-docs/                     README images
+assets/                   README images (readme/) and Discord art (discord/)
 DESIGN.md                 Design system notes
 ```
 
