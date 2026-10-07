@@ -78,6 +78,8 @@ Copie `.env.example` para `.env`. Localmente nada é obrigatório (só a Ativida
 | `npm run build` | Gera o frontend em `dist/` |
 | `npm run preview` | Preview do Vite sobre um `dist/` já gerado, com a API plugada (útil para checagens rápidas; produção usa `serve`) |
 | `npm run lint` | Checagem de tipos (`tsc --noEmit`) |
+| `npm test` | Vitest: servidor de salas (entrar/sair, autoridade do Host, kick/ban, sala vazia) e rotas da API (SSRF, envios/cota, Range, erros de legenda). As rotas de mídia precisam do FFmpeg |
+| `npm run test:e2e` | Faz o build e roda o E2E (Playwright) contra o servidor de produção, com um MKV gerado pelo FFmpeg (dois usuários na sala, sincronia, kick/ban, áudio alternativo, reload do Host). Na primeira vez: `npx playwright install chromium` |
 | `python -m pytest tests` | Roda os testes do `mkv_extractor` |
 
 > O backend mora em `src/server/` e não depende do Vite: `npm run serve` roda como um app Express comum, e `npm run dev` / `npm run preview` só plugam o mesmo router no Vite. Em desenvolvimento, editar um arquivo do servidor reinicia o servidor de dev (e derruba as salas abertas); em produção nada observa o código, então as salas só caem num restart ou deploy.

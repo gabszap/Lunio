@@ -78,6 +78,8 @@ Copy `.env.example` to `.env`. Locally nothing is required (only the Discord Act
 | `npm run build` | Builds the frontend into `dist/` |
 | `npm run preview` | Vite's preview of an existing `dist/` with the API plugged in (handy for quick checks; production uses `serve`) |
 | `npm run lint` | Type-checks the project (`tsc --noEmit`) |
+| `npm test` | Vitest: room server (join/leave, Host authority, kick/ban, empty rooms) and API routes (SSRF, uploads/quota, Range, subtitle errors). Needs FFmpeg for the media routes |
+| `npm run test:e2e` | Builds, then Playwright E2E against the production server with a local FFmpeg-generated MKV (two users in one room, sync, kick/ban, alternate audio, Host reload). First time: `npx playwright install chromium` |
 | `python -m pytest tests` | Runs the `mkv_extractor` tests |
 
 > The backend lives in `src/server/` and is independent of Vite: `npm run serve` runs it as a plain Express app, and `npm run dev` / `npm run preview` just plug the same router into Vite. In development, editing a server file restarts the dev server (and drops open rooms); in production nothing watches the code, so rooms only drop on a restart or deploy.
