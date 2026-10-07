@@ -1,7 +1,68 @@
 import { test, expect } from '@playwright/test';
-import { createRoom, joinRoom, newUser, openParticipants, state, togglePlay, trackHls, waitReady } from './helpers';
+import { SUBTITLES_URL, createRoom, joinRoom, newUser, openParticipants, state, togglePlay, trackHls, video, waitReady } from './helpers';
 
 test.describe('Watch Party', () => {
+  test('fila: quando o vídeo acaba, o próximo começa sozinho para todos', async ({ browser }) => {
+    const host = await newUser(browser);
+    const guest = await newUser(browser);
+    const code = await createRoom(host.page, 'Ana');
+    await joinRoom(guest.page, code, 'Bia');
+    await waitReady(host.page);
+    await waitReady(guest.page);
+
+    await host.page.keyboard.press('w');
+    await host.page.getByRole('tab', { name: /Fila/ }).click();
+    await host.page.getByLabel('Link para adicionar à fila').fill(SUBTITLES_URL);
+    await host.page.getByRole('button', { name: 'Adicionar à fila' }).click();
+    await expect(host.page.getByText('por Ana')).toBeVisible();
+
+    // Leva o vídeo para 1 s do fim e deixa acabar
+    await video(host.page).evaluate((v: HTMLVideoElement) => {
+      v.muted = true;
+      v.currentTime = Math.max(0, v.duration - 1);
+      void v.play();
+    });
+    await expect.poll(async () => (await state(host.page)).src, { timeout: 40_000 }).toContain('legendas');
+    await expect.poll(async () => (await state(guest.page)).src, { timeout: 40_000 }).toContain('legendas');
+    await expect(host.page.getByText('A fila está vazia.')).toBeVisible();
+    // e começa a tocar sem ninguém apertar play
+    await expect.poll(async () => (await state(host.page)).paused, { timeout: 30_000 }).toBe(false);
+
+    await host.context.close();
+    await guest.context.close();
+  });
+
+  test('fila: o espectador adiciona, o Host toca agora e o vídeo troca para todos', async ({ browser }) => {
+    const host = await newUser(browser);
+    const guest = await newUser(browser);
+    const code = await createRoom(host.page, 'Ana');
+    await joinRoom(guest.page, code, 'Bia');
+    await waitReady(host.page);
+    await waitReady(guest.page);
+
+    // Bia (espectador) adiciona um vídeo à fila
+    await guest.page.keyboard.press('w');
+    await guest.page.getByRole('tab', { name: /Fila/ }).click();
+    await guest.page.getByLabel('Link para adicionar à fila').fill(SUBTITLES_URL);
+    await guest.page.getByRole('button', { name: 'Adicionar à fila' }).click();
+    await expect(guest.page.getByText('por Bia')).toBeVisible();
+
+    // O Host vê o item, não vê o do outro como removível por engano e toca agora
+    await host.page.keyboard.press('w');
+    await host.page.getByRole('tab', { name: /Fila/ }).click();
+    await expect(host.page.getByText('por Bia')).toBeVisible();
+    await host.page.getByRole('button', { name: 'Tocar agora' }).click();
+
+    // A fila esvazia nos dois e o vídeo trocou nos dois
+    await expect(host.page.getByText('A fila está vazia.')).toBeVisible();
+    await expect(guest.page.getByText('A fila está vazia.')).toBeVisible();
+    await expect.poll(async () => (await state(host.page)).src, { timeout: 30_000 }).toContain('legendas');
+    await expect.poll(async () => (await state(guest.page)).src, { timeout: 30_000 }).toContain('legendas');
+
+    await host.context.close();
+    await guest.context.close();
+  });
+
   test('play, pause e seek do Host chegam ao espectador', async ({ browser }) => {
     const host = await newUser(browser);
     const guest = await newUser(browser);

@@ -25,6 +25,18 @@ export interface RoomMedia {
   audioTracks?: AudioTrackOption[];
 }
 
+/** Item da fila (playlist) da sala. A mídia só é resolvida (faixas, legendas) quando o Host toca o item. */
+export interface PlaylistItem {
+  id: string;
+  url: string;
+  title: string;
+  mimeType?: string;
+  addedById: string;
+  addedBy: string;
+}
+
+export const PLAYLIST_MAX_ITEMS = 50;
+
 export interface RoomPlaybackState {
   playing: boolean;
   position: number;
@@ -61,6 +73,8 @@ export interface RoomState {
   roomId: string;
   hostId: string;
   media: RoomMedia | null;
+  /** Fila de vídeos a tocar em seguida (qualquer membro adiciona; o Host controla a ordem). */
+  playlist?: PlaylistItem[];
   /** Estado de playback global autoritativo (ditado pelo Host) */
   playback: RoomPlaybackState;
   members: RoomMember[];
@@ -162,6 +176,26 @@ export type ClientMessage =
   | {
       type: 'chat:send';
       text: string;
+    }
+  | {
+      type: 'playlist:add';
+      url: string;
+      title: string;
+      mimeType?: string;
+    }
+  | {
+      type: 'playlist:remove';
+      itemId: string;
+    }
+  | {
+      type: 'playlist:move';
+      itemId: string;
+      direction: 'up' | 'down';
+    }
+  | {
+      /** O Host tirou o item da fila para tocá-lo (o cliente do Host carrega a mídia em seguida). */
+      type: 'playlist:take';
+      itemId: string;
     };
 
 // Mensagens Servidor -> Cliente
@@ -172,6 +206,10 @@ export type ServerMessage =
       assignedUserId?: string;
       /** Token de sessão do membro, usado em /api/* (proxy, legendas, envio). */
       accessToken?: string;
+    }
+  | {
+      type: 'playlist:update';
+      playlist: PlaylistItem[];
     }
   | {
       type: 'room:bans_update';

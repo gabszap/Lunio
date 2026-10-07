@@ -16,11 +16,13 @@ import {
   Shield,
   ArrowDown,
   ArrowRight,
+  ListVideo,
 } from 'lucide-react';
 import { syncManager } from '../lib/sync';
 import { discordManager } from '../lib/discord';
 import { roomCodeFrom } from '../lib/roomCode';
-import type { RoomState, ChatMessage } from '../types/sync';
+import type { RoomState, ChatMessage, PlaylistItem } from '../types/sync';
+import { PlaylistPanel } from './PlaylistPanel';
 import { setSkipNamePrompt, shouldSkipNamePrompt } from './UsernameModal';
 import { Avatar, Dot, IconButton, PrimaryButton, TextButton, TextInput, cx } from './ui';
 
@@ -31,12 +33,14 @@ interface WatchPartyPanelProps {
   onRoomMediaTrigger?: (url: string) => void;
   /** Sair da sala (volta para a tela inicial). Sem isso, só desconecta. */
   onLeaveRoom?: () => void;
+  /** Host: toca um item da fila. */
+  onPlayPlaylistItem?: (item: PlaylistItem) => void;
 }
 
-export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClose, onOpenRoomLobby, onLeaveRoom }) => {
+export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClose, onOpenRoomLobby, onLeaveRoom, onPlayPlaylistItem }) => {
   const [roomState, setRoomState] = useState<RoomState | null>(() => syncManager.getRoomState());
   const [currentUser, setCurrentUser] = useState(() => syncManager.getUser());
-  const [activeTab, setActiveTab] = useState<'members' | 'chat'>('chat');
+  const [activeTab, setActiveTab] = useState<'members' | 'chat' | 'queue'>('chat');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => [...syncManager.getChatHistory()]);
   const [chatInput, setChatInput] = useState<string>('');
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
@@ -331,9 +335,16 @@ export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClos
               Participantes
               <span className="text-[12px] tabular text-lu-muted">{members.length}</span>
             </button>
+            <button type="button" role="tab" aria-selected={activeTab === 'queue'} onClick={() => setActiveTab('queue')} className={tabClass(activeTab === 'queue')}>
+              <ListVideo size={16} />
+              Fila
+              {(roomState?.playlist?.length ?? 0) > 0 && <span className="text-[12px] tabular text-lu-muted">{roomState?.playlist?.length}</span>}
+            </button>
           </div>
 
-          {activeTab === 'members' ? (
+          {activeTab === 'queue' ? (
+            <PlaylistPanel onPlayItem={(item) => onPlayPlaylistItem?.(item)} />
+          ) : activeTab === 'members' ? (
             <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-5 py-4 flex flex-col gap-3.5">
               {/* Seu apelido */}
               <div className="p-3 pl-3.5 rounded-[14px] bg-lu-surface border border-lu-border">

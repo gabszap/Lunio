@@ -11,6 +11,7 @@ Lunio is a web video player built for watching together. Paste a stream link, up
 ## Features
 
 - **Rooms (Watch Party)** — create a room from any source and share an 8-character code or link. The Host controls play, pause, seek and speed; everyone else follows with continuous drift correction. Chat, member list, Host transfer, kick and ban.
+- **Queue (playlist)** — inside a room, anyone can add links to a queue; the Host reorders it, plays an item now, and the next one starts by itself when the video ends.
 - **Video sources**
   - Direct stream links: Stremio, TorBox, and other debrids, `.mkv`/`.mp4`/`.webm`/HLS, proxied through the local server (HTTP Range, CORS bypass).
   - File upload (up to 50 GB) — the room exists while the file uploads. Watching alone plays the file locally without uploading.

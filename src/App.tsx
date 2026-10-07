@@ -18,6 +18,7 @@ import { CatalogTab, WatchIntent } from './components/catalog/CatalogTab';
 import type { CommitMode, CommitOptions } from './components/home/types';
 import { PRESETS } from './lib/media';
 import { MediaPayload, SubtitleTrack } from './types/media';
+import type { PlaylistItem } from './types/sync';
 import { logger } from './lib/logger';
 import { discordManager, DiscordContextState } from './lib/discord';
 import { syncManager } from './lib/sync';
@@ -50,6 +51,8 @@ export default function App() {
   const [watchIntent, setWatchIntent] = useState<WatchIntent | null>(null);
 
   const [currentPayload, setCurrentPayload] = useState<MediaPayload>(EMPTY_PAYLOAD);
+  // Vídeo vindo da fila começa sozinho (o anterior já tinha acabado)
+  const [autoPlayNext, setAutoPlayNext] = useState(false);
   const currentUrlRef = useRef('');
   currentUrlRef.current = currentPayload.url;
   const [pendingSubtitles, setPendingSubtitles] = useState<SubtitleTrack[]>([]);
@@ -283,6 +286,7 @@ export default function App() {
     }
     const merged: MediaPayload = { ...payload, subtitles: [...(payload.subtitles || []), ...pendingSubtitles] };
     setPendingSubtitles([]);
+    setAutoPlayNext(false);
     setCurrentPayload(merged);
     setWatchIntent(null);
     if (options.recent) setRecentStreams((prev) => pushRecentStream(prev, merged.url, merged.title || ''));
@@ -303,9 +307,30 @@ export default function App() {
     }
   };
 
+  /** Fila da sala: o Host toca um item (o servidor tira da fila; o vídeo vai para todos como um media:set normal). */
+  const playPlaylistItem = (item: PlaylistItem) => {
+    if (!syncManager.isRoomHost()) return;
+    syncManager.emitPlaylistTake(item.id);
+    const payload: MediaPayload = {
+      url: item.url,
+      title: item.title,
+      mimeType: item.mimeType,
+      chapters: [],
+      subtitles: [],
+      audioTracks: [],
+      isMkv: /\.mkv|torrentio/i.test(item.url),
+    };
+    logger.info(`[Fila] Tocando "${item.title}"`);
+    setPendingSubtitles([]);
+    setAutoPlayNext(true);
+    setCurrentPayload(payload);
+    emitCurrentMedia(payload);
+  };
+
   const handleSelectPreset = (presetId: string) => {
     const found = PRESETS.find((p) => p.id === presetId);
     if (!found) return;
+    setAutoPlayNext(false);
     setCurrentPayload(found.payload);
     if (syncManager.isRoomHost()) emitCurrentMedia({ ...found.payload, title: found.payload.title || found.name });
     logger.info(`[Mídia] Abrindo o exemplo ${found.name}`);
@@ -457,6 +482,8 @@ export default function App() {
             onCloseWatchParty={() => setIsWatchPartyOpen(false)}
             onBack={leaveToHome}
             onLeaveRoom={leaveToHome}
+            autoPlay={autoPlayNext}
+            onPlayPlaylistItem={playPlaylistItem}
             onAddSubtitle={() => setSubtitleModal('current')}
             onChooseVideo={() => goHome('room')}
             onMediaChangeRequested={(media) => {
