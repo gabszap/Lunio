@@ -178,6 +178,8 @@ export type ServerMessage =
       type: 'room:state';
       state: RoomState;
       assignedUserId?: string;
+      /** Token de sessão do membro, usado em /api/* (proxy, legendas, envio). */
+      accessToken?: string;
     }
   | {
       type: 'room:bans_update';

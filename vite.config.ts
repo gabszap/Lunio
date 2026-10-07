@@ -3,30 +3,28 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig, createLogger, type Plugin, type PreviewServer, type ViteDevServer } from 'vite';
 import { parseTorrentTitle } from '@viren070/parse-torrent-title';
-import { spawn } from 'node:child_process';
 import http from 'node:http';
 import https from 'node:https';
 import crypto from 'crypto';
 import fs from 'fs';
+import { config as serverConfig } from './src/server/config';
+import { apiGate, handleSession } from './src/server/gate';
+import { sendApiError, redactUrl } from './src/server/http';
+import { spawnLimited } from './src/server/limits';
+import { startCleanup, touchCacheFile } from './src/server/cleanup';
+import {
+  assertPublicUrl,
+  checkUrlSyntax,
+  isBlockedError,
+  safeHttpAgent,
+  safeHttpsAgent,
+  safeRequest,
+} from './src/server/security';
 import { setupWebSocketServer } from './src/server/roomServer';
 import { handleDrive, handleRoomInfo, handleUpload, handleUploadServe } from './src/server/sources';
 
-// Connection pooling com Keep-Alive para streaming nativo em alta velocidade
-const httpsKeepAliveAgent = new https.Agent({
-  keepAlive: true,
-  keepAliveMsecs: 60000,
-  maxSockets: 100,
-  maxFreeSockets: 30,
-  timeout: 60000,
-});
-
-const httpKeepAliveAgent = new http.Agent({
-  keepAlive: true,
-  keepAliveMsecs: 60000,
-  maxSockets: 100,
-  maxFreeSockets: 30,
-  timeout: 60000,
-});
+// Só http(s) e só rede interna fora: FFmpeg não pode abrir file:, concat:, subfile: etc. por causa de uma URL/playlist maliciosa
+const FFMPEG_NET_ONLY = ['-protocol_whitelist', 'http,https,tcp,tls,crypto'];
 
 const resolvedUrlCache = new Map<string, string>();
 const tracksCache = new Map<string, {
@@ -121,25 +119,27 @@ function extractFilenameFromUrl(urlStr: string): string {
 }
 
 async function resolveFinalCdnUrl(url: string): Promise<string> {
+  // Lança UrlBlockedError se a URL (ou algum redirecionamento) apontar para rede interna
+  await assertPublicUrl(url);
   if (resolvedUrlCache.has(url)) {
     return resolvedUrlCache.get(url)!;
   }
   try {
-    const res = await fetch(url, {
-      method: 'GET',
-      redirect: 'follow',
+    const res = await safeRequest(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Range': 'bytes=0-0',
       },
     });
+    res.body.destroy();
     const finalUrl = res.url || url;
-    if (res.ok && finalUrl !== url) {
+    if (res.status < 400 && finalUrl !== url) {
       resolvedUrlCache.set(url, finalUrl);
-      console.log('[Resolver] ✅ URL da CDN resolvida:', finalUrl);
+      console.log('[Resolver] URL da CDN resolvida:', redactUrl(finalUrl));
     }
     return finalUrl;
   } catch (err: any) {
+    if (isBlockedError(err)) throw err;
     console.warn('[Resolver] Falha ao resolver URL final, usando original:', err?.message);
     return url;
   }
@@ -169,13 +169,23 @@ async function extractRemoteMkvSubtitle(
   ];
 
   return await new Promise<string>((resolve, reject) => {
-    const proc = spawn(PYTHON_PATH, args, {
+    const proc = spawnLimited(PYTHON_PATH, args, {
       cwd: __dirname,
     });
+    if (!proc) {
+      const busy: any = new Error('Servidor ocupado (limite de processos).');
+      busy.code = 'busy';
+      reject(busy);
+      return;
+    }
     let stderr = '';
     let stdout = '';
     proc.stderr?.on('data', (d) => stderr += d.toString());
     proc.stdout?.on('data', (d) => stdout += d.toString());
+    proc.on('error', (err) => {
+      activeSubtitleProcesses.delete(extractionKey);
+      reject(err);
+    });
 
     activeSubtitleProcesses.set(extractionKey, () => {
       try {
@@ -215,6 +225,7 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
   const cacheFile = path.join(SUB_CACHE_DIR, `${hash}_s${track}.ass`);
 
   if (fs.existsSync(cacheFile) && fs.statSync(cacheFile).size > 100) {
+    touchCacheFile(cacheFile);
     return fs.readFileSync(cacheFile, 'utf-8');
   }
 
@@ -279,6 +290,7 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
       const args = [
         '-hide_banner',
         '-v', 'error',
+        ...FFMPEG_NET_ONLY,
         '-reconnect', '1',
         '-reconnect_at_eof', '1',
         '-reconnect_streamed', '1',
@@ -299,9 +311,16 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
       ];
 
       return await new Promise<string>((resolve, reject) => {
-        const proc = spawn(FFMPEG_PATH, args);
+        const proc = spawnLimited(FFMPEG_PATH, args);
+        if (!proc) {
+          const busy: any = new Error('Servidor ocupado (limite de processos).');
+          busy.code = 'busy';
+          reject(busy);
+          return;
+        }
         let stderr = '';
         proc.stderr?.on('data', (d) => stderr += d.toString());
+        proc.on('error', (err) => reject(err));
 
         activeSubtitleProcesses.set(extractionKey, () => {
           try {
@@ -358,6 +377,7 @@ async function getOrExtractSubtitle(targetUrl: string, track: string, customFing
 
   // Se já existe no cache e é válido, responde em 0ms
   if (fs.existsSync(cacheFile) && fs.statSync(cacheFile).size > 100) {
+    touchCacheFile(cacheFile);
     return fs.readFileSync(cacheFile, 'utf-8');
   }
 
@@ -376,10 +396,12 @@ function pipeMediaStreamDirect(
   redirectsLeft = 5
 ) {
   try {
-    const parsedUrl = new URL(actualUrl);
+    // Cada salto (inclusive redirecionamentos) passa por aqui: esquema e IP literal checados agora,
+    // DNS checado na conexão pelo agente seguro
+    const parsedUrl = checkUrlSyntax(actualUrl);
     const isHttps = parsedUrl.protocol === 'https:';
     const client = isHttps ? https : http;
-    const agent = isHttps ? httpsKeepAliveAgent : httpKeepAliveAgent;
+    const agent = isHttps ? safeHttpsAgent : safeHttpAgent;
 
     const reqHeaders: Record<string, string | string[]> = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -445,9 +467,10 @@ function pipeMediaStreamDirect(
         }
 
         const outHeaders: Record<string, any> = {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': '*',
           'Accept-Ranges': 'bytes',
+          'X-Content-Type-Options': 'nosniff',
+          // Mesmo que o upstream devolva HTML, o navegador não executa nada vindo deste endpoint
+          'Content-Security-Policy': 'sandbox',
         };
 
         const passHeaders = [
@@ -471,6 +494,9 @@ function pipeMediaStreamDirect(
           outHeaders['content-type'] = 'video/mp4';
         } else if (targetUrl.toLowerCase().includes('.webm')) {
           outHeaders['content-type'] = 'video/webm';
+        } else if (!/^(video|audio)\//i.test(currentType)) {
+          // text/html & cia nunca saem deste endpoint com o tipo original (evita XSS na origem do app)
+          outHeaders['content-type'] = 'application/octet-stream';
         }
 
         res.writeHead(upstreamRes.statusCode || 200, outHeaders);
@@ -496,9 +522,12 @@ function pipeMediaStreamDirect(
     );
 
     proxyReq.on('error', (err: any) => {
+      console.warn('[MediaProxy] Falha ao falar com o upstream:', err?.message);
       if (!res.headersSent) {
-        res.statusCode = 502;
-        res.end(`Proxy error: ${err.message}`);
+        if (isBlockedError(err)) sendApiError(res, 403, 'url_blocked');
+        else sendApiError(res, 502, 'upstream_failed');
+      } else if (!res.writableEnded) {
+        res.end();
       }
     });
 
@@ -510,9 +539,11 @@ function pipeMediaStreamDirect(
 
     proxyReq.end();
   } catch (err: any) {
-    if (!res.headersSent) {
-      res.statusCode = 500;
-      res.end(`Proxy setup error: ${err.message}`);
+    if (isBlockedError(err)) {
+      sendApiError(res, 403, 'url_blocked');
+    } else {
+      console.error('[MediaProxy] Erro ao montar a requisição:', err);
+      sendApiError(res, 500, 'internal');
     }
   }
 }
@@ -532,21 +563,25 @@ function mediaProxyPlugin(): Plugin {
       setupWebSocketServer(server.httpServer);
     }
 
+    if (serverConfig.allowPrivateUrls) {
+      console.warn('[Segurança] ALLOW_PRIVATE_URLS ligado: o proxy aceita endereços de rede interna. Use só em desenvolvimento.');
+    }
+    if (serverConfig.sessionSecretIsEphemeral) {
+      console.log('[Segurança] SESSION_SECRET não definido: os tokens de sessão valem só até o servidor reiniciar.');
+    }
+
     // Suporte ao Discord Activity URL Mapping prefix /.proxy/api/*
     server.middlewares.use((req, res, next) => {
       if (req.url && req.url.startsWith('/.proxy/api/')) {
         req.url = req.url.replace('/.proxy', '');
       }
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Headers', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, HEAD, OPTIONS');
-      if (req.method === 'OPTIONS') {
-        res.statusCode = 204;
-        res.end();
-        return;
-      }
       next();
     });
+
+    // CORS restrito (própria origem + ALLOWED_ORIGINS), rate limit por IP e token de sessão em toda a /api
+    server.middlewares.use(apiGate);
+    server.middlewares.use('/api/session', handleSession);
+    startCleanup();
 
     // Fontes de vídeo da Home: checagem de sala, upload de arquivo e links do Google Drive
     server.middlewares.use('/api/room', handleRoomInfo);
@@ -565,7 +600,10 @@ function mediaProxyPlugin(): Plugin {
       }
 
       let body = '';
-      req.on('data', (chunk) => { body += chunk; });
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 8192) req.destroy();
+      });
       req.on('end', async () => {
         try {
           const data = JSON.parse(body || '{}');
@@ -626,12 +664,10 @@ function mediaProxyPlugin(): Plugin {
             console.log('[Discord Auth] ✅ Token obtido com sucesso!');
           }
           res.setHeader('Content-Type', 'application/json');
-          res.setHeader('Access-Control-Allow-Origin', '*');
           res.end(JSON.stringify(tokenData));
         } catch (err: any) {
-          res.statusCode = 500;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ error: err.message }));
+          console.error('[Discord Auth] Erro na troca do código:', err?.message);
+          sendApiError(res, 500, 'internal');
         }
       });
     });
@@ -642,14 +678,19 @@ function mediaProxyPlugin(): Plugin {
         const reqUrl = new URL(req.url || '', 'http://localhost');
         const targetUrl = reqUrl.searchParams.get('url');
         const audioTrack = reqUrl.searchParams.get('audio');
-        const seekSeconds = parseFloat(reqUrl.searchParams.get('ss') || '0');
-        const sessionId = reqUrl.searchParams.get('session') || '';
-        const generation = parseInt(reqUrl.searchParams.get('gen') || '0', 10);
+        const seekSeconds = Math.min(86400, Math.max(0, parseFloat(reqUrl.searchParams.get('ss') || '0') || 0));
+        const rawSession = reqUrl.searchParams.get('session') || '';
+        const sessionId = /^[\w-]{1,64}$/.test(rawSession) ? rawSession : '';
+        const generation = parseInt(reqUrl.searchParams.get('gen') || '0', 10) || 0;
         const explicitRemux = reqUrl.searchParams.get('remux') === 'true';
 
         if (!targetUrl) {
-          res.statusCode = 400;
-          res.end('Missing url parameter');
+          sendApiError(res, 400, 'bad_request', 'Parâmetro url ausente.');
+          return;
+        }
+        // O índice de áudio vai direto para um argumento do FFmpeg: só número
+        if (audioTrack !== null && !/^\d{0,3}$/.test(audioTrack)) {
+          sendApiError(res, 400, 'bad_request', 'Faixa de áudio inválida.');
           return;
         }
 
@@ -691,6 +732,7 @@ function mediaProxyPlugin(): Plugin {
           const ffmpegArgs: string[] = [
             '-hide_banner',
             '-v', 'error',
+            ...FFMPEG_NET_ONLY,
             '-reconnect', '1',
             '-reconnect_at_eof', '1',
             '-reconnect_streamed', '1',
@@ -724,7 +766,12 @@ function mediaProxyPlugin(): Plugin {
             '-'
           );
 
-          const ffmpegProc = spawn(FFMPEG_PATH, ffmpegArgs);
+          const ffmpegProc = spawnLimited(FFMPEG_PATH, ffmpegArgs);
+          if (!ffmpegProc) {
+            res.setHeader('Retry-After', '5');
+            sendApiError(res, 503, 'busy');
+            return;
+          }
 
           // Últimos bytes produzidos (para retomar) + quem está consumindo agora
           const tail: Buffer[] = [];
@@ -796,8 +843,6 @@ function mediaProxyPlugin(): Plugin {
             aRes.setHeader('Accept-Ranges', 'none');
             aRes.setHeader('Cache-Control', 'no-cache, no-store');
             aRes.setHeader('Connection', 'keep-alive');
-            aRes.setHeader('Access-Control-Allow-Origin', '*');
-            aRes.setHeader('Access-Control-Allow-Headers', '*');
             if (sessionId) aRes.setHeader('X-MediaRun-Session', sessionId);
             if (generation) aRes.setHeader('X-MediaRun-Generation', String(generation));
             aRes.setHeader('X-MediaRegion-Start', seekSeconds.toFixed(2));
@@ -849,6 +894,11 @@ function mediaProxyPlugin(): Plugin {
           ffmpegProc.stderr.on('data', (d) => {
             console.warn('[FFmpeg Stderr]', d.toString());
           });
+          ffmpegProc.on('error', (err) => {
+            console.error('[MediaProxy] Não foi possível iniciar o FFmpeg:', err.message);
+            if (!res.headersSent) sendApiError(res, 500, 'internal');
+            cleanUp();
+          });
 
           return;
         }
@@ -857,11 +907,12 @@ function mediaProxyPlugin(): Plugin {
         const actualFetchUrl = await resolveFinalCdnUrl(targetUrl);
         pipeMediaStreamDirect(actualFetchUrl, targetUrl, req, res);
       } catch (err: any) {
-        console.error('[MediaProxy] Erro geral:', err);
-        if (!res.headersSent) {
-          res.statusCode = 502;
-          res.end(`Proxy error: ${err.message}`);
+        if (isBlockedError(err)) {
+          sendApiError(res, 403, 'url_blocked');
+          return;
         }
+        console.error('[MediaProxy] Erro geral:', err);
+        if (!res.headersSent) sendApiError(res, 502, 'upstream_failed');
       }
     });
 
@@ -871,40 +922,19 @@ function mediaProxyPlugin(): Plugin {
         const reqUrl = new URL(req.url || '', 'http://localhost');
         const targetUrl = reqUrl.searchParams.get('url');
         if (!targetUrl) {
-          res.statusCode = 400;
-          res.end(JSON.stringify({ error: 'Missing url' }));
+          sendApiError(res, 400, 'bad_request', 'Parâmetro url ausente.');
           return;
         }
-
-        if (resolvedUrlCache.has(targetUrl)) {
-          const cachedUrl = resolvedUrlCache.get(targetUrl)!;
-          res.setHeader('Content-Type', 'application/json');
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.end(JSON.stringify({ cdnUrl: cachedUrl }));
-          return;
-        }
-
-        const headRes = await fetch(targetUrl, {
-          method: 'GET',
-          redirect: 'follow',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Range': 'bytes=0-0',
-          },
-        });
-
-        const finalUrl = headRes.url || targetUrl;
-        if (headRes.ok && finalUrl !== targetUrl) {
-          resolvedUrlCache.set(targetUrl, finalUrl);
-          console.log('[Resolver] ✅ URL resolvida com sucesso:', finalUrl);
-        }
-
+        const finalUrl = await resolveFinalCdnUrl(targetUrl);
         res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Access-Control-Allow-Origin', '*');
         res.end(JSON.stringify({ cdnUrl: finalUrl }));
       } catch (e: any) {
-        res.statusCode = 500;
-        res.end(JSON.stringify({ error: e.message }));
+        if (isBlockedError(e)) {
+          sendApiError(res, 403, 'url_blocked');
+          return;
+        }
+        console.error('[Resolver] Erro:', e?.message);
+        sendApiError(res, 500, 'internal');
       }
     });
 
@@ -914,8 +944,7 @@ function mediaProxyPlugin(): Plugin {
         const reqUrl = new URL(req.url || '', 'http://localhost');
         const targetUrl = reqUrl.searchParams.get('url');
         if (!targetUrl) {
-          res.statusCode = 400;
-          res.end(JSON.stringify({ error: 'Missing url parameter' }));
+          sendApiError(res, 400, 'bad_request', 'Parâmetro url ausente.');
           return;
         }
 
@@ -934,7 +963,6 @@ function mediaProxyPlugin(): Plugin {
 
           if (!hasGenericChapters && !hasNoneSubtitles && hasDuration) {
             res.setHeader('Content-Type', 'application/json');
-            res.setHeader('Access-Control-Allow-Origin', '*');
             res.end(JSON.stringify(cached));
             return;
           }
@@ -945,6 +973,7 @@ function mediaProxyPlugin(): Plugin {
 
         const args = [
           '-hide_banner',
+          ...FFMPEG_NET_ONLY,
           '-reconnect', '1',
           '-reconnect_at_eof', '1',
           '-reconnect_streamed', '1',
@@ -955,7 +984,16 @@ function mediaProxyPlugin(): Plugin {
           '-i', streamUrl,
         ];
 
-        const proc = spawn(FFMPEG_PATH, args);
+        const proc = spawnLimited(FFMPEG_PATH, args);
+        if (!proc) {
+          res.setHeader('Retry-After', '5');
+          sendApiError(res, 503, 'busy');
+          return;
+        }
+        proc.on('error', (err) => {
+          console.error('[Tracks] Não foi possível iniciar o FFmpeg:', err.message);
+          if (!res.headersSent) sendApiError(res, 500, 'internal');
+        });
         let stderr = '';
 
         proc.stderr.on('data', (d) => stderr += d.toString());
@@ -1322,16 +1360,19 @@ function mediaProxyPlugin(): Plugin {
             console.log(`[Tracks] 🎬 Título: "${cleanTitle}" | Duração: ${mediaDuration.toFixed(1)}s | Original: "${rawFileTitle}"`);
             console.log(`[Tracks] Detectados ${audios.length} áudios, ${subtitles.length} legendas, ${chapters.length} capítulos e ${fonts.length} fontes embutidas via FFmpeg.`);
             res.setHeader('Content-Type', 'application/json');
-            res.setHeader('Access-Control-Allow-Origin', '*');
             res.end(JSON.stringify(result));
           } catch (err: any) {
-            res.statusCode = 500;
-            res.end(JSON.stringify({ error: err.message, stderr }));
+            console.error('[Tracks] Falha ao interpretar a saída do FFmpeg:', err?.message, stderr.slice(-300));
+            if (!res.headersSent) sendApiError(res, 500, 'internal');
           }
         });
       } catch (e: any) {
-        res.statusCode = 500;
-        res.end(JSON.stringify({ error: e.message }));
+        if (isBlockedError(e)) {
+          sendApiError(res, 403, 'url_blocked');
+          return;
+        }
+        console.error('[Tracks] Erro:', e?.message);
+        sendApiError(res, 500, 'internal');
       }
     });
 
@@ -1342,12 +1383,10 @@ function mediaProxyPlugin(): Plugin {
         const reqUrl = new URL(req.url || '', 'http://localhost');
         const targetUrl = reqUrl.searchParams.get('url');
         track = reqUrl.searchParams.get('track');
-        const customFingerprint = reqUrl.searchParams.get('fingerprint') || undefined;
+        const customFingerprint = (reqUrl.searchParams.get('fingerprint') || '').slice(0, 200) || undefined;
 
-        if (!targetUrl || !track) {
-          res.statusCode = 400;
-          res.setHeader('Content-Type', 'application/json; charset=utf-8');
-          res.end(JSON.stringify({ error: 'Missing url or track parameter' }));
+        if (!targetUrl || !track || !/^\d{1,4}$/.test(track)) {
+          sendApiError(res, 400, 'bad_request', 'Parâmetros url e track são obrigatórios.');
           return;
         }
 
@@ -1355,18 +1394,20 @@ function mediaProxyPlugin(): Plugin {
         const content = await getOrExtractSubtitle(targetUrl, track, customFingerprint);
 
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-        res.setHeader('Access-Control-Allow-Origin', '*');
         res.end(content);
       } catch (e: any) {
-        console.warn(`[Subtitle] Falha na extração da faixa #${track || 'unknown'}:`, e.message);
-        const statusCode = e?.code === 'BITMAP_NOT_SUPPORTED' ? 415 : 422;
-        res.statusCode = statusCode;
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.end(JSON.stringify({
-          error: e?.message || 'Subtitle extraction failed',
-          code: e?.code || 'EXTRACTION_FAILED',
-        }));
+        // O detalhe (stderr do FFmpeg, caminhos) fica só no log; o cliente recebe código + frase genérica
+        console.warn(`[Subtitle] Falha na extração da faixa #${track || 'unknown'}:`, e?.message);
+        if (isBlockedError(e)) {
+          sendApiError(res, 403, 'url_blocked');
+        } else if (e?.code === 'busy') {
+          res.setHeader('Retry-After', '5');
+          sendApiError(res, 503, 'busy');
+        } else if (e?.code === 'BITMAP_NOT_SUPPORTED') {
+          sendApiError(res, 415, 'BITMAP_NOT_SUPPORTED');
+        } else {
+          sendApiError(res, 422, 'EXTRACTION_FAILED');
+        }
       }
     });
 
@@ -1376,154 +1417,142 @@ function mediaProxyPlugin(): Plugin {
         const reqUrl = new URL(req.url || '', 'http://localhost');
         const targetUrl = reqUrl.searchParams.get('url');
         const fontFilename = reqUrl.searchParams.get('name') || '';
-        const streamTrack = reqUrl.searchParams.get('track');
-        const customFingerprint = reqUrl.searchParams.get('fingerprint') || undefined;
+        const streamTrack = reqUrl.searchParams.get('track') || '';
+        const customFingerprint = (reqUrl.searchParams.get('fingerprint') || '').slice(0, 200) || undefined;
 
-        if (!targetUrl || (!fontFilename && !streamTrack)) {
-          res.statusCode = 400;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ error: 'Missing url and name/track parameter' }));
+        if (!targetUrl || !/^\d{1,4}$/.test(streamTrack)) {
+          sendApiError(res, 400, 'bad_request', 'Parâmetros url e track são obrigatórios.');
           return;
         }
 
         const hash = getMediaFingerprint(targetUrl, customFingerprint);
         const targetDir = path.join(FONT_CACHE_DIR, hash);
-        if (!fs.existsSync(targetDir)) {
-          fs.mkdirSync(targetDir, { recursive: true });
-        }
+        fs.mkdirSync(targetDir, { recursive: true });
 
-        const extractedMarker = path.join(targetDir, '.extracted');
+        // O nome do anexo vem do MKV (dado de terceiros, pode ter `..\`). Por isso o FFmpeg grava só em
+        // caminhos que o servidor escolhe (f<índice>.<ext>); o nome original serve apenas para a extensão.
+        const extOf = (name: string) => /\.(ttf|otf|woff2|ttc)$/i.exec(name)?.[1].toLowerCase() || 'ttf';
 
-        // Se já existirem fontes extraídas de sessões anteriores, marca como extraído
-        if (!fs.existsSync(extractedMarker) && fs.existsSync(targetDir)) {
+        const findCached = (idx: string): string | null => {
           try {
-            const existingFiles = fs.readdirSync(targetDir);
-            if (existingFiles.some((f) => /\.(ttf|otf|woff2|ttc)$/i.test(f))) {
-              fs.writeFileSync(extractedMarker, new Date().toISOString());
-            }
+            const name = fs.readdirSync(targetDir).find((f) => f.startsWith(`f${idx}.`) && !f.endsWith('.done'));
+            if (!name) return null;
+            const full = path.join(targetDir, name);
+            const st = fs.statSync(full);
+            return st.isFile() && st.size > 100 ? full : null;
           } catch {
-            // ignore
+            return null;
           }
-        }
-
-        const safeFilename = path.basename(fontFilename || `font_${streamTrack}.ttf`);
-        const cacheFile = path.join(targetDir, safeFilename);
+        };
+        const wasAttempted = (idx: string) => fs.existsSync(path.join(targetDir, `f${idx}.done`));
 
         const serveCachedFont = (filePath: string) => {
           const ext = path.extname(filePath).toLowerCase();
           const mime = ext === '.otf' ? 'font/otf' : (ext === '.woff2' ? 'font/woff2' : 'font/ttf');
           res.setHeader('Content-Type', mime);
           res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          fs.createReadStream(filePath).pipe(res);
+          res.setHeader('X-Content-Type-Options', 'nosniff');
+          touchCacheFile(filePath);
+          const stream = fs.createReadStream(filePath);
+          stream.on('error', () => {
+            if (!res.headersSent) sendApiError(res, 500, 'internal');
+            else res.end();
+          });
+          stream.pipe(res);
         };
 
-        const tryFindAndServe = (): boolean => {
-          // 1. Arquivo com nome exato
-          if (fs.existsSync(cacheFile) && fs.statSync(cacheFile).size > 100) {
-            serveCachedFont(cacheFile);
-            return true;
-          }
-          // 2. Arquivo com case diferente ou extensão normalizada
-          if (fs.existsSync(targetDir)) {
-            const files = fs.readdirSync(targetDir);
-            const matched = files.find((f) => f.toLowerCase() === safeFilename.toLowerCase());
-            if (matched) {
-              const matchedPath = path.join(targetDir, matched);
-              if (fs.statSync(matchedPath).size > 100) {
-                serveCachedFont(matchedPath);
-                return true;
-              }
-            }
-          }
-          return false;
-        };
+        const notFound = () => sendApiError(res, 404, 'not_found', 'Fonte não encontrada no container MKV');
 
-        // 1. Se já está no cache local
-        if (tryFindAndServe()) {
-          return;
-        }
+        const cached = findCached(streamTrack);
+        if (cached) return serveCachedFont(cached);
+        if (wasAttempted(streamTrack)) return notFound();
 
-        // 2. Se o container já foi totalmente extraído, não roda FFmpeg de novo
-        if (fs.existsSync(extractedMarker)) {
-          res.statusCode = 404;
-          res.setHeader('Content-Type', 'application/json');
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.end(JSON.stringify({ error: 'Fonte não encontrada no container MKV' }));
-          return;
-        }
-
-        // 3. Deduplica extrações de fonte simultâneas para a mesma mídia
-        if (pendingFontExtractions.has(hash)) {
-          await pendingFontExtractions.get(hash);
-          if (tryFindAndServe()) {
-            return;
-          }
-          res.statusCode = 404;
-          res.setHeader('Content-Type', 'application/json');
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.end(JSON.stringify({ error: 'Fonte não encontrada no container MKV' }));
-          return;
+        // Deduplica extrações de fonte simultâneas para a mesma mídia
+        const inFlight = pendingFontExtractions.get(hash);
+        if (inFlight) {
+          await inFlight;
+          const afterWait = findCached(streamTrack);
+          if (afterWait) return serveCachedFont(afterWait);
+          if (wasAttempted(streamTrack)) return notFound();
         }
 
         const extractionPromise = (async () => {
           const streamUrl = await resolveFinalCdnUrl(targetUrl);
-          console.log(`[FontExtractor] 🔤 Extraindo fontes anexadas do MKV (Media: ${hash})...`);
+          // Extrai de uma vez todos os anexos que o /api/tracks já listou (e o pedido atual)
+          const wanted = new Map<string, string>([[streamTrack, fontFilename]]);
+          for (const f of tracksCache.get(targetUrl)?.fonts || []) {
+            if (Number.isInteger(f.index)) wanted.set(String(f.index), f.filename || '');
+          }
+          console.log(`[FontExtractor] Extraindo ${wanted.size} fonte(s) anexada(s) do MKV (Media: ${hash})...`);
 
-          return new Promise<void>((resolve, reject) => {
-            // Executa FFmpeg com -dump_attachment:t "" para extrair todas as fontes para o diretório targetDir de uma só vez
-            const args = [
-              '-hide_banner',
-              '-v', 'error',
-              '-y',
-              '-reconnect', '1',
-              '-reconnect_at_eof', '1',
-              '-reconnect_streamed', '1',
-              '-reconnect_delay_max', '5',
-              '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n',
-              '-dump_attachment:t', '',
-              '-i', streamUrl,
-            ];
+          const dumpArgs: string[] = [];
+          for (const [idx, name] of wanted) {
+            dumpArgs.push(`-dump_attachment:${idx}`, path.join(targetDir, `f${idx}.${extOf(name)}`));
+          }
+          const args = [
+            '-hide_banner',
+            '-v', 'error',
+            '-y',
+            ...FFMPEG_NET_ONLY,
+            '-reconnect', '1',
+            '-reconnect_at_eof', '1',
+            '-reconnect_streamed', '1',
+            '-reconnect_delay_max', '5',
+            '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n',
+            ...dumpArgs,
+            '-i', streamUrl,
+          ];
 
-            const proc = spawn(FFMPEG_PATH, args, { cwd: targetDir });
-
+          await new Promise<void>((resolve, reject) => {
+            const proc = spawnLimited(FFMPEG_PATH, args, { cwd: targetDir });
+            if (!proc) {
+              const busy: any = new Error('Servidor ocupado (limite de processos).');
+              busy.code = 'busy';
+              reject(busy);
+              return;
+            }
+            const timer = setTimeout(() => {
+              try { proc.kill('SIGKILL'); } catch {}
+            }, 120000);
             proc.on('close', () => {
-              // Marca o diretório como inspecionado/extraído para nunca mais reexecutar FFmpeg
-              try {
-                fs.writeFileSync(extractedMarker, new Date().toISOString());
-              } catch {
-                // ignore
+              clearTimeout(timer);
+              // Marca cada índice como já tentado para nunca mais reexecutar o FFmpeg por ele
+              for (const idx of wanted.keys()) {
+                try {
+                  fs.writeFileSync(path.join(targetDir, `f${idx}.done`), new Date().toISOString());
+                } catch {
+                  // ignore
+                }
               }
               resolve();
             });
-
             proc.on('error', (err) => {
+              clearTimeout(timer);
               reject(err);
             });
           });
         })();
 
         pendingFontExtractions.set(hash, extractionPromise);
-
         try {
           await extractionPromise;
         } finally {
           pendingFontExtractions.delete(hash);
         }
 
-        if (tryFindAndServe()) {
-          return;
-        }
-
-        res.statusCode = 404;
-        res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.end(JSON.stringify({ error: 'Fonte não encontrada no container MKV' }));
+        const extracted = findCached(streamTrack);
+        if (extracted) return serveCachedFont(extracted);
+        notFound();
       } catch (err: any) {
-        res.statusCode = 500;
-        res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.end(JSON.stringify({ error: err.message }));
+        if (isBlockedError(err)) {
+          sendApiError(res, 403, 'url_blocked');
+        } else if (err?.code === 'busy') {
+          res.setHeader('Retry-After', '5');
+          sendApiError(res, 503, 'busy');
+        } else {
+          console.error('[FontExtractor] Erro:', err?.message);
+          sendApiError(res, 500, 'internal');
+        }
       }
     });
   };
@@ -1568,7 +1597,8 @@ export default defineConfig(() => {
       port: 3000,
       host: '0.0.0.0',
       allowedHosts: true as const,
-      cors: true,
+      // CORS é responsabilidade da nossa /api (src/server/cors.ts), não do Vite (`*`)
+      cors: false,
       hmr: process.env.DISABLE_HMR !== 'true',
       watch: {
         ignored: [
@@ -1590,7 +1620,7 @@ export default defineConfig(() => {
       port: 3000,
       host: '0.0.0.0',
       allowedHosts: true as const,
-      cors: true,
+      cors: false,
     },
   };
 });

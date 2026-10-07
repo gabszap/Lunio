@@ -1,6 +1,8 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Server as HttpsServer } from 'node:https';
+import { issueRoomToken } from './access';
+import { isOriginAllowed } from './cors';
 import type {
   ClientMessage,
   ServerMessage,
@@ -60,6 +62,32 @@ export class RoomManager {
       return { exists: true, closed: false, members: room.clients.size, hasMedia: Boolean(room.media) };
     }
     return { exists: false, closed: this.closedRooms.has(roomId), members: 0, hasMedia: false };
+  }
+
+  /** A pessoa está (ou acabou de cair e pode voltar) na sala, e não foi banida? */
+  public isMember(roomId: string, userId: string): boolean {
+    const room = this.rooms.get(roomId);
+    if (!room || room.bannedMembers.has(userId)) return false;
+    if (room.pendingLeaves.has(userId)) return true;
+    for (const s of room.clients.values()) if (s.userId === userId) return true;
+    return false;
+  }
+
+  /** Host de uma sala ativa, com conexão aberta agora. */
+  public isHostMember(roomId: string, userId: string): boolean {
+    const room = this.rooms.get(roomId);
+    if (!room || room.hostId !== userId) return false;
+    for (const s of room.clients.values()) if (s.userId === userId) return true;
+    return false;
+  }
+
+  public isRoomActive(roomId: string): boolean {
+    return this.rooms.has(roomId);
+  }
+
+  /** Quando a sala foi encerrada (ms), ou `undefined` se ainda existe / o servidor não sabe. */
+  public getClosedAt(roomId: string): number | undefined {
+    return this.closedRooms.get(roomId);
   }
 
   private calculateCurrentPosition(playback: RoomInternal['playback']): number {
@@ -242,6 +270,7 @@ export class RoomManager {
       type: 'room:state',
       state: currentState,
       assignedUserId: session.userId,
+      accessToken: issueRoomToken(roomId, session.userId),
     });
 
     // Envia histórico de chat recente para o novo membro
@@ -374,8 +403,23 @@ export class RoomManager {
       return;
     }
 
+    if (!msg || typeof msg !== 'object') return;
+
     if (msg.type === 'room:join') {
-      this.handleJoin(ws, msg.roomId, msg.user);
+      const user = msg.user;
+      if (
+        typeof msg.roomId !== 'string' ||
+        !/^[\w-]{1,64}$/.test(msg.roomId) ||
+        !user ||
+        typeof user.id !== 'string' ||
+        user.id.length === 0 ||
+        user.id.length > 96 ||
+        typeof user.username !== 'string'
+      ) {
+        this.send(ws, { type: 'error', message: 'Dados de entrada inválidos.', code: 'bad_request' });
+        return;
+      }
+      this.handleJoin(ws, msg.roomId, { ...user, username: user.username.trim().slice(0, 32) || 'Espectador' });
       return;
     }
 
@@ -746,7 +790,7 @@ export const roomManager = new RoomManager();
  * Registra o servidor WebSocket no servidor HTTP/HTTPS existente do Vite
  */
 export function setupWebSocketServer(httpServer: any) {
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
 
   httpServer.on('upgrade', (req: IncomingMessage, socket, head) => {
     const url = req.url || '';
@@ -758,6 +802,12 @@ export function setupWebSocketServer(httpServer: any) {
       url.startsWith('/.proxy/ws');
 
     if (isWatchPartyWs) {
+      // Origem de outro site não abre WebSocket (evita que uma página qualquer controle a sala do visitante)
+      if (!isOriginAllowed(req.headers.origin, req.headers)) {
+        socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
       wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit('connection', ws, req);
       });

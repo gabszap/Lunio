@@ -7,6 +7,7 @@ import {
   SubtitleFormat,
 } from '../types/media';
 import { logger } from './logger';
+import { apiFetch } from './access';
 import { srtToVtt } from './media';
 import { sessionManager } from './session';
 
@@ -454,7 +455,7 @@ export class SubtitleResolver {
         throw new Error('Candidate não possui URL válida.');
       }
 
-      const res = await fetch(candidate.url, {
+      const res = await apiFetch(candidate.url, {
         signal: controller.signal,
       });
 
@@ -690,7 +691,7 @@ export class SubtitleManager {
             logger.info('[Legenda] Extraindo do arquivo de vídeo no servidor…');
           }, 1500);
 
-          const res = await fetch(track.src, { signal });
+          const res = await apiFetch(track.src, { signal });
           clearTimeout(slowNoticeTimer);
 
           if (!res.ok) {
@@ -802,7 +803,7 @@ export class SubtitleManager {
           const prepared = await subtitleResolver.prepareCandidate(track.candidate, signal);
           content = prepared.content;
         } else if (track.src) {
-          const res = await fetch(track.src, { signal });
+          const res = await apiFetch(track.src, { signal });
           if (!res.ok) {
             let errMessage = `HTTP ${res.status}`;
             let errCode = 'EXTRACTION_FAILED';

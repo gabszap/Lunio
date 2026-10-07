@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { safeStringify } from './lib/logger';
+import { ensureSession } from './lib/access';
 
 // Global guard against circular structure exceptions in AI Studio iframe console bridges
 (() => {
@@ -54,6 +55,9 @@ import { safeStringify } from './lib/logger';
     }
   };
 })();
+
+// Token de sessão para a API de mídia (proxy, faixas, legendas). Se falhar, as chamadas tentam de novo.
+void ensureSession().catch(() => {});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

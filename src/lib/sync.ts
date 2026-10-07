@@ -1,4 +1,5 @@
 import { discordManager } from './discord';
+import { clearRoomToken, setRoomToken } from './access';
 import { logger } from './logger';
 import type {
   ClientMessage,
@@ -418,6 +419,7 @@ class SyncManager {
     this.currentRoomId = '';
     this.roomState = null;
     this.chatHistory = [];
+    clearRoomToken();
     this.stopHeartbeat();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -458,6 +460,7 @@ class SyncManager {
 
     switch (msg.type) {
       case 'room:state': {
+        if (msg.accessToken) setRoomToken(msg.state.roomId, msg.accessToken);
         if (msg.assignedUserId && this.user.id !== msg.assignedUserId) {
           this.user = {
             ...this.user,
