@@ -8,10 +8,11 @@ import https from 'node:https';
 import crypto from 'crypto';
 import fs from 'fs';
 import { config as serverConfig } from './src/server/config';
-import { apiGate, handleSession } from './src/server/gate';
+import { apiGate, handleSession, handleStatus } from './src/server/gate';
 import { sendApiError, redactUrl } from './src/server/http';
 import { spawnLimited } from './src/server/limits';
 import { startCleanup, touchCacheFile } from './src/server/cleanup';
+import { ffmpegBin, getTools, killTree, logToolStatus } from './src/server/tools';
 import {
   assertPublicUrl,
   checkUrlSyntax,
@@ -56,14 +57,6 @@ interface ActiveRemuxProcess {
 const REMUX_TAIL_LIMIT = 96 * 1024 * 1024;
 const activeRemuxProcesses = new Map<string, ActiveRemuxProcess>();
 const pendingFontExtractions = new Map<string, Promise<void>>();
-
-// Detecta caminho do FFmpeg (preferência pelo mpv ou instalação do sistema)
-const FFMPEG_PATH = fs.existsSync('C:\\Program Files\\mpv\\ffmpeg.exe')
-  ? 'C:\\Program Files\\mpv\\ffmpeg.exe'
-  : (fs.existsSync('C:\\ffmpeg\\ffmpeg.exe') ? 'C:\\ffmpeg\\ffmpeg.exe' : 'ffmpeg');
-
-// Detecta caminho do interpretador Python para o Remote Subtitle Extractor
-const PYTHON_PATH = process.env.PYTHON_PATH || 'python';
 
 const SUB_CACHE_DIR = path.resolve(__dirname, '.cache', 'subtitles');
 const AUDIO_CACHE_DIR = path.resolve(__dirname, '.cache', 'audio');
@@ -169,7 +162,12 @@ async function extractRemoteMkvSubtitle(
   ];
 
   return await new Promise<string>((resolve, reject) => {
-    const proc = spawnLimited(PYTHON_PATH, args, {
+    const py = getTools().python;
+    if (!py.found) {
+      reject(new Error('Python 3.10+ não encontrado.'));
+      return;
+    }
+    const proc = spawnLimited(py.command, [...py.args, ...args], {
       cwd: __dirname,
     });
     if (!proc) {
@@ -190,12 +188,12 @@ async function extractRemoteMkvSubtitle(
     activeSubtitleProcesses.set(extractionKey, () => {
       try {
         console.log(`[MkvExtractor] ⏹ Cancelando extração remota da faixa #${track}...`);
-        proc.kill('SIGKILL');
+        killTree(proc);
       } catch {}
     });
 
     const timer = setTimeout(() => {
-      try { proc.kill('SIGKILL'); } catch {}
+      killTree(proc);
       reject(new Error('Tempo limite de 60s excedido no mkv_extractor.'));
     }, 60000);
 
@@ -311,7 +309,7 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
       ];
 
       return await new Promise<string>((resolve, reject) => {
-        const proc = spawnLimited(FFMPEG_PATH, args);
+        const proc = spawnLimited(ffmpegBin(), args);
         if (!proc) {
           const busy: any = new Error('Servidor ocupado (limite de processos).');
           busy.code = 'busy';
@@ -325,12 +323,12 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
         activeSubtitleProcesses.set(extractionKey, () => {
           try {
             console.log(`[Subtitle] ⏹ Cancelando extração da faixa #${track} (processo descartado/obsoleto)...`);
-            proc.kill('SIGKILL');
+            killTree(proc);
           } catch {}
         });
 
         const timer = setTimeout(() => {
-          try { proc.kill('SIGKILL'); } catch {}
+          killTree(proc);
           const timeoutErr: any = new Error('Tempo limite de 480s excedido ao extrair legenda individual.');
           timeoutErr.code = 'EXTRACTION_FAILED';
           reject(timeoutErr);
@@ -581,6 +579,8 @@ function mediaProxyPlugin(): Plugin {
     // CORS restrito (própria origem + ALLOWED_ORIGINS), rate limit por IP e token de sessão em toda a /api
     server.middlewares.use(apiGate);
     server.middlewares.use('/api/session', handleSession);
+    server.middlewares.use('/api/status', handleStatus);
+    logToolStatus();
     startCleanup();
 
     // Fontes de vídeo da Home: checagem de sala, upload de arquivo e links do Google Drive
@@ -766,7 +766,7 @@ function mediaProxyPlugin(): Plugin {
             '-'
           );
 
-          const ffmpegProc = spawnLimited(FFMPEG_PATH, ffmpegArgs);
+          const ffmpegProc = spawnLimited(ffmpegBin(), ffmpegArgs);
           if (!ffmpegProc) {
             res.setHeader('Retry-After', '5');
             sendApiError(res, 503, 'busy');
@@ -787,7 +787,7 @@ function mediaProxyPlugin(): Plugin {
             if (isCleanedUp) return;
             isCleanedUp = true;
             try {
-              ffmpegProc.kill('SIGKILL');
+              killTree(ffmpegProc);
             } catch {}
             if (current && !current.writableEnded) current.end();
             current = null;
@@ -984,7 +984,7 @@ function mediaProxyPlugin(): Plugin {
           '-i', streamUrl,
         ];
 
-        const proc = spawnLimited(FFMPEG_PATH, args);
+        const proc = spawnLimited(ffmpegBin(), args);
         if (!proc) {
           res.setHeader('Retry-After', '5');
           sendApiError(res, 503, 'busy');
@@ -1504,7 +1504,7 @@ function mediaProxyPlugin(): Plugin {
           ];
 
           await new Promise<void>((resolve, reject) => {
-            const proc = spawnLimited(FFMPEG_PATH, args, { cwd: targetDir });
+            const proc = spawnLimited(ffmpegBin(), args, { cwd: targetDir });
             if (!proc) {
               const busy: any = new Error('Servidor ocupado (limite de processos).');
               busy.code = 'busy';
@@ -1512,7 +1512,7 @@ function mediaProxyPlugin(): Plugin {
               return;
             }
             const timer = setTimeout(() => {
-              try { proc.kill('SIGKILL'); } catch {}
+              killTree(proc);
             }, 120000);
             proc.on('close', () => {
               clearTimeout(timer);

@@ -15,6 +15,35 @@ interface StatusTabProps {
   room: { connected: boolean; code: string; members: number; isHost: boolean };
 }
 
+interface ToolsReport {
+  ffmpeg: { found: boolean; version?: string };
+  python: { found: boolean; version?: string; tooOld: boolean };
+}
+
+function toolChecks(t: ToolsReport | null): Check[] {
+  if (!t) return [];
+  return [
+    {
+      id: 'ffmpeg',
+      label: 'FFmpeg',
+      detail: t.ffmpeg.found
+        ? `Encontrado${t.ffmpeg.version ? ` (${t.ffmpeg.version})` : ''}. Faixas, troca de áudio e legendas disponíveis.`
+        : 'Não encontrado. Troca de áudio e leitura de faixas não vão funcionar.',
+      state: t.ffmpeg.found ? 'ok' : 'down',
+    },
+    {
+      id: 'python',
+      label: 'Python',
+      detail: t.python.found
+        ? `Encontrado${t.python.version ? ` (${t.python.version})` : ''}. Extração rápida de legendas disponível.`
+        : t.python.tooOld
+        ? `Versão ${t.python.version} é antiga (precisa de 3.10+). Legendas usam o FFmpeg, mais lento.`
+        : 'Não encontrado. Legendas usam o FFmpeg, mais lento.',
+      state: t.python.found ? 'ok' : 'warn',
+    },
+  ];
+}
+
 async function timed(url: string): Promise<{ ok: boolean; ms: number }> {
   const t0 = performance.now();
   try {
@@ -35,9 +64,12 @@ export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
       { id: 'server', label: 'Servidor do Lunio', detail: 'Salas, proxy de mídia e envios', state: 'checking' },
       { id: 'catalog', label: 'Catálogo', detail: 'Metadados de filmes e séries (Cinemeta)', state: 'checking' },
     ]);
-    const [server, catalog] = await Promise.all([
+    const [server, catalog, tools] = await Promise.all([
       timed('/api/room?id=STATUS'),
       timed('https://v3-cinemeta.strem.io/manifest.json'),
+      fetch('/api/status', { cache: 'no-store' })
+        .then((r) => (r.ok ? (r.json() as Promise<ToolsReport>) : null))
+        .catch(() => null),
     ]);
     setChecks([
       {
@@ -54,6 +86,7 @@ export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
         state: catalog.ok ? 'ok' : 'warn',
         ms: catalog.ms,
       },
+      ...toolChecks(tools),
     ]);
     setRunning(false);
   }, []);

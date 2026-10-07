@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "npm run build && vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "node scripts/clean.mjs",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

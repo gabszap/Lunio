@@ -4,6 +4,7 @@ import { handleCors } from './cors';
 import { sendApiError, sendJson } from './http';
 import { checkRate, clientIp, type RateRule } from './limits';
 import { roomManager } from './roomServer';
+import { getTools } from './tools';
 
 /**
  * Porta de entrada de /api/*: CORS → rate limit por IP → token de sessão.
@@ -30,6 +31,7 @@ const ROUTES: Record<string, { auth: AuthMode; rate: RateRule }> = {
   session: { auth: 'none', rate: { max: 30, windowMs: MIN } },
   room: { auth: 'none', rate: { max: 120, windowMs: MIN } },
   token: { auth: 'none', rate: { max: 20, windowMs: MIN } },
+  status: { auth: 'none', rate: { max: 30, windowMs: MIN } },
   proxy: { auth: 'any', rate: { max: 900, windowMs: MIN } },
   resolve: { auth: 'any', rate: { max: 60, windowMs: MIN } },
   tracks: { auth: 'any', rate: { max: 30, windowMs: MIN } },
@@ -84,4 +86,14 @@ export function handleSession(req: IncomingMessage, res: ServerResponse) {
   const { token, expiresAt } = issueSoloToken();
   res.setHeader('Cache-Control', 'no-store');
   sendJson(res, 200, { token, expiresAt });
+}
+
+/** GET /api/status — FFmpeg e Python foram encontrados? Só versões: o caminho no disco não sai do servidor. */
+export function handleStatus(_req: IncomingMessage, res: ServerResponse) {
+  const { ffmpeg, python } = getTools();
+  res.setHeader('Cache-Control', 'no-store');
+  sendJson(res, 200, {
+    ffmpeg: { found: ffmpeg.found, version: ffmpeg.version },
+    python: { found: python.found, version: python.version, tooOld: python.tooOld === true },
+  });
 }
