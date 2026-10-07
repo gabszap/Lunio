@@ -1,4 +1,5 @@
 import { Chapter } from '../types/media';
+import { t } from './/i18n';
 
 export function normalizeChapters(chapters: Chapter[], totalDuration: number = 0): Chapter[] {
   if (!chapters || chapters.length === 0) return [];
@@ -83,7 +84,7 @@ export function getSkippableChapter(currentTime: number, chapters: Chapter[]): S
   ) {
     return {
       canSkip: true,
-      label: 'Pular abertura',
+      label: t('Pular abertura'),
       type: 'op',
       targetTime: current.endTime,
     };
@@ -100,7 +101,7 @@ export function getSkippableChapter(currentTime: number, chapters: Chapter[]): S
   ) {
     return {
       canSkip: true,
-      label: 'Pular encerramento',
+      label: t('Pular encerramento'),
       type: 'ed',
       targetTime: current.endTime,
     };
@@ -113,7 +114,7 @@ export function getSkippableChapter(currentTime: number, chapters: Chapter[]): S
   ) {
     return {
       canSkip: true,
-      label: 'Pular resumo',
+      label: t('Pular resumo'),
       type: 'recap',
       targetTime: current.endTime,
     };

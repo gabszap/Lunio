@@ -21,6 +21,7 @@ Lunio is a web video player built for watching together. Paste a stream link, up
 - **Player** — chapter-segmented timeline, "Skip intro/outro" for detected chapters, playback speed, audio delay, volume boost, aspect modes, picture-in-picture, resume where you left off, keyboard shortcuts.
 - **Catalog** — browse and search movies and series (metadata from Stremio's public Cinemeta addon), with seasons, episodes and a personal list. The catalog only provides metadata: to watch, you still pick a video source.
 - **Status page** — checks the local server, the catalog and your current room.
+- **Languages** — Portuguese and English; follows the browser language, switchable on the home screen.
 
 ## Screenshots
 

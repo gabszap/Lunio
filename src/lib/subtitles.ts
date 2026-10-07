@@ -10,6 +10,7 @@ import { logger } from './logger';
 import { apiFetch } from './access';
 import { srtToVtt } from './media';
 import { sessionManager } from './session';
+import { t } from './/i18n';
 
 /**
  * Creates a JASSUB class compatible with Vidstack's LibASSTextRenderer.
@@ -230,7 +231,7 @@ export class SubtitleResolver {
             trackId: st.index,
             confidence: 0,
             forced: !!st.isForced,
-            title: st.label || `Legenda #${st.index}`,
+            title: st.label || t('Legenda #{index}', { index: st.index }),
             availability: 'known',
           };
         });
@@ -251,7 +252,7 @@ export class SubtitleResolver {
           url: es.url,
           confidence: 0,
           forced: false,
-          title: es.title || `Legenda Externa (${es.language})`,
+          title: es.title || t('Legenda Externa ({language})', { language: es.language }),
           availability: 'known',
         }));
       },
@@ -438,7 +439,7 @@ export class SubtitleResolver {
 
     // Faixa já conhecida como incompatível (imagem/extração impossível): não repete a requisição
     if (candidate.availability === 'failed' && candidate.errorCode && PERMANENT_SUBTITLE_ERRORS.has(candidate.errorCode)) {
-      const known: any = new Error(candidate.errorMessage || 'Legenda indisponível.');
+      const known: any = new Error(candidate.errorMessage || t('Legenda indisponível.'));
       known.code = candidate.errorCode;
       throw known;
     }
@@ -731,7 +732,7 @@ export class SubtitleManager {
       }
 
       if (!subContent || subContent.trim().length === 0) {
-        throw new Error('Conteúdo da legenda está vazio.');
+        throw new Error(t('Conteúdo da legenda está vazio.'));
       }
 
       track.content = subContent;

@@ -1,5 +1,9 @@
 import React, { useEffect, useId, useRef } from 'react';
 import { Check, X } from 'lucide-react';
+import { t } from '../lib/i18n';
+
+/** Rótulos de opção chegam como ReactNode: só texto passa pelo dicionário. */
+const translateNode = (node: React.ReactNode) => (typeof node === 'string' ? t(node) : node);
 
 /**
  * Primitivas visuais do design system Lunio (canvas "Lunio" no Claude Design).
@@ -48,7 +52,7 @@ export const Logo: React.FC<{ onClick?: () => void; size?: number }> = ({ onClic
   return (
     <a
       href="/"
-      aria-label="Lunio, início"
+      aria-label={t('Lunio, início')}
       onClick={(e) => {
         e.preventDefault();
         onClick();
@@ -262,7 +266,7 @@ export function Segmented<T extends string>({
             )}
           >
             {opt.icon}
-            {opt.label}
+            {translateNode(opt.label)}
           </button>
         );
       })}
@@ -310,7 +314,7 @@ export function PillTabs<T extends string>({
             )}
           >
             {opt.icon}
-            <span>{opt.label}</span>
+            <span>{translateNode(opt.label)}</span>
           </button>
         );
       })}
@@ -375,7 +379,7 @@ export const MenuPanel = React.forwardRef<
       {onClose && (
         <button
           type="button"
-          aria-label="Fechar"
+          aria-label={t('Fechar')}
           onClick={onClose}
           className="sm:hidden inline-flex items-center justify-center w-11 h-11 -mr-2 rounded-[10px] text-lu-muted hover:bg-white/8"
         >
@@ -624,7 +628,7 @@ export const ModalHeader: React.FC<{ title: string; description?: React.ReactNod
       {description && <p className="mt-1.5 mb-0 text-[14px] text-lu-muted">{description}</p>}
     </div>
     {onClose && (
-      <IconButton label="Fechar" size={40} tone="muted" onClick={onClose} className="-mt-1.5 -mr-2">
+      <IconButton label={t('Fechar')} size={40} tone="muted" onClick={onClose} className="-mt-1.5 -mr-2">
         <X size={18} strokeWidth={1.75} />
       </IconButton>
     )}

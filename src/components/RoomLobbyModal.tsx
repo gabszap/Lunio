@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Crown, Link as LinkIcon, LogIn, Play, Users, CircleAlert } from 'lucide-react';
 import { generateRoomCode, roomCodeFrom } from '../lib/roomCode';
 import { BigInput, FieldLabel, Hint, Modal, ModalHeader, PrimaryButton, Segmented, TextInput } from './ui';
+import { t } from '../lib/i18n';
 
 interface RoomLobbyModalProps {
   isOpen: boolean;
@@ -49,26 +50,26 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     }
     const code = roomCodeFrom(joinCode);
     if (!code) {
-      setError('Isso não parece um código de sala. Cole o link ou o código de 8 caracteres.');
+      setError(t('Isso não parece um código de sala. Cole o link ou o código de 8 caracteres.'));
       return;
     }
     onJoinRoom(code, name);
   };
 
   return (
-    <Modal open={isOpen} onClose={onClose} label="Watch Party">
-      <ModalHeader title="Watch Party" description="Crie uma sala para seus amigos ou entre em uma existente." onClose={onClose} />
+    <Modal open={isOpen} onClose={onClose} label={t('Watch Party')}>
+      <ModalHeader title={t('Watch Party')} description={t('Crie uma sala para seus amigos ou entre em uma existente.')} onClose={onClose} />
 
       <Segmented
-        label="Criar ou entrar"
+        label={t('Criar ou entrar')}
         value={activeTab}
         onChange={(v) => {
           setActiveTab(v as 'create' | 'join');
           setError('');
         }}
         options={[
-          { value: 'create', label: 'Criar sala', icon: <Crown size={16} /> },
-          { value: 'join', label: 'Entrar em sala', icon: <LogIn size={16} /> },
+          { value: 'create', label: t('Criar sala'), icon: <Crown size={16} /> },
+          { value: 'join', label: t('Entrar em sala'), icon: <LogIn size={16} /> },
         ]}
       />
 
@@ -76,7 +77,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
         {activeTab === 'join' && (
           <div>
             <FieldLabel htmlFor="join-code" className="!font-medium">
-              Link ou código da sala
+              {t('Link ou código da sala')}
             </FieldLabel>
             <BigInput
               id="join-code"
@@ -102,27 +103,27 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
 
         <div>
           <FieldLabel htmlFor="lobby-username" className="!font-medium">
-            Como você quer ser chamado?
+            {t('Como você quer ser chamado?')}
           </FieldLabel>
           <TextInput
             id="lobby-username"
             maxLength={32}
-            placeholder="Digite seu nome ou apelido…"
+            placeholder={t('Digite seu nome ou apelido…')}
             value={username}
             onChange={(e) => setUsername(e.target.value)}
           />
-          <p className="mt-2 mb-0 text-[12px] text-lu-muted">Se deixar vazio, geramos um nome de visitante para você.</p>
+          <p className="mt-2 mb-0 text-[12px] text-lu-muted">{t('Se deixar vazio, geramos um nome de visitante para você.')}</p>
         </div>
 
         {activeTab === 'create' && (
           <p className="-mt-2 mb-0 text-[13px] text-lu-muted">
-            Você será o Host e controlará a reprodução e a seleção de mídia. O código da sala é gerado ao criar.
+            {t('Você será o Host e controlará a reprodução e a seleção de mídia. O código da sala é gerado ao criar.')}
           </p>
         )}
 
         <PrimaryButton type="submit" size="lg" block>
           {activeTab === 'create' ? <Users size={18} /> : <LogIn size={18} />}
-          <span>{activeTab === 'create' ? 'Criar sala e iniciar' : 'Entrar na sala'}</span>
+          <span>{activeTab === 'create' ? t('Criar sala e iniciar') : t('Entrar na sala')}</span>
         </PrimaryButton>
       </form>
 
@@ -133,7 +134,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
         className="w-full inline-flex items-center justify-center gap-2 h-11 -my-1.5 rounded-[10px] text-[14px] font-medium text-lu-muted hover:bg-white/6"
       >
         <Play size={16} />
-        Assistir sozinho
+        {t('Assistir sozinho')}
       </button>
     </Modal>
   );

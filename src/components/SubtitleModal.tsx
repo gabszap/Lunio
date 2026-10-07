@@ -4,6 +4,7 @@ import { srtToVtt } from '../lib/media';
 import { logger } from '../lib/logger';
 import type { SubtitleTrack } from '../types/media';
 import { FieldLabel, Modal, ModalHeader, PrimaryButton, Segmented, TextButton, TextInput } from './ui';
+import { t } from '../lib/i18n';
 
 interface SubtitleModalProps {
   open: boolean;
@@ -52,7 +53,7 @@ export const SubtitleModal: React.FC<SubtitleModalProps> = ({ open, onClose, onA
     if (!url.trim()) return;
     const track: SubtitleTrack = {
       src: url.trim(),
-      label: label.trim() || `Legenda ${type.toUpperCase()}`,
+      label: label.trim() || t('Legenda {v1}', { v1: type.toUpperCase() }),
       language: 'pt',
       type,
       default: true,
@@ -64,8 +65,8 @@ export const SubtitleModal: React.FC<SubtitleModalProps> = ({ open, onClose, onA
   };
 
   return (
-    <Modal open={open} onClose={onClose} label="Adicionar legenda">
-      <ModalHeader title="Adicionar legenda" description="Envie um arquivo ou aponte para uma URL." onClose={onClose} />
+    <Modal open={open} onClose={onClose} label={t('Adicionar legenda')}>
+      <ModalHeader title={t('Adicionar legenda')} description={t('Envie um arquivo ou aponte para uma URL.')} onClose={onClose} />
 
       <input ref={fileRef} type="file" accept=".ass,.ssa,.vtt,.srt" className="sr-only" tabIndex={-1} onChange={handleFile} />
       <button
@@ -76,33 +77,33 @@ export const SubtitleModal: React.FC<SubtitleModalProps> = ({ open, onClose, onA
         <span className="flex text-lu-accent">
           <Upload size={22} />
         </span>
-        <span className="text-[14px] font-semibold">Carregar arquivo local</span>
-        <span className="text-[12px] text-lu-muted">.ass, .ssa, .srt ou .vtt · .srt é convertido automaticamente para WebVTT</span>
+        <span className="text-[14px] font-semibold">{t('Carregar arquivo local')}</span>
+        <span className="text-[12px] text-lu-muted">{t('.ass, .ssa, .srt ou .vtt · .srt é convertido automaticamente para WebVTT')}</span>
       </button>
 
       <div className="flex items-center gap-3 text-[12px] text-lu-disabled">
         <div className="flex-1 h-px bg-lu-border" />
-        ou por URL
+        {t('ou por URL')}
         <div className="flex-1 h-px bg-lu-border" />
       </div>
 
       <form onSubmit={handleUrl} className="flex flex-col gap-5">
         <div>
           <FieldLabel htmlFor="sub-label" className="!font-medium">
-            Nome da faixa
+            {t('Nome da faixa')}
           </FieldLabel>
-          <TextInput id="sub-label" placeholder="Ex.: Português (ASS)" value={label} onChange={(e) => setLabel(e.target.value)} />
+          <TextInput id="sub-label" placeholder={t('Ex.: Português (ASS)')} value={label} onChange={(e) => setLabel(e.target.value)} />
         </div>
         <div>
           <FieldLabel htmlFor="sub-url" className="!font-medium">
-            URL da legenda
+            {t('URL da legenda')}
           </FieldLabel>
-          <TextInput id="sub-url" type="url" placeholder="https://…/legenda.ass" value={url} onChange={(e) => setUrl(e.target.value)} />
+          <TextInput id="sub-url" type="url" placeholder={t('https://…/legenda.ass')} value={url} onChange={(e) => setUrl(e.target.value)} />
         </div>
         <div>
-          <span className="block text-[13px] font-medium mb-2">Formato</span>
+          <span className="block text-[13px] font-medium mb-2">{t('Formato')}</span>
           <Segmented
-            label="Formato da legenda"
+            label={t('Formato da legenda')}
             value={type}
             onChange={(v) => setType(v as 'ass' | 'vtt')}
             options={[
@@ -111,16 +112,16 @@ export const SubtitleModal: React.FC<SubtitleModalProps> = ({ open, onClose, onA
             ]}
           />
           <p className="mt-2 mb-0 text-[12px] text-lu-muted">
-            ASS usa renderização avançada (JASSUB). VTT usa o renderizador nativo do navegador.
+            {t('ASS usa renderização avançada (JASSUB). VTT usa o renderizador nativo do navegador.')}
           </p>
         </div>
         <div className="flex justify-end gap-2">
           <TextButton onClick={onClose} className="!px-4">
-            Cancelar
+            {t('Cancelar')}
           </TextButton>
           <PrimaryButton type="submit" disabled={!url.trim()}>
             <Plus size={18} />
-            <span>Adicionar legenda</span>
+            <span>{t('Adicionar legenda')}</span>
           </PrimaryButton>
         </div>
       </form>

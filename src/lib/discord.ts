@@ -1,5 +1,6 @@
 import { DiscordSDK, patchUrlMappings } from '@discord/embedded-app-sdk';
 import { logger } from './logger';
+import { t } from './/i18n';
 
 export interface DiscordUser {
   id: string;
@@ -82,7 +83,7 @@ class DiscordActivityManager {
       this.state.user = {
         id: 'mock_discord_user',
         username: 'Discord Guest',
-        globalName: 'Convidado Discord',
+        globalName: t('Convidado Discord'),
       };
       this.notify();
       return this.state;

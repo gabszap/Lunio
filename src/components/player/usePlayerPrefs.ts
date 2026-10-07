@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { audioBoost } from '../../lib/audioBoost';
 import { logger } from '../../lib/logger';
 import { subtitleManager } from '../../lib/subtitles';
+import { t } from '../../lib/i18n';
 
 export type AspectMode = 'fit' | 'stretch' | 'fill';
 
@@ -31,7 +32,7 @@ export function usePlayerPrefs() {
     audioBoost.setAudioDelay(clamped);
     setAudioDelay(clamped);
     const ms = Math.round(clamped * 1000);
-    triggerOsdToast(ms === 0 ? 'Atraso do áudio: 0 ms' : `Atraso do áudio: +${ms} ms`);
+    triggerOsdToast(ms === 0 ? t('Atraso do áudio: 0 ms') : t('Atraso do áudio: +{ms} ms', { ms }));
   }, [triggerOsdToast]);
 
   const handleSubtitleDelayChange = useCallback((delay: number) => {
@@ -39,29 +40,29 @@ export function usePlayerPrefs() {
     subtitleManager.setSubtitleDelay(clamped);
     setSubtitleDelay(clamped);
     const ms = Math.round(clamped * 1000);
-    triggerOsdToast(ms === 0 ? 'Sincronia da legenda: 0 ms' : `Sincronia da legenda: ${ms > 0 ? '+' : '−'}${Math.abs(ms)} ms`);
+    triggerOsdToast(ms === 0 ? t('Sincronia da legenda: 0 ms') : t('Sincronia da legenda: {sign}{n} ms', { sign: ms > 0 ? '+' : '−', n: Math.abs(ms) }));
   }, [triggerOsdToast]);
 
   const handleSubtitleFontSizeChange = useCallback((size: number) => {
     subtitleManager.setFontSize(size);
     setSubtitleFontSize(size);
-    triggerOsdToast(`Tamanho da legenda: ${size}%`);
+    triggerOsdToast(t('Tamanho da legenda: {size}%', { size }));
   }, [triggerOsdToast]);
 
   // Alternar Aspect Ratio (Original / Esticar / Preencher - estilo mpv & Stremio)
   const handleToggleAspect = () => {
     setAspectMode((prev) => {
       let next: AspectMode = 'fit';
-      let label = 'Ajuste de tela: original';
+      let label = t('Ajuste de tela: original');
       if (prev === 'fit') {
         next = 'stretch';
-        label = 'Ajuste de tela: esticar';
+        label = t('Ajuste de tela: esticar');
       } else if (prev === 'stretch') {
         next = 'fill';
-        label = 'Ajuste de tela: preencher';
+        label = t('Ajuste de tela: preencher');
       } else {
         next = 'fit';
-        label = 'Ajuste de tela: original';
+        label = t('Ajuste de tela: original');
       }
       setAspectToast(label);
       setTimeout(() => setAspectToast((curr) => (curr === label ? null : curr)), 2500);

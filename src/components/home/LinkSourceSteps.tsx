@@ -5,6 +5,7 @@ import { getYouTubeId } from '../../lib/media';
 import { formatBytes } from '../../lib/recent';
 import { BigInput, CardFooter, ClearButton, FieldLabel, GhostButton, Hint, HomeCard, HomeCardTitle, PrimaryButton, Spinner, TextButton } from '../ui';
 import type { CommitMode, SourceCommit } from './types';
+import { t } from '../../lib/i18n';
 
 interface LinkStepProps {
   onBack: () => void;
@@ -19,16 +20,16 @@ const StepActions: React.FC<{ onBack: () => void; onCommit: (mode: CommitMode) =
   <CardFooter>
     <TextButton onClick={onBack} className="!pl-2">
       <ChevronLeft size={18} />
-      <span>Voltar</span>
+      <span>{t('Voltar')}</span>
     </TextButton>
     <div className="flex flex-wrap gap-2 justify-end">
       <GhostButton disabled={disabled} onClick={() => onCommit('solo')}>
         <Play size={16} />
-        <span>Assistir sozinho</span>
+        <span>{t('Assistir sozinho')}</span>
       </GhostButton>
       <PrimaryButton disabled={disabled} onClick={() => onCommit('room')}>
         <Users size={18} />
-        <span>Criar sala</span>
+        <span>{t('Criar sala')}</span>
       </PrimaryButton>
     </div>
   </CardFooter>
@@ -77,7 +78,7 @@ export const YouTubeStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
       {
         url: `https://www.youtube.com/watch?v=${videoId}`,
         mimeType: 'video/youtube',
-        title: info?.title || 'Vídeo do YouTube',
+        title: info?.title || t('Vídeo do YouTube'),
         chapters: [],
         subtitles: [],
         audioTracks: [],
@@ -88,20 +89,20 @@ export const YouTubeStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
 
   return (
     <HomeCard>
-      <HomeCardTitle icon={<Youtube size={20} />} title="Abrir vídeo do YouTube" description="Cole o link de um vídeo ou de uma live." />
+      <HomeCardTitle icon={<Youtube size={20} />} title={t('Abrir vídeo do YouTube')} description={t('Cole o link de um vídeo ou de uma live.')} />
       <form
         onSubmit={(e) => {
           e.preventDefault();
           commit('room');
         }}
       >
-        <FieldLabel htmlFor="yt-link">Link do YouTube</FieldLabel>
+        <FieldLabel htmlFor="yt-link">{t('Link do YouTube')}</FieldLabel>
         <BigInput
           id="yt-link"
           type="url"
           inputMode="url"
           autoFocus
-          placeholder="https://youtu.be/…"
+          placeholder={t('https://youtu.be/…')}
           value={link}
           invalid={invalid}
           aria-describedby={invalid ? 'yt-msg' : undefined}
@@ -112,7 +113,7 @@ export const YouTubeStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
         {invalid && (
           <Hint id="yt-msg" role="alert" tone="error">
             <CircleAlert size={14} />
-            Esse link não parece ser de um vídeo do YouTube.
+            {t('Esse link não parece ser de um vídeo do YouTube.')}
           </Hint>
         )}
 
@@ -127,15 +128,15 @@ export const YouTubeStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
               {loading && !info ? (
                 <span className="flex items-center gap-2 text-[13px] text-lu-muted">
                   <Spinner size={14} className="text-lu-accent" />
-                  Buscando o vídeo…
+                  {t('Buscando o vídeo…')}
                 </span>
               ) : (
                 <>
-                  <span className="text-[14px] font-semibold leading-snug line-clamp-2">{info?.title || 'Vídeo do YouTube'}</span>
+                  <span className="text-[14px] font-semibold leading-snug line-clamp-2">{info?.title || t('Vídeo do YouTube')}</span>
                   {info?.author && <span className="text-[12px] text-lu-muted">{info.author}</span>}
                   <span className="flex items-center gap-1.5 text-[12px] text-lu-success mt-0.5">
                     <CircleCheck size={14} />
-                    Pronto pra assistir
+                    {t('Pronto pra assistir')}
                   </span>
                 </>
               )}
@@ -190,10 +191,10 @@ export const DriveStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
           if (r.ok) setState({ kind: 'ok', file: body });
           else if (body.code === 'forbidden') setState({ kind: 'no_access' });
           else if (body.code === 'bad_request') setState({ kind: 'invalid' });
-          else setState({ kind: 'error', message: 'Não deu pra falar com o Google Drive agora.' });
+          else setState({ kind: 'error', message: t('Não deu pra falar com o Google Drive agora.') });
         })
         .catch((err) => {
-          if (err?.name !== 'AbortError') setState({ kind: 'error', message: 'Não deu pra falar com o servidor.' });
+          if (err?.name !== 'AbortError') setState({ kind: 'error', message: t('Não deu pra falar com o servidor.') });
         });
     }, 350);
     return () => {
@@ -223,20 +224,20 @@ export const DriveStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
 
   return (
     <HomeCard>
-      <HomeCardTitle icon={<FolderOpen size={20} />} title="Abrir o Google Drive" description="Cole o link de compartilhamento do vídeo." />
+      <HomeCardTitle icon={<FolderOpen size={20} />} title={t('Abrir o Google Drive')} description={t('Cole o link de compartilhamento do vídeo.')} />
       <form
         onSubmit={(e) => {
           e.preventDefault();
           commit('room');
         }}
       >
-        <FieldLabel htmlFor="gd-link">Link do Drive</FieldLabel>
+        <FieldLabel htmlFor="gd-link">{t('Link do Drive')}</FieldLabel>
         <BigInput
           id="gd-link"
           type="url"
           inputMode="url"
           autoFocus
-          placeholder="https://drive.google.com/file/d/…/view"
+          placeholder={t('https://drive.google.com/file/d/…/view')}
           value={link}
           invalid={blocked}
           aria-describedby={blocked ? 'gd-msg' : undefined}
@@ -248,13 +249,13 @@ export const DriveStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
         {state.kind === 'checking' && (
           <Hint>
             <Spinner size={14} className="text-lu-accent" />
-            Conferindo o arquivo…
+            {t('Conferindo o arquivo…')}
           </Hint>
         )}
         {state.kind === 'invalid' && (
           <Hint id="gd-msg" role="alert" tone="error">
             <CircleAlert size={14} />
-            Esse não parece ser um link de arquivo do Google Drive.
+            {t('Esse não parece ser um link de arquivo do Google Drive.')}
           </Hint>
         )}
         {state.kind === 'error' && (
@@ -271,7 +272,7 @@ export const DriveStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
             </span>
             <div className="flex-1 min-w-0 flex flex-col">
               <span className="text-[14px] font-semibold truncate">{state.file.name}</span>
-              <span className="text-[12px] text-lu-muted tabular">{state.file.size ? formatBytes(state.file.size) : 'Tamanho desconhecido'}</span>
+              <span className="text-[12px] text-lu-muted tabular">{state.file.size ? formatBytes(state.file.size) : t('Tamanho desconhecido')}</span>
             </div>
             <span className="text-lu-success flex">
               <CircleCheck size={20} />
@@ -283,16 +284,16 @@ export const DriveStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
           <div id="gd-msg" role="alert" className="mt-4 p-4 rounded-[14px] bg-lu-error/8 border border-lu-error/25">
             <p className="m-0 mb-2.5 flex items-center gap-2 text-[14px] font-semibold text-lu-error">
               <CircleAlert size={18} />
-              Sem acesso a esse arquivo
+              {t('Sem acesso a esse arquivo')}
             </p>
             <ol className="m-0 pl-5 flex flex-col gap-1.5 text-[13px] text-lu-muted">
               <li>
-                Abra o vídeo no Google Drive e clique em <strong className="text-lu-text font-semibold">Compartilhar</strong>.
+                {t('Abra o vídeo no Google Drive e clique em')} <strong className="text-lu-text font-semibold">{t('Compartilhar')}</strong>.
               </li>
               <li>
-                Em “Acesso geral”, escolha <strong className="text-lu-text font-semibold">Qualquer pessoa com o link</strong>.
+                {t('Em “Acesso geral”, escolha')} <strong className="text-lu-text font-semibold">{t('Qualquer pessoa com o link')}</strong>.
               </li>
-              <li>Volte aqui e tente de novo.</li>
+              <li>{t('Volte aqui e tente de novo.')}</li>
             </ol>
           </div>
         ) : (
@@ -301,7 +302,7 @@ export const DriveStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
               <Info size={16} />
             </span>
             <span>
-              O arquivo precisa estar compartilhado como <strong className="text-lu-text font-semibold">“Qualquer pessoa com o link”</strong>.
+              {t('O arquivo precisa estar compartilhado como')} <strong className="text-lu-text font-semibold">{t('“Qualquer pessoa com o link”')}</strong>.
             </span>
           </div>
         )}
@@ -310,7 +311,7 @@ export const DriveStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
           <CardFooter>
             <TextButton onClick={onBack} className="!pl-2">
               <ChevronLeft size={18} />
-              <span>Voltar</span>
+              <span>{t('Voltar')}</span>
             </TextButton>
             <div className="flex flex-wrap gap-2 justify-end">
               <a
@@ -320,11 +321,11 @@ export const DriveStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
                 className="inline-flex items-center gap-2 h-11 px-3.5 rounded-[10px] text-[14px] font-medium text-lu-muted no-underline hover:bg-white/8"
               >
                 <ExternalLink size={16} />
-                <span>Abrir no Drive</span>
+                <span>{t('Abrir no Drive')}</span>
               </a>
               <PrimaryButton onClick={() => setAttempt((n) => n + 1)}>
                 <RotateCw size={18} />
-                <span>Tentar de novo</span>
+                <span>{t('Tentar de novo')}</span>
               </PrimaryButton>
             </div>
           </CardFooter>

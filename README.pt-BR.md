@@ -21,6 +21,7 @@ O Lunio é um player de vídeo web feito para assistir junto. Cole um link de st
 - **Player** — timeline dividida por capítulos, "Pular abertura/encerramento" nos capítulos detectados, velocidade, atraso do áudio, volume boost, modos de ajuste de tela, picture-in-picture, continuar de onde parou, atalhos de teclado.
 - **Catálogo** — navegue e busque filmes e séries (metadados do addon público Cinemeta, do Stremio), com temporadas, episódios e uma lista pessoal. O catálogo só fornece metadados: para assistir, você ainda escolhe uma fonte de vídeo.
 - **Página de status** — verifica o servidor local, o catálogo e a sua sala atual.
+- **Idiomas** — português e inglês; segue o idioma do navegador e dá para trocar na tela inicial.
 
 ## Capturas de tela
 

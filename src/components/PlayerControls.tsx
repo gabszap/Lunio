@@ -21,6 +21,7 @@ import { VolumeDisplay } from './VolumeDisplay';
 import { SettingsMenu, formatMs } from './SettingsMenu';
 import { ChapterTimeline } from './ChapterTimeline';
 import { ChapterList } from './ChapterList';
+import { t, msg } from '../lib/i18n';
 import {
   Badge,
   Chip,
@@ -174,9 +175,9 @@ function getBufferAhead(currentTime: number, buffered: number, ranges?: { start:
 }
 
 const ASPECT_LABEL: Record<'fit' | 'fill' | 'stretch', string> = {
-  fit: 'Ajuste de tela: original (Z)',
-  fill: 'Ajuste de tela: preencher (Z)',
-  stretch: 'Ajuste de tela: esticar (Z)',
+  fit: msg('Ajuste de tela: original (Z)'),
+  fill: msg('Ajuste de tela: preencher (Z)'),
+  stretch: msg('Ajuste de tela: esticar (Z)'),
 };
 
 type MenuId = 'subs' | 'audio' | 'chapters' | 'settings' | null;
@@ -263,20 +264,20 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
       <div className="pointer-events-auto flex items-start justify-between gap-4 px-3 sm:px-6 pt-3 sm:pt-5 pb-14 bg-gradient-to-b from-lu-video/80 to-lu-video/0">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           {onBack && (
-            <IconButton label="Voltar" onClick={onBack} className="-ml-2">
+            <IconButton label={t('Voltar')} onClick={onBack} className="-ml-2">
               <ChevronLeft size={20} />
             </IconButton>
           )}
           <div className="min-w-0">
             <h2 id="player-media-title" className="m-0 text-[15px] sm:text-[16px] font-medium truncate">
-              {title || 'Stream de vídeo'}
+              {title || t('Stream de vídeo')}
             </h2>
             {(subtitleLine || isInspecting) && (
               <div className="hidden sm:flex items-center gap-2 text-[13px] text-lu-muted min-w-0">
                 {isInspecting && (
                   <span className="inline-flex items-center gap-1.5 text-lu-accent flex-none">
                     <Spinner size={13} />
-                    Lendo faixas…
+                    {t('Lendo faixas…')}
                   </span>
                 )}
                 {subtitleLine && <span id="player-active-chapter-badge" className="truncate">{subtitleLine}</span>}
@@ -303,7 +304,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           <>
             {/* Celular: −10 · play · +10 sempre no centro */}
             <div className="flex sm:hidden items-center gap-8" onClick={(e) => e.stopPropagation()}>
-              <IconButton label="Voltar 10 segundos" onClick={() => onSeek(Math.max(0, currentTime - 10))}>
+              <IconButton label={t('Voltar 10 segundos')} onClick={() => onSeek(Math.max(0, currentTime - 10))}>
                 <RotateCcw size={22} />
               </IconButton>
               <button
@@ -315,7 +316,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                 {paused ? <Play size={24} className="ml-0.5" /> : <Pause size={24} />}
               </button>
               <IconButton
-                label="Avançar 10 segundos"
+                label={t('Avançar 10 segundos')}
                 onClick={() => onSeek(duration > 0 ? Math.min(duration, currentTime + 10) : currentTime + 10)}
               >
                 <RotateCw size={22} />
@@ -324,7 +325,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             {paused && (
               <button
                 type="button"
-                aria-label="Reproduzir"
+                aria-label={t('Reproduzir')}
                 onClick={(e) => {
                   e.stopPropagation();
                   onPlayToggle();
@@ -358,19 +359,19 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             {isViewer ? (
               <span
                 id="viewer-sync-badge"
-                title="Sua reprodução é sincronizada automaticamente com o Host da sala."
+                title={t('Sua reprodução é sincronizada automaticamente com o Host da sala.')}
                 className="inline-flex items-center gap-2 h-11 px-3.5 box-border rounded-[10px] bg-lu-success/10 border border-lu-success/28 text-lu-success text-[13px] font-semibold"
               >
                 <Dot tone="success" />
-                Ao vivo
+                {t('Ao vivo')}
               </span>
             ) : (
               <>
                 <button
                   id="btn-play-pause"
                   type="button"
-                  aria-label={paused ? 'Reproduzir (Espaço)' : 'Pausar (Espaço)'}
-                  title={paused ? 'Reproduzir (Espaço)' : 'Pausar (Espaço)'}
+                  aria-label={paused ? t('Reproduzir (Espaço)') : t('Pausar (Espaço)')}
+                  title={paused ? t('Reproduzir (Espaço)') : t('Pausar (Espaço)')}
                   onClick={onPlayToggle}
                   className="hidden sm:inline-flex w-11 h-11 rounded-[10px] items-center justify-center bg-lu-accent text-lu-bg hover:bg-lu-accent-hover transition-colors"
                 >
@@ -387,11 +388,11 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             {showBuffer && (
               <span
                 id="player-buffer-status"
-                title={`Buffer contíguo à frente: +${bufferAhead.toFixed(1)} s (até ${formatTime(currentTime + bufferAhead)})`}
+                title={t('Buffer contíguo à frente: +{v1} s (até {v2})', { v1: bufferAhead.toFixed(1), v2: formatTime(currentTime + bufferAhead) })}
                 className="hidden lg:inline-flex items-center gap-1.5 text-[12px] text-lu-muted whitespace-nowrap tabular"
               >
                 <Dot tone={bufferTone} />
-                {bufferAhead > 0.2 ? `Buffer +${bufferAhead.toFixed(1).replace('.', ',')} s` : 'Buffer: baixando…'}
+                {bufferAhead > 0.2 ? t('Buffer +{n} s', { n: bufferAhead.toFixed(1).replace('.', ',') }) : t('Buffer: baixando…')}
               </span>
             )}
           </div>
@@ -403,7 +404,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             <div className="relative" ref={subMenuRef}>
               <IconButton
                 id="btn-subtitles-toggle"
-                label="Legendas (C)"
+                label={t('Legendas (C)')}
                 aria-expanded={openMenu === 'subs'}
                 active={Boolean(activeSubtitle) || openMenu === 'subs'}
                 onClick={() => toggleMenu('subs')}
@@ -413,19 +414,19 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               {openMenu === 'subs' && (
                 <MenuPanel
                   id="subtitles-popover-menu"
-                  title="Legendas"
+                  title={t('Legendas')}
                   meta={`${subtitles.length} ${subtitles.length === 1 ? 'faixa' : 'faixas'}`}
                   onClose={closeMenu}
                   className="right-[-96px] w-[320px]"
                 >
-                  <div role="radiogroup" aria-label="Faixa de legenda" className="flex flex-col gap-0.5">
+                  <div role="radiogroup" aria-label={t('Faixa de legenda')} className="flex flex-col gap-0.5">
                     <MenuItem
                       selected={activeSubtitle === null}
                       onClick={() => {
                         onSubtitleChange(null);
                         closeMenu();
                       }}
-                      label="Desativadas"
+                      label={t('Desativadas')}
                     />
                     {subtitles.map((track) => (
                       <MenuItem
@@ -444,13 +445,13 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   {activeSubtitle && onSubtitleDelayChange && (
                     <>
                       <MenuDivider />
-                      <MenuSection title="Sincronia" value={formatMs(subtitleDelay)}>
+                      <MenuSection title={t('Sincronia')} value={formatMs(subtitleDelay)}>
                         <ChipRow>
-                          <Chip onClick={() => onSubtitleDelayChange(Number((subtitleDelay - 0.05).toFixed(2)))}>−50 ms</Chip>
+                          <Chip onClick={() => onSubtitleDelayChange(Number((subtitleDelay - 0.05).toFixed(2)))}>{t('−50 ms')}</Chip>
                           <Chip selected={subtitleDelay === 0} onClick={() => onSubtitleDelayChange(0)}>
-                            Redefinir
+                            {t('Redefinir')}
                           </Chip>
-                          <Chip onClick={() => onSubtitleDelayChange(Number((subtitleDelay + 0.05).toFixed(2)))}>+50 ms</Chip>
+                          <Chip onClick={() => onSubtitleDelayChange(Number((subtitleDelay + 0.05).toFixed(2)))}>{t('+50 ms')}</Chip>
                         </ChipRow>
                       </MenuSection>
                     </>
@@ -459,7 +460,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   {activeSubtitle && onSubtitleFontSizeChange && (
                     <>
                       <MenuDivider />
-                      <MenuSection title="Tamanho da fonte" value={`${subtitleFontSize}%`} last>
+                      <MenuSection title={t('Tamanho da fonte')} value={`${subtitleFontSize}%`} last>
                         <ChipRow>
                           {[75, 100, 125, 150].map((sz) => (
                             <Chip key={sz} selected={subtitleFontSize === sz} onClick={() => onSubtitleFontSizeChange(sz)}>
@@ -483,7 +484,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                         className="w-full inline-flex items-center gap-2 h-10 px-2.5 rounded-[10px] text-[14px] font-medium text-lu-accent hover:bg-white/6"
                       >
                         <Plus size={18} />
-                        Adicionar legenda
+                        {t('Adicionar legenda')}
                       </button>
                     </>
                   )}
@@ -496,7 +497,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               <div className="relative hidden sm:block" ref={audioMenuRef}>
                 <IconButton
                   id="btn-audio-tracks-toggle"
-                  label="Faixas de áudio"
+                  label={t('Faixas de áudio')}
                   aria-expanded={openMenu === 'audio'}
                   active={openMenu === 'audio'}
                   onClick={() => toggleMenu('audio')}
@@ -506,12 +507,12 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                 {openMenu === 'audio' && (
                   <MenuPanel
                     id="audio-tracks-popover-menu"
-                    title="Faixas de áudio"
+                    title={t('Faixas de áudio')}
                     meta={`${audioTracks.length} ${audioTracks.length === 1 ? 'faixa' : 'faixas'}`}
                     onClose={closeMenu}
                     className="right-[-96px] w-[320px]"
                   >
-                    <div role="radiogroup" aria-label="Faixa de áudio" className="flex flex-col gap-0.5 pb-1">
+                    <div role="radiogroup" aria-label={t('Faixa de áudio')} className="flex flex-col gap-0.5 pb-1">
                       {audioTracks.map((trk) => (
                         <MenuItem
                           key={trk.id}
@@ -558,7 +559,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             {canPip && (
               <IconButton
                 id="btn-pip-toggle"
-                label="Picture-in-Picture"
+                label={t('Picture-in-Picture')}
                 active={isPip}
                 onClick={onPipToggle}
                 className="hidden md:inline-flex"
@@ -570,7 +571,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             {onToggleAspect && (
               <IconButton
                 id="btn-aspect-toggle"
-                label={ASPECT_LABEL[aspectMode]}
+                label={t(ASPECT_LABEL[aspectMode])}
                 active={aspectMode !== 'fit'}
                 onClick={onToggleAspect}
                 className="hidden md:inline-flex"
@@ -582,7 +583,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             {onWatchPartyToggle && (
               <IconButton
                 id="btn-watchparty-toggle"
-                label="Watch Party"
+                label={t('Watch Party')}
                 active={Boolean(isWatchPartyConnected)}
                 onClick={onWatchPartyToggle}
                 className="hidden sm:inline-flex"
@@ -603,7 +604,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
 
             <IconButton
               id="btn-fullscreen-toggle"
-              label={isFullscreen ? 'Sair da tela cheia (F)' : 'Tela cheia (F)'}
+              label={isFullscreen ? t('Sair da tela cheia (F)') : t('Tela cheia (F)')}
               onClick={onFullscreenToggle}
             >
               {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}

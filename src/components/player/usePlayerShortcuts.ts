@@ -1,6 +1,7 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { logger } from '../../lib/logger';
 import type { SubtitleTrack } from '../../types/media';
+import { t } from '../../lib/i18n';
 
 /** Atalhos de teclado do player (espaço/K, J/L, N, setas, M, F, Z, W, C, G/H, [ ]). Espectador não controla a reprodução. */
 export function usePlayerShortcuts(a: {
@@ -58,7 +59,7 @@ export function usePlayerShortcuts(a: {
         case 'KeyK':
           e.preventDefault();
           if (isViewer) {
-            setSyncToast('A reprodução é controlada pelo Host da sala');
+            setSyncToast(t('A reprodução é controlada pelo Host da sala'));
             setTimeout(() => setSyncToast(null), 2500);
             break;
           }

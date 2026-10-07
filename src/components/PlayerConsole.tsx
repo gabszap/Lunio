@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Terminal, Trash2, ArrowDownToLine, Copy, Check, FileText, Download, List, ChevronDown } from 'lucide-react';
 import { LogEntry, LogLevel } from '../types/media';
 import { logger, safeStringify } from '../lib/logger';
+import { t } from '../lib/i18n';
 
 export const PlayerConsole: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -137,7 +138,7 @@ export const PlayerConsole: React.FC = () => {
   return (
     <section
       id="player-console-container"
-      aria-label="Console do player"
+      aria-label={t('Console do player')}
       className="w-full rounded-[14px] bg-lu-surface border border-lu-border overflow-hidden"
     >
       <div className="flex items-center justify-between gap-3 flex-wrap pl-4 pr-3 py-2.5 border-b border-lu-border">
@@ -145,7 +146,7 @@ export const PlayerConsole: React.FC = () => {
           <span className="flex text-lu-muted">
             <Terminal size={16} />
           </span>
-          <h2 className="m-0 text-[14px] font-semibold">Console do player</h2>
+          <h2 className="m-0 text-[14px] font-semibold">{t('Console do player')}</h2>
           <span className="text-[12px] text-lu-muted tabular">
             {logs.length} {logs.length === 1 ? 'evento' : 'eventos'}
           </span>
@@ -154,12 +155,12 @@ export const PlayerConsole: React.FC = () => {
         <div className="flex items-center gap-1">
           <div className="relative">
             <select
-              aria-label="Filtrar nível de logs"
+              aria-label={t('Filtrar nível de logs')}
               value={filterLevel}
               onChange={(e) => setFilterLevel(e.target.value)}
               className="appearance-none h-9 pl-3 pr-[30px] rounded-md bg-lu-bg2 border border-lu-border text-lu-muted font-[inherit] text-[12px]"
             >
-              <option value="all">Todos os níveis</option>
+              <option value="all">{t('Todos os níveis')}</option>
               <option value="info">INFO</option>
               <option value="action">ACTION</option>
               <option value="setting">SETTING</option>
@@ -172,8 +173,8 @@ export const PlayerConsole: React.FC = () => {
           </div>
           <button
             type="button"
-            aria-label={rawViewMode ? 'Voltar para a lista' : 'Modo texto puro'}
-            title={rawViewMode ? 'Voltar para a lista' : 'Modo texto puro'}
+            aria-label={rawViewMode ? t('Voltar para a lista') : t('Modo texto puro')}
+            title={rawViewMode ? t('Voltar para a lista') : t('Modo texto puro')}
             aria-pressed={rawViewMode}
             onClick={() => setRawViewMode(!rawViewMode)}
             className={toolBtn(rawViewMode)}
@@ -183,8 +184,8 @@ export const PlayerConsole: React.FC = () => {
           {!rawViewMode && (
             <button
               type="button"
-              aria-label={autoScroll ? 'Auto-scroll ativo' : 'Auto-scroll desligado'}
-              title={autoScroll ? 'Auto-scroll ativo' : 'Auto-scroll desligado'}
+              aria-label={autoScroll ? t('Auto-scroll ativo') : t('Auto-scroll desligado')}
+              title={autoScroll ? t('Auto-scroll ativo') : t('Auto-scroll desligado')}
               aria-pressed={autoScroll}
               onClick={() => setAutoScroll(!autoScroll)}
               className={toolBtn(autoScroll)}
@@ -195,17 +196,17 @@ export const PlayerConsole: React.FC = () => {
           <button
             id="btn-console-copy"
             type="button"
-            aria-label={copied ? 'Logs copiados' : 'Copiar logs'}
-            title={copied ? 'Logs copiados' : 'Copiar logs'}
+            aria-label={copied ? t('Logs copiados') : t('Copiar logs')}
+            title={copied ? t('Logs copiados') : t('Copiar logs')}
             onClick={handleCopyLogs}
             className={toolBtn(copied)}
           >
             {copied ? <Check size={16} /> : <Copy size={16} />}
           </button>
-          <button type="button" aria-label="Baixar logs" title="Baixar logs" onClick={handleDownloadLogs} className={toolBtn()}>
+          <button type="button" aria-label={t('Baixar logs')} title={t('Baixar logs')} onClick={handleDownloadLogs} className={toolBtn()}>
             <Download size={16} />
           </button>
-          <button id="btn-console-clear" type="button" aria-label="Limpar logs" title="Limpar logs" onClick={() => logger.clear()} className={toolBtn()}>
+          <button id="btn-console-clear" type="button" aria-label={t('Limpar logs')} title={t('Limpar logs')} onClick={() => logger.clear()} className={toolBtn()}>
             <Trash2 size={16} />
           </button>
         </div>
@@ -214,15 +215,15 @@ export const PlayerConsole: React.FC = () => {
       {rawViewMode ? (
         <div className="p-3 bg-lu-bg2 flex flex-col gap-2">
           <div className="flex items-center justify-between text-[12px] text-lu-muted">
-            <span>Clique dentro e use Ctrl+A / Ctrl+C, ou:</span>
+            <span>{t('Clique dentro e use Ctrl+A / Ctrl+C, ou:')}</span>
             <button type="button" onClick={handleSelectAllRaw} className="text-lu-accent font-semibold hover:text-lu-accent-hover">
-              Selecionar tudo
+              {t('Selecionar tudo')}
             </button>
           </div>
           <textarea
             ref={rawTextAreaRef}
             readOnly
-            aria-label="Logs em texto puro"
+            aria-label={t('Logs em texto puro')}
             value={getLogPlainText()}
             rows={10}
             className="w-full box-border bg-lu-bg border border-lu-border rounded-[10px] p-2.5 text-lu-text font-mono text-[12px] leading-relaxed custom-scrollbar resize-y select-text"
@@ -237,7 +238,7 @@ export const PlayerConsole: React.FC = () => {
           style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
         >
           {filteredLogs.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-lu-disabled text-[12px]">Nenhum evento registrado ainda.</div>
+            <div className="flex items-center justify-center h-full text-lu-disabled text-[12px]">{t('Nenhum evento registrado ainda.')}</div>
           ) : (
             filteredLogs.map((log) => (
               <div key={log.id} className="flex gap-3 text-[12px] leading-[1.7]">

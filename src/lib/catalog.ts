@@ -1,3 +1,4 @@
+import { t, msg } from './/i18n';
 /**
  * Catálogo de filmes e séries via Cinemeta (addon público de metadados do Stremio).
  * Só metadados: pôster, sinopse, temporadas e episódios. O vídeo em si continua vindo
@@ -88,7 +89,7 @@ export async function fetchMeta(type: CatalogType, id: string): Promise<CatalogM
       id: v.id,
       season: Number(v.season) || 0,
       episode: Number(v.episode ?? v.number) || 0,
-      title: v.name || v.title || `Episódio ${v.episode ?? v.number}`,
+      title: v.name || v.title || t('Episódio {v1}', { v1: v.episode ?? v.number }),
       overview: v.overview || v.description,
       thumbnail: v.thumbnail,
       released: v.released || v.firstAired,
@@ -136,20 +137,20 @@ export function toggleMyList(item: CatalogItem): boolean {
 }
 
 export const GENRES_PT: Record<string, string> = {
-  Action: 'Ação',
+  Action: msg('Ação'),
   Adventure: 'Aventura',
-  Animation: 'Animação',
-  Comedy: 'Comédia',
+  Animation: msg('Animação'),
+  Comedy: msg('Comédia'),
   Crime: 'Crime',
-  Documentary: 'Documentário',
+  Documentary: msg('Documentário'),
   Drama: 'Drama',
-  Family: 'Família',
+  Family: msg('Família'),
   Fantasy: 'Fantasia',
-  History: 'História',
+  History: msg('História'),
   Horror: 'Terror',
-  Mystery: 'Mistério',
+  Mystery: msg('Mistério'),
   Romance: 'Romance',
-  'Sci-Fi': 'Ficção científica',
+  'Sci-Fi': msg('Ficção científica'),
   Thriller: 'Suspense',
   War: 'Guerra',
   Western: 'Faroeste',

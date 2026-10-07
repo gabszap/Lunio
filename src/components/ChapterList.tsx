@@ -4,6 +4,7 @@ import { Chapter } from '../types/media';
 import { formatTime, getCurrentChapter } from '../lib/chapters';
 import { logger } from '../lib/logger';
 import { IconButton, MenuItem, MenuPanel, useDismiss } from './ui';
+import { t } from '../lib/i18n';
 
 interface ChapterListProps {
   chapters: Chapter[];
@@ -41,7 +42,7 @@ export const ChapterList: React.FC<ChapterListProps> = ({
     <div id="chapter-list-menu-container" className="relative hidden sm:block" ref={containerRef}>
       <IconButton
         id="btn-chapters-menu-toggle"
-        label="Capítulos"
+        label={t('Capítulos')}
         aria-expanded={open}
         active={open}
         disabled={disabled}
@@ -53,8 +54,8 @@ export const ChapterList: React.FC<ChapterListProps> = ({
       {open && (
         <MenuPanel
           id="chapter-list-popover"
-          title="Capítulos"
-          meta={`${chapters.length} ${chapters.length === 1 ? 'capítulo' : 'capítulos'}`}
+          title={t('Capítulos')}
+          meta={`${chapters.length} ${chapters.length === 1 ? t('capítulo') : t('capítulos')}`}
           onClose={() => onOpenChange(false)}
           className="right-0 w-[340px]"
         >

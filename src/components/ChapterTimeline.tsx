@@ -2,6 +2,7 @@ import React, { useState, useRef, useCallback } from 'react';
 import { Check } from 'lucide-react';
 import { Chapter } from '../types/media';
 import { formatTime, getCurrentChapter } from '../lib/chapters';
+import { t } from '../lib/i18n';
 
 interface ChapterTimelineProps {
   currentTime: number;
@@ -126,7 +127,7 @@ export const ChapterTimeline: React.FC<ChapterTimelineProps> = ({
       ref={containerRef}
       role="slider"
       tabIndex={disabled ? -1 : 0}
-      aria-label="Posição de reprodução"
+      aria-label={t('Posição de reprodução')}
       aria-valuemin={0}
       aria-valuemax={Math.round(safeDuration)}
       aria-valuenow={Math.round(displayTime)}
@@ -157,10 +158,10 @@ export const ChapterTimeline: React.FC<ChapterTimelineProps> = ({
               (hoverBuffered ? (
                 <span className="inline-flex items-center gap-1 text-lu-success">
                   <Check size={12} />
-                  No buffer
+                  {t('No buffer')}
                 </span>
               ) : (
-                <span>Sem buffer</span>
+                <span>{t('Sem buffer')}</span>
               ))}
           </div>
         </div>

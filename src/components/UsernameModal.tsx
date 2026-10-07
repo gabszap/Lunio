@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { syncManager } from '../lib/sync';
 import { Modal, PrimaryButton, TextInput } from './ui';
+import { t } from '../lib/i18n';
 
 const LAST_NAME_KEY = 'lunio_last_username';
 const SKIP_PROMPT_KEY = 'lunio_skip_name_prompt';
@@ -42,7 +43,7 @@ interface UsernameModalProps {
 }
 
 /** "Modal · Apelido": pedido de apelido antes de criar ou entrar numa sala. */
-export const UsernameModal: React.FC<UsernameModalProps> = ({ isOpen, onUsernameSet, onClose, actionLabel = 'Entrar na sala' }) => {
+export const UsernameModal: React.FC<UsernameModalProps> = ({ isOpen, onUsernameSet, onClose, actionLabel = t('Entrar na sala') }) => {
   const [name, setName] = useState('');
   const [dontAskAgain, setDontAskAgain] = useState(false);
   const guestName = useMemo(() => {
@@ -77,22 +78,22 @@ export const UsernameModal: React.FC<UsernameModalProps> = ({ isOpen, onUsername
   };
 
   return (
-    <Modal open={isOpen} onClose={onClose} label="Escolha seu apelido" width={400} className="text-center">
+    <Modal open={isOpen} onClose={onClose} label={t('Escolha seu apelido')} width={400} className="text-center">
       <div>
-        <h2 className="m-0 text-[20px] font-semibold tracking-[-0.01em]">Como você quer ser chamado?</h2>
+        <h2 className="m-0 text-[20px] font-semibold tracking-[-0.01em]">{t('Como você quer ser chamado?')}</h2>
         <p className="mt-2 mx-auto mb-0 max-w-[300px] text-[14px] text-lu-muted">
-          Escolha um apelido para sincronizar a reprodução e conversar no chat da Watch Party.
+          {t('Escolha um apelido para sincronizar a reprodução e conversar no chat da Watch Party.')}
         </p>
       </div>
       <form onSubmit={submit} className="flex flex-col gap-3 text-left">
         <label htmlFor="invite-username" className="text-[13px] font-medium">
-          Seu apelido na sala
+          {t('Seu apelido na sala')}
         </label>
         <TextInput
           id="invite-username"
           maxLength={25}
           autoComplete="nickname"
-          placeholder="Ex.: Marina"
+          placeholder={t('Ex.: Marina')}
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
@@ -103,7 +104,7 @@ export const UsernameModal: React.FC<UsernameModalProps> = ({ isOpen, onUsername
             onChange={(e) => setDontAskAgain(e.target.checked)}
             className="w-4 h-4 m-0 accent-[var(--color-lu-accent)]"
           />
-          Não perguntar de novo (usar este apelido sempre)
+          {t('Não perguntar de novo (usar este apelido sempre)')}
         </label>
         <PrimaryButton type="submit" size="lg" block disabled={!name.trim()}>
           <ArrowRight size={18} />
