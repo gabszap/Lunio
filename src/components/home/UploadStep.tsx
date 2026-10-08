@@ -7,6 +7,7 @@ import { waitForRoomToken } from '../../lib/access';
 import { BigInput, CardFooter, FieldLabel, GhostButton, HomeCard, HomeCardTitle, PrimaryButton, TextButton, cx } from '../ui';
 import type { SourceCommit } from './types';
 import type { SourceStep } from './RoomMenu';
+import { apiErrorMessage, t } from '../../lib/i18n';
 
 const MAX_BYTES = 50 * 1024 ** 3;
 
@@ -71,7 +72,7 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
       token = await waitForRoomToken(roomCode);
     } catch {
       if (attemptRef.current === attempt) {
-        setPhase({ kind: 'error', file, message: 'Não deu pra entrar na sala para enviar. Tente de novo.' });
+        setPhase({ kind: 'error', file, message: t('Não deu pra entrar na sala para enviar. Tente de novo.') });
       }
       return;
     }
@@ -94,7 +95,7 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
           logger.info(`[Mídia] Envio concluído: ${file.name}`);
           setPhase({ kind: 'done', file, url: absolute, roomCode });
         } catch {
-          setPhase({ kind: 'error', file, message: 'O servidor respondeu de um jeito inesperado.' });
+          setPhase({ kind: 'error', file, message: t('O servidor respondeu de um jeito inesperado.') });
         }
       } else if (xhr.status === 413) {
         setPhase({ kind: 'too_large', file });
@@ -102,16 +103,17 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
         // O servidor responde { error: frase em português, code }
         let reason = '';
         try {
-          reason = JSON.parse(xhr.responseText)?.error || '';
+          const body = JSON.parse(xhr.responseText);
+          reason = apiErrorMessage(body?.code, body?.error);
         } catch {
           // corpo não-JSON
         }
-        setPhase({ kind: 'error', file, message: reason || `O envio falhou (HTTP ${xhr.status}).` });
+        setPhase({ kind: 'error', file, message: reason || t('O envio falhou (HTTP {status}).', { status: xhr.status }) });
       }
     };
     xhr.onerror = () => {
       xhrRef.current = null;
-      setPhase({ kind: 'error', file, message: 'A conexão caiu durante o envio.' });
+      setPhase({ kind: 'error', file, message: t('A conexão caiu durante o envio.') });
     };
     xhr.open('POST', `/api/upload?name=${encodeURIComponent(file.name)}`);
     xhr.setRequestHeader('Content-Type', 'application/octet-stream');
@@ -167,17 +169,17 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
     const pct = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
     const speed = phase.kind === 'uploading' ? phase.speed : 0;
     const eta = speed > 0 ? Math.max(0, (total - loaded) / speed) : 0;
-    const etaText = eta < 60 ? 'Falta menos de 1 min' : `Faltam cerca de ${Math.round(eta / 60)} min`;
+    const etaText = eta < 60 ? t('Falta menos de 1 min') : t('Faltam cerca de {v1} min', { v1: Math.round(eta / 60) });
 
     return (
       <HomeCard>
         <HomeCardTitle
           icon={<Upload size={20} />}
-          title={phase.kind === 'done' ? 'Arquivo enviado' : 'Enviando arquivo'}
+          title={phase.kind === 'done' ? t('Arquivo enviado') : t('Enviando arquivo')}
           description={
             phase.kind === 'done'
-              ? 'Tudo pronto. Abra o player e dê play quando a galera chegar.'
-              : 'A sala já existe. Pode mandar o link pra galera enquanto o vídeo sobe.'
+              ? t('Tudo pronto. Abra o player e dê play quando a galera chegar.')
+              : t('A sala já existe. Pode mandar o link pra galera enquanto o vídeo sobe.')
           }
         />
 
@@ -198,7 +200,7 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
           </div>
           <div
             role="progressbar"
-            aria-label="Progresso do envio"
+            aria-label={t('Progresso do envio')}
             aria-valuenow={pct}
             aria-valuemin={0}
             aria-valuemax={100}
@@ -208,14 +210,14 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
           </div>
           {phase.kind === 'uploading' && (
             <div className="flex justify-between text-[12px] text-lu-muted tabular">
-              <span>{speed > 0 ? etaText : 'Calculando…'}</span>
-              <span>Não feche esta aba</span>
+              <span>{speed > 0 ? etaText : t('Calculando…')}</span>
+              <span>{t('Não feche esta aba')}</span>
             </div>
           )}
         </div>
 
         <FieldLabel htmlFor="up-link" className="mt-5">
-          Código da sala
+          {t('Código da sala')}
         </FieldLabel>
         <BigInput
           id="up-link"
@@ -230,7 +232,7 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
               className="inline-flex items-center gap-1.5 h-10 px-3 rounded-lg bg-lu-tint text-lu-accent text-[13px] font-semibold hover:bg-lu-accent/20 flex-none"
             >
               {copied ? <Check size={16} /> : <Copy size={16} />}
-              <span>{copied ? 'Copiado' : 'Copiar link'}</span>
+              <span>{copied ? t('Copiado') : t('Copiar link')}</span>
             </button>
           }
         />
@@ -239,14 +241,14 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
           {phase.kind === 'uploading' ? (
             <TextButton onClick={cancelUpload}>
               <X size={18} />
-              <span>Cancelar envio</span>
+              <span>{t('Cancelar envio')}</span>
             </TextButton>
           ) : (
             <span />
           )}
           <PrimaryButton disabled={phase.kind !== 'done'} onClick={openPlayer}>
             <Play size={16} />
-            <span>Abrir player</span>
+            <span>{t('Abrir player')}</span>
           </PrimaryButton>
         </CardFooter>
       </HomeCard>
@@ -258,7 +260,7 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
   return (
     <HomeCard>
       {fileInput}
-      <HomeCardTitle icon={<Upload size={20} />} title="Enviar um arquivo" description="MKV, MP4 e mais · até 50 GB" />
+      <HomeCardTitle icon={<Upload size={20} />} title={t('Enviar um arquivo')} description={t('MKV, MP4 e mais · até 50 GB')} />
 
       {!file ? (
         <button
@@ -282,8 +284,8 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
           <span className="flex text-lu-accent">
             <Upload size={24} />
           </span>
-          <span className="text-[14px] font-semibold">Escolher um vídeo</span>
-          <span className="text-[12px] text-lu-muted">ou arraste o arquivo pra cá</span>
+          <span className="text-[14px] font-semibold">{t('Escolher um vídeo')}</span>
+          <span className="text-[12px] text-lu-muted">{t('ou arraste o arquivo pra cá')}</span>
         </button>
       ) : (
         <div
@@ -300,7 +302,7 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
             <span className="text-[14px] font-semibold truncate">{file.name}</span>
             <span className={cx('text-[13px] tabular', phase.kind === 'chosen' ? 'text-lu-muted' : 'text-lu-error')}>
               {phase.kind === 'too_large'
-                ? `${formatBytes(file.size)} · passa do limite de 50 GB`
+                ? t('{v1} · passa do limite de 50 GB', { v1: formatBytes(file.size) })
                 : phase.kind === 'error'
                 ? phase.message
                 : formatBytes(file.size)}
@@ -308,7 +310,7 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
           </div>
           <button
             type="button"
-            aria-label="Remover arquivo"
+            aria-label={t('Remover arquivo')}
             onClick={() => setPhase({ kind: 'pick' })}
             className="w-10 h-10 rounded-lg inline-flex items-center justify-center text-lu-muted hover:bg-white/8 flex-none"
           >
@@ -319,11 +321,11 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
 
       {phase.kind === 'too_large' && (
         <>
-          <p className="mt-5 mb-2.5 text-[13px] font-semibold">Pra arquivos grandes, tente:</p>
+          <p className="mt-5 mb-2.5 text-[13px] font-semibold">{t('Pra arquivos grandes, tente:')}</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {[
-              { step: 'drive' as const, label: 'Google Drive', icon: <FolderOpen size={18} /> },
-              { step: 'stream' as const, label: 'Link de stream', icon: <Link size={18} /> },
+              { step: 'drive' as const, label: t('Google Drive'), icon: <FolderOpen size={18} /> },
+              { step: 'stream' as const, label: t('Link de stream'), icon: <Link size={18} /> },
             ].map((alt) => (
               <button
                 key={alt.step}
@@ -341,36 +343,36 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
 
       {phase.kind === 'chosen' && (
         <p className="mt-3 mb-0 text-[12px] text-lu-muted">
-          Pra assistir com amigos o arquivo sobe pro servidor. Sozinho, ele toca direto daqui, sem enviar nada.
+          {t('Pra assistir com amigos o arquivo sobe pro servidor. Sozinho, ele toca direto daqui, sem enviar nada.')}
         </p>
       )}
 
       <CardFooter>
         <TextButton onClick={onBack} className="!pl-2">
           <ChevronLeft size={18} />
-          <span>Voltar</span>
+          <span>{t('Voltar')}</span>
         </TextButton>
         <div className="flex flex-wrap gap-2 justify-end">
           {phase.kind === 'chosen' ? (
             <>
               <GhostButton onClick={() => playLocally(phase.file)}>
                 <Play size={16} />
-                <span>Assistir sozinho</span>
+                <span>{t('Assistir sozinho')}</span>
               </GhostButton>
               <PrimaryButton onClick={() => requireName(() => startUpload(phase.file))}>
                 <Users size={18} />
-                <span>Enviar e criar sala</span>
+                <span>{t('Enviar e criar sala')}</span>
               </PrimaryButton>
             </>
           ) : phase.kind === 'error' ? (
             <PrimaryButton onClick={() => requireName(() => startUpload(phase.file))}>
               <Upload size={18} />
-              <span>Tentar de novo</span>
+              <span>{t('Tentar de novo')}</span>
             </PrimaryButton>
           ) : (
             <GhostButton onClick={() => inputRef.current?.click()}>
               <Upload size={18} />
-              <span>{file ? 'Escolher outro arquivo' : 'Procurar no computador'}</span>
+              <span>{file ? t('Escolher outro arquivo') : t('Procurar no computador')}</span>
             </GhostButton>
           )}
         </div>

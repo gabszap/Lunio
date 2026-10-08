@@ -3,6 +3,7 @@ import type { SubtitleTrack } from '../../types/media';
 import { formatTime } from '../../lib/chapters';
 import { Avatar, Dot, GhostButton, IconButton, Kbd, PrimaryButton, Spinner } from '../ui';
 import { WatchPartyPanel } from '../WatchPartyPanel';
+import { t } from '../../lib/i18n';
 
 /** Peças visuais do player (avisos, prompts e toasts). Só renderizam: o estado e as decisões ficam nos hooks. */
 
@@ -31,23 +32,23 @@ export function StandbyScreen(props: {
           <Film size={28} />
         </div>
         <div>
-          <h2 className="m-0 text-[20px] font-semibold tracking-[-0.01em]">Nenhum vídeo na sala</h2>
+          <h2 className="m-0 text-[20px] font-semibold tracking-[-0.01em]">{t('Nenhum vídeo na sala')}</h2>
           <p className="mt-2 mx-auto mb-0 max-w-[420px] text-[14px] text-lu-muted">
             {canChoose || !isConnected
-              ? 'Escolha um vídeo pra começar. Arquivo, YouTube, Drive ou link de stream.'
-              : 'O Host ainda não escolheu o vídeo. Ele aparece aqui assim que for carregado.'}
+              ? t('Escolha um vídeo pra começar. Arquivo, YouTube, Drive ou link de stream.')
+              : t('O Host ainda não escolheu o vídeo. Ele aparece aqui assim que for carregado.')}
           </p>
         </div>
         <div className="flex flex-wrap justify-center gap-3">
           {canChoose && (
             <PrimaryButton onClick={onChooseVideo}>
               <Plus size={18} />
-              <span>Escolher um vídeo</span>
+              <span>{t('Escolher um vídeo')}</span>
             </PrimaryButton>
           )}
           <GhostButton onClick={onToggleWatchParty}>
             <Users size={18} />
-            <span>Watch Party · {Math.max(1, membersCount)} online</span>
+            <span>{t('Watch Party · {n} online', { n: Math.max(1, membersCount) })}</span>
           </GhostButton>
         </div>
       </div>
@@ -65,7 +66,7 @@ export function SubtitlePreparingBadge({ label }: { label?: string }) {
     >
       <Spinner size={16} className="text-lu-accent" />
       <span>
-        Sincronizando legenda <strong className="font-semibold text-lu-accent">{label}</strong>…
+        {t('Sincronizando legenda')} <strong className="font-semibold text-lu-accent">{label}</strong>…
       </span>
     </div>
   );
@@ -80,7 +81,7 @@ export function SubtitleFailurePrompt({ prompt, hasNext, onTryNext, onWatchWitho
             <TriangleAlert size={18} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[14px] font-semibold">Não deu pra carregar a legenda</div>
+            <div className="text-[14px] font-semibold">{t('Não deu pra carregar a legenda')}</div>
             <div className="text-[13px] text-lu-muted truncate">
               {prompt.track.label}
               {prompt.code ? ` · ${prompt.code}` : ''}
@@ -92,10 +93,10 @@ export function SubtitleFailurePrompt({ prompt, hasNext, onTryNext, onWatchWitho
           {hasNext && (
             <PrimaryButton onClick={onTryNext}>
               <RefreshCw size={16} />
-              <span>Tentar a próxima</span>
+              <span>{t('Tentar a próxima')}</span>
             </PrimaryButton>
           )}
-          <GhostButton onClick={onWatchWithout}>Assistir sem legenda</GhostButton>
+          <GhostButton onClick={onWatchWithout}>{t('Assistir sem legenda')}</GhostButton>
         </div>
       </div>
     </div>
@@ -107,7 +108,7 @@ export function PlaybackErrorOverlay({ error, onBack, onReconnect, onResetToWork
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-lu-video/92 backdrop-blur-md select-text">
       {onBack && (
         <div className="absolute top-5 left-4 sm:left-6">
-          <IconButton label="Voltar" onClick={onBack}>
+          <IconButton label={t('Voltar')} onClick={onBack}>
             <ChevronLeft size={20} />
           </IconButton>
         </div>
@@ -125,12 +126,12 @@ export function PlaybackErrorOverlay({ error, onBack, onReconnect, onResetToWork
         <div className="flex flex-wrap justify-center gap-2 mt-1">
           <PrimaryButton onClick={onReconnect}>
             <RefreshCw size={18} />
-            <span>Reconectar stream</span>
+            <span>{t('Reconectar stream')}</span>
           </PrimaryButton>
           {onResetToWorkingPreset && (
             <GhostButton onClick={onResetToWorkingPreset}>
               <Play size={18} />
-              <span>Preset Sintel 1080p</span>
+              <span>{t('Preset Sintel 1080p')}</span>
             </GhostButton>
           )}
         </div>
@@ -145,9 +146,9 @@ export function BufferingOverlay({ bufferAheadNow }: { bufferAheadNow: number })
       <div role="status" className={`flex items-center gap-3.5 px-5 py-3.5 rounded-[14px] ${floatingCard}`}>
         <Spinner size={22} className="text-lu-accent" />
         <div>
-          <div className="text-[14px] font-semibold">Carregando buffer da mídia…</div>
+          <div className="text-[14px] font-semibold">{t('Carregando buffer da mídia…')}</div>
           <div className="text-[13px] tabular text-lu-muted">
-            Buffer acumulado: +{bufferAheadNow.toFixed(1).replace('.', ',')} s
+            {t('Buffer acumulado: +{n} s', { n: bufferAheadNow.toFixed(1).replace('.', ',') })}
           </div>
         </div>
       </div>
@@ -165,10 +166,10 @@ export function HostPausedOverlay({ pausedByName }: { pausedByName: string }) {
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-[14px] font-semibold">
             <Crown size={14} className="flex-none" />
-            <span className="truncate">Vídeo pausado por {pausedByName}</span>
+            <span className="truncate">{t('Vídeo pausado por {name}', { name: pausedByName })}</span>
           </div>
           <div className="mt-0.5 text-[13px] text-lu-muted">
-            A reprodução continuará automaticamente quando o Host der play.
+            {t('A reprodução continuará automaticamente quando o Host der play.')}
           </div>
         </div>
       </div>
@@ -184,13 +185,13 @@ export function ResumePrompt({ prompt, onResume, onDismiss }: { prompt: { time: 
           <RotateCcw size={16} />
         </span>
         <div className="min-w-0">
-          <div className="text-[12px] text-lu-muted">Continuar de onde parou?</div>
+          <div className="text-[12px] text-lu-muted">{t('Continuar de onde parou?')}</div>
           <div className="text-[14px] font-semibold tabular">{prompt.formatted}</div>
         </div>
         <PrimaryButton onClick={onResume} className="!h-9 !px-3.5 text-[13px]">
-          Retomar
+          {t('Retomar')}
         </PrimaryButton>
-        <IconButton label="Fechar e assistir do início" size={36} tone="muted" onClick={onDismiss}>
+        <IconButton label={t('Fechar e assistir do início')} size={36} tone="muted" onClick={onDismiss}>
           <X size={16} />
         </IconButton>
       </div>
@@ -204,7 +205,7 @@ export function SkipChapterButton({ chapter, showControls, skipProgress, onSkip 
       id="skip-chapter-prompt"
       type="button"
       aria-label={`${chapter.label} (N)`}
-      title={`${chapter.label}: avançar para ${formatTime(chapter.targetTime)}`}
+      title={t('{label}: avançar para {v1}', { label: chapter.label, v1: formatTime(chapter.targetTime) })}
       onClick={(e) => {
             e.stopPropagation();
             onSkip();

@@ -6,6 +6,7 @@ import { RecentStream, extractCleanTitleFromUrl, formatRecentTitle } from '../..
 import { logger } from '../../lib/logger';
 import { BigInput, CardFooter, FieldLabel, GhostButton, Hint, HomeCard, HomeCardTitle, PrimaryButton, TextButton } from '../ui';
 import type { CommitMode, SourceCommit } from './types';
+import { t } from '../../lib/i18n';
 
 const FORMATS = [
   { value: 'video/x-matroska', label: 'MKV (Remux)' },
@@ -68,20 +69,20 @@ export const StreamStep: React.FC<StreamStepProps> = ({
         setError('');
         logger.action('[Mídia] Link colado da área de transferência');
       } else {
-        setError('Nenhum link http(s) na área de transferência.');
+        setError(t('Nenhum link http(s) na área de transferência.'));
       }
     } catch {
-      setError('O navegador não deixou ler a área de transferência. Cole com Ctrl+V.');
+      setError(t('O navegador não deixou ler a área de transferência. Cole com Ctrl+V.'));
     }
   };
 
   const commit = (mode: CommitMode, targetUrl = formatted, recentTitle?: string) => {
     if (!/^https?:\/\//i.test(targetUrl)) {
-      setError('Cole uma URL completa, começando com http:// ou https://');
+      setError(t('Cole uma URL completa, começando com http:// ou https://'));
       return;
     }
     if (getYouTubeId(targetUrl)) {
-      setError('Isso é um link do YouTube. Volte e use "Abrir vídeo do YouTube".');
+      setError(t('Isso é um link do YouTube. Volte e use "Abrir vídeo do YouTube".'));
       return;
     }
     const title = recentTitle || intentTitle || extractCleanTitleFromUrl(targetUrl) || 'Stream';
@@ -106,14 +107,14 @@ export const StreamStep: React.FC<StreamStepProps> = ({
     <HomeCard wide>
       <HomeCardTitle
         icon={<Link size={20} />}
-        title="Colar link de stream"
+        title={t('Colar link de stream')}
         description={
           intentTitle ? (
             <>
-              Para <strong className="text-lu-text font-semibold">{intentTitle}</strong>: cole a URL direta do Stremio, TorBox, debrid ou de um .mkv.
+              {t('Para')} <strong className="text-lu-text font-semibold">{intentTitle}</strong>{t(': cole a URL direta do Stremio, TorBox, debrid ou de um .mkv.')}
             </>
           ) : (
-            'URL direta do Stremio, TorBox, debrid ou de um arquivo .mkv.'
+            t('URL direta do Stremio, TorBox, debrid ou de um arquivo .mkv.')
           )
         }
       />
@@ -124,14 +125,14 @@ export const StreamStep: React.FC<StreamStepProps> = ({
           commit(primaryMode);
         }}
       >
-        <FieldLabel htmlFor="st-url">URL do stream</FieldLabel>
+        <FieldLabel htmlFor="st-url">{t('URL do stream')}</FieldLabel>
         <div className="flex flex-col sm:flex-row gap-2">
           <BigInput
             id="st-url"
             type="url"
             inputMode="url"
             autoFocus
-            placeholder="https://…/Nome.da.Serie.S01E02.mkv"
+            placeholder={t('https://…/Nome.da.Serie.S01E02.mkv')}
             value={url}
             invalid={Boolean(error)}
             aria-describedby="st-msg"
@@ -143,13 +144,13 @@ export const StreamStep: React.FC<StreamStepProps> = ({
             trailing={
               <TextButton size="sm" onClick={handlePaste} className="!h-10">
                 <Clipboard size={16} />
-                <span>Colar</span>
+                <span>{t('Colar')}</span>
               </TextButton>
             }
           />
           <div className="relative flex-none sm:w-[150px]">
             <select
-              aria-label="Formato do vídeo"
+              aria-label={t('Formato do vídeo')}
               value={effectiveMime}
               onChange={(e) => setMime(e.target.value)}
               className="appearance-none w-full h-[52px] box-border pl-3.5 pr-9 rounded-xl bg-lu-bg border border-lu-border-strong text-lu-text font-[inherit] text-[14px]"
@@ -174,7 +175,8 @@ export const StreamStep: React.FC<StreamStepProps> = ({
         ) : info ? (
           <Hint id="st-msg" tone="success">
             <CircleCheck size={14} />
-            Link válido{info.bits.length ? ` · ${info.bits.join(' · ')}` : ''}
+            {t('Link válido')}
+            {info.bits.length ? ` · ${info.bits.join(' · ')}` : ''}
             {info.name ? ` · ${info.name}` : ''}
           </Hint>
         ) : null}
@@ -184,10 +186,10 @@ export const StreamStep: React.FC<StreamStepProps> = ({
             <div className="flex items-center justify-between mt-5 mb-2">
               <span className="flex items-center gap-1.5 text-[13px] font-semibold">
                 <History size={16} />
-                Recentes
+                {t('Recentes')}
               </span>
               <TextButton size="sm" onClick={onClearRecent} className="!h-8 text-[12px]">
-                Limpar
+                {t('Limpar')}
               </TextButton>
             </div>
             <ul className="list-none m-0 p-0 flex flex-col gap-1.5 max-h-[188px] overflow-y-auto custom-scrollbar">
@@ -206,7 +208,7 @@ export const StreamStep: React.FC<StreamStepProps> = ({
                     </button>
                     <button
                       type="button"
-                      aria-label={`Remover ${cleanName} do histórico`}
+                      aria-label={t('Remover {cleanName} do histórico', { cleanName })}
                       onClick={() => onRemoveRecent(item.url)}
                       className="w-9 h-9 mr-1 flex-none rounded-lg inline-flex items-center justify-center text-lu-disabled hover:bg-white/8 hover:text-lu-text"
                     >
@@ -222,33 +224,33 @@ export const StreamStep: React.FC<StreamStepProps> = ({
         <CardFooter>
           <TextButton onClick={onBack} className="!pl-2">
             <ChevronLeft size={18} />
-            <span>Voltar</span>
+            <span>{t('Voltar')}</span>
           </TextButton>
           <div className="flex flex-wrap gap-2 justify-end">
             <GhostButton onClick={onAddSubtitle}>
               <Captions size={18} />
-              <span>Legenda{pendingSubtitles > 0 ? ` (${pendingSubtitles})` : ''}</span>
+              <span>{t('Legenda')}{pendingSubtitles > 0 ? ` (${pendingSubtitles})` : ''}</span>
             </GhostButton>
             {primaryMode === 'room' ? (
               <>
                 <GhostButton onClick={() => commit('solo')}>
                   <Play size={16} />
-                  <span>Assistir sozinho</span>
+                  <span>{t('Assistir sozinho')}</span>
                 </GhostButton>
                 <PrimaryButton type="submit">
                   <Users size={18} />
-                  <span>Criar sala</span>
+                  <span>{t('Criar sala')}</span>
                 </PrimaryButton>
               </>
             ) : (
               <>
                 <GhostButton onClick={() => commit('room')}>
                   <Users size={18} />
-                  <span>Criar sala</span>
+                  <span>{t('Criar sala')}</span>
                 </GhostButton>
                 <PrimaryButton type="submit">
                   <Play size={16} />
-                  <span>Assistir sozinho</span>
+                  <span>{t('Assistir sozinho')}</span>
                 </PrimaryButton>
               </>
             )}

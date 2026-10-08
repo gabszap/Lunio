@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Settings } from 'lucide-react';
 import { logger } from '../lib/logger';
 import { Chip, ChipRow, IconButton, MenuDivider, MenuPanel, MenuSection, Segmented, Slider, useDismiss } from './ui';
+import { t } from '../lib/i18n';
 
 interface SettingsMenuProps {
   playbackRate: number;
@@ -62,7 +63,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     <div id="settings-menu-container" className="relative" ref={menuRef}>
       <IconButton
         id="btn-settings-toggle"
-        label="Ajustes"
+        label={t('Ajustes')}
         aria-expanded={open}
         active={open}
         disabled={disabled}
@@ -74,25 +75,25 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
       {open && (
         <MenuPanel
           id="settings-popover-panel"
-          title="Ajustes"
+          title={t('Ajustes')}
           onClose={() => onOpenChange(false)}
           className="right-0 md:right-[-140px] w-[360px]"
         >
           <Segmented
-            label="Seção de ajustes"
+            label={t('Seção de ajustes')}
             size="sm"
             value={activeTab}
             onChange={(v) => setActiveTab(v as 'audio' | 'subtitles')}
             className="mx-0.5 mt-0.5 mb-3"
             options={[
-              { value: 'audio', label: 'Áudio e velocidade' },
-              { value: 'subtitles', label: 'Legendas e sync' },
+              { value: 'audio', label: t('Áudio e velocidade') },
+              { value: 'subtitles', label: t('Legendas e sync') },
             ]}
           />
 
           {activeTab === 'audio' && (
             <>
-              <MenuSection title="Velocidade de reprodução" value={formatRate(playbackRate)}>
+              <MenuSection title={t('Velocidade de reprodução')} value={formatRate(playbackRate)}>
                 <Slider
                   id="slider-playback-speed"
                   min="0.25"
@@ -100,7 +101,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   step="0.05"
                   value={playbackRate}
                   disabled={!canChangeRate}
-                  aria-label="Velocidade de reprodução"
+                  aria-label={t('Velocidade de reprodução')}
                   onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
                 />
                 <ChipRow gap="tight">
@@ -116,7 +117,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   ))}
                 </ChipRow>
                 {!canChangeRate && (
-                  <p className="mt-2 mb-0 text-[12px] text-lu-muted">Só o Host muda a velocidade da sala.</p>
+                  <p className="mt-2 mb-0 text-[12px] text-lu-muted">{t('Só o Host muda a velocidade da sala.')}</p>
                 )}
               </MenuSection>
 
@@ -124,9 +125,9 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                 <>
                   <MenuDivider />
                   <MenuSection
-                    title="Atraso do áudio"
+                    title={t('Atraso do áudio')}
                     value={formatMs(audioDelay)}
-                    description="Atrasa o áudio caso a voz saia antes da imagem."
+                    description={t('Atrasa o áudio caso a voz saia antes da imagem.')}
                   >
                     <Slider
                       id="slider-audio-delay"
@@ -134,12 +135,12 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                       max="2"
                       step="0.05"
                       value={audioDelay}
-                      aria-label="Atraso do áudio"
+                      aria-label={t('Atraso do áudio')}
                       onChange={(e) => onAudioDelayChange(parseFloat(e.target.value))}
                     />
                     <ChipRow gap="tight">
                       <Chip dense selected={audioDelay === 0} onClick={() => onAudioDelayChange(0)}>
-                        Redefinir
+                        {t('Redefinir')}
                       </Chip>
                       {AUDIO_DELAY_PRESETS.map((d) => (
                         <Chip key={d} dense selected={Math.abs(audioDelay - d) < 0.01} onClick={() => onAudioDelayChange(d)}>
@@ -153,9 +154,9 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
 
               <MenuDivider />
               <MenuSection
-                title="Volume boost"
+                title={t('Volume boost')}
                 value={`${volumeBoost}%`}
-                description="Amplifica streams com áudio baixo."
+                description={t('Amplifica streams com áudio baixo.')}
                 last
               >
                 <Slider
@@ -164,7 +165,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   max="200"
                   step="5"
                   value={volumeBoost}
-                  aria-label="Volume boost"
+                  aria-label={t('Volume boost')}
                   onChange={(e) => onVolumeBoostChange(parseInt(e.target.value, 10))}
                 />
                 <ChipRow gap="tight">
@@ -182,9 +183,9 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
             <>
               {onSubtitleDelayChange && (
                 <MenuSection
-                  title="Sincronia da legenda"
+                  title={t('Sincronia da legenda')}
                   value={formatMs(subtitleDelay)}
-                  description="Positivo atrasa a legenda; negativo adianta. Atalhos: G e H."
+                  description={t('Positivo atrasa a legenda; negativo adianta. Atalhos: G e H.')}
                 >
                   <Slider
                     id="slider-subtitle-delay"
@@ -192,7 +193,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                     max="5"
                     step="0.05"
                     value={subtitleDelay}
-                    aria-label="Sincronia da legenda"
+                    aria-label={t('Sincronia da legenda')}
                     onChange={(e) => onSubtitleDelayChange(parseFloat(e.target.value))}
                   />
                   <ChipRow gap="tight">
@@ -202,7 +203,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                       </Chip>
                     ))}
                     <Chip dense selected={subtitleDelay === 0} onClick={() => onSubtitleDelayChange(0)}>
-                      Redefinir
+                      {t('Redefinir')}
                     </Chip>
                     {[0.05, 0.25].map((d) => (
                       <Chip key={d} dense onClick={() => onSubtitleDelayChange(Number((subtitleDelay + d).toFixed(2)))}>
@@ -216,7 +217,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
               {onSubtitleFontSizeChange && (
                 <>
                   <MenuDivider />
-                  <MenuSection title="Tamanho da fonte" value={`${subtitleFontSize}%`} last>
+                  <MenuSection title={t('Tamanho da fonte')} value={`${subtitleFontSize}%`} last>
                     <ChipRow gap="tight">
                       {FONT_SIZE_PRESETS.map((sz) => (
                         <Chip key={sz} selected={subtitleFontSize === sz} onClick={() => onSubtitleFontSizeChange(sz)}>

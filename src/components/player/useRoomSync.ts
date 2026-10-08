@@ -5,6 +5,7 @@ import { formatTime } from '../../lib/chapters';
 import { logger } from '../../lib/logger';
 import { syncManager } from '../../lib/sync';
 import { getVideoElement } from './dom';
+import { t } from '../../lib/i18n';
 
 export interface RoomSyncArgs {
   playerRef: RefObject<MediaPlayerInstance | null>;
@@ -123,7 +124,7 @@ export function useRoomSync(args: RoomSyncArgs) {
             videoEl.play().catch(() => {});
           }
           setPaused(false);
-          setSyncToast(`${username} deu play`);
+          setSyncToast(t('{username} deu play', { username }));
           setTimeout(() => setSyncToast(null), 3000);
         } else if (action === 'pause') {
           setHostPausedInfo({ username });
@@ -141,19 +142,19 @@ export function useRoomSync(args: RoomSyncArgs) {
               handleSeekRef.current(position);
             }
           }
-          setSyncToast(`${username} pausou o vídeo`);
+          setSyncToast(t('{username} pausou o vídeo', { username }));
           setTimeout(() => setSyncToast(null), 3000);
         } else if (action === 'seek') {
           if (!isSelf) {
             handleSeekRef.current(position);
           }
-          setSyncToast(`${username} buscou para ${formatTime(position)}`);
+          setSyncToast(t('{username} buscou para {v1}', { username, v1: formatTime(position) }));
           setTimeout(() => setSyncToast(null), 3000);
         } else if (action === 'rate') {
           if (videoEl) videoEl.playbackRate = rate;
           if (playerRef.current) playerRef.current.playbackRate = rate;
           setPlaybackRate(rate);
-          setSyncToast(`${username} alterou velocidade: ${rate}x`);
+          setSyncToast(t('{username} alterou velocidade: {rate}x', { username, rate }));
           setTimeout(() => setSyncToast(null), 3000);
         }
       }
@@ -161,7 +162,7 @@ export function useRoomSync(args: RoomSyncArgs) {
 
     const unsubMedia = syncManager.subscribeMedia((media, generation, triggeredBy, username) => {
       if (media && !syncManager.isRoomHost()) {
-        setSyncToast(`${username} carregou: ${media.title || 'novo vídeo'}`);
+        setSyncToast(t('{username} carregou: {title}', { username, title: media.title || t('novo vídeo') }));
         setTimeout(() => setSyncToast(null), 4000);
         onMediaChangeRequested?.(media);
       }
@@ -188,9 +189,9 @@ export function useRoomSync(args: RoomSyncArgs) {
 
     const unsubError = syncManager.subscribeError((_errorMsg, code) => {
       if (code === 'banned') {
-        setSyncToast('Você foi banido da sala pelo Host.');
+        setSyncToast(t('Você foi banido da sala pelo Host.'));
       } else if (code === 'kicked') {
-        setSyncToast('Você foi expulso da sala pelo Host.');
+        setSyncToast(t('Você foi expulso da sala pelo Host.'));
       }
     });
 

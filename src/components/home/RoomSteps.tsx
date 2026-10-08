@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowRight, ChevronLeft, CircleAlert, CircleX, Link, LogIn, Plus } from 'lucide-react';
 import { roomCodeFrom } from '../../lib/roomCode';
 import { BigInput, CardFooter, ClearButton, FieldLabel, GhostButton, Hint, HomeCard, HomeCardTitle, PrimaryButton, Spinner, TextButton } from '../ui';
+import { t, msg } from '../../lib/i18n';
 
 export type JoinError = 'invalid' | 'not_found' | 'closed';
 
@@ -33,8 +34,8 @@ interface JoinStepProps {
 }
 
 const ERROR_TEXT: Record<Exclude<JoinError, 'closed'>, string> = {
-  invalid: 'Isso não parece um código de sala. Cole o link que te mandaram ou só o código de 8 caracteres.',
-  not_found: 'Não achamos essa sala. Confira o código ou peça um link novo pra quem criou.',
+  invalid: msg('Isso não parece um código de sala. Cole o link que te mandaram ou só o código de 8 caracteres.'),
+  not_found: msg('Não achamos essa sala. Confira o código ou peça um link novo pra quem criou.'),
 };
 
 export const JoinStep: React.FC<JoinStepProps> = ({ initialCode = '', initialError = null, onBack, onJoin, onCreate }) => {
@@ -70,9 +71,9 @@ export const JoinStep: React.FC<JoinStepProps> = ({ initialCode = '', initialErr
         <span className="w-14 h-14 rounded-2xl bg-lu-error/12 text-lu-error flex items-center justify-center">
           <CircleX size={28} />
         </span>
-        <h1 className="mt-4 mb-0 text-[22px] sm:text-[24px] font-semibold tracking-[-0.02em] leading-tight">Essa sala foi encerrada</h1>
+        <h1 className="mt-4 mb-0 text-[22px] sm:text-[24px] font-semibold tracking-[-0.02em] leading-tight">{t('Essa sala foi encerrada')}</h1>
         <p className="mt-1.5 mb-2 text-[14px] text-lu-muted">
-          O Host fechou a sala <strong className="text-lu-text font-semibold tracking-[0.08em]">{code}</strong>. Peça um link novo ou crie a sua.
+          {t('O Host fechou a sala')} <strong className="text-lu-text font-semibold tracking-[0.08em]">{code}</strong>{t('. Peça um link novo ou crie a sua.')}
         </p>
         <div className="flex flex-col sm:flex-row gap-3 mt-5 w-full">
           <GhostButton
@@ -83,11 +84,11 @@ export const JoinStep: React.FC<JoinStepProps> = ({ initialCode = '', initialErr
             }}
           >
             <LogIn size={18} />
-            <span>Entrar em outra</span>
+            <span>{t('Entrar em outra')}</span>
           </GhostButton>
           <PrimaryButton className="flex-1" onClick={onCreate}>
             <Plus size={18} />
-            <span>Criar uma sala</span>
+            <span>{t('Criar uma sala')}</span>
           </PrimaryButton>
         </div>
       </HomeCard>
@@ -96,14 +97,14 @@ export const JoinStep: React.FC<JoinStepProps> = ({ initialCode = '', initialErr
 
   return (
     <HomeCard>
-      <HomeCardTitle icon={<LogIn size={20} />} title="Entrar na sala" description="Quem criou a sala te passa o link ou o código." />
+      <HomeCardTitle icon={<LogIn size={20} />} title={t('Entrar na sala')} description={t('Quem criou a sala te passa o link ou o código.')} />
       <form
         onSubmit={(e) => {
           e.preventDefault();
           void submit();
         }}
       >
-        <FieldLabel htmlFor="room-code">Link ou código da sala</FieldLabel>
+        <FieldLabel htmlFor="room-code">{t('Link ou código da sala')}</FieldLabel>
         <BigInput
           id="room-code"
           autoFocus
@@ -126,20 +127,20 @@ export const JoinStep: React.FC<JoinStepProps> = ({ initialCode = '', initialErr
             <span className="flex mt-px">
               <CircleAlert size={16} />
             </span>
-            <span>{ERROR_TEXT[error]}</span>
+            <span>{t(ERROR_TEXT[error])}</span>
           </Hint>
         ) : (
-          <Hint id="room-code-msg">Cole o link da sala ou só o código de 8 caracteres.</Hint>
+          <Hint id="room-code-msg">{t('Cole o link da sala ou só o código de 8 caracteres.')}</Hint>
         )}
 
         <CardFooter>
           <TextButton onClick={onBack} className="!pl-2">
             <ChevronLeft size={18} />
-            <span>Voltar</span>
+            <span>{t('Voltar')}</span>
           </TextButton>
           <PrimaryButton type="submit" disabled={!value.trim() || checking}>
             {checking ? <Spinner size={18} /> : <ArrowRight size={18} />}
-            <span>{error ? 'Tentar de novo' : 'Entrar'}</span>
+            <span>{error ? t('Tentar de novo') : t('Entrar')}</span>
           </PrimaryButton>
         </CardFooter>
       </form>

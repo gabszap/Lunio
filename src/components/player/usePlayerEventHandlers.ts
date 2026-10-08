@@ -5,6 +5,7 @@ import { formatTime } from '../../lib/chapters';
 import { logger } from '../../lib/logger';
 import { sessionManager } from '../../lib/session';
 import { getVideoElement } from './dom';
+import { t } from '../../lib/i18n';
 
 /** Callbacks do `<MediaPlayer>` (Vidstack): pronto para tocar, tempo, play/pause, duração, buffer e erros de stream. */
 export function usePlayerEventHandlers(args: {
@@ -184,13 +185,13 @@ export function usePlayerEventHandlers(args: {
     const errMsg = err?.message || err?.detail?.message || 'Failed to load resource.';
     const errCode = err?.code || err?.detail?.code || 4;
 
-    let title = 'Erro ao Carregar Stream';
-    let hint = 'O navegador não conseguiu abrir o arquivo de vídeo. Verifique se o link possui suporte a CORS e se o formato é aceito pelo navegador.';
+    let title = t('Erro ao Carregar Stream');
+    let hint = t('O navegador não conseguiu abrir o arquivo de vídeo. Verifique se o link possui suporte a CORS e se o formato é aceito pelo navegador.');
 
     const srcLower = source.src.toLowerCase();
     if (srcLower.includes('torrentio.strem.fun') && !resolvedStreamUrl.includes('/api/proxy')) {
-      title = 'Redirecionando Torrentio via Proxy...';
-      hint = 'O stream está sendo roteado pelo backend local para streaming acelerado.';
+      title = t('Redirecionando Torrentio via Proxy...');
+      hint = t('O stream está sendo roteado pelo backend local para streaming acelerado.');
       setResolvedStreamUrl(`/api/proxy?url=${encodeURIComponent(source.src)}#.mp4`);
       return;
     }

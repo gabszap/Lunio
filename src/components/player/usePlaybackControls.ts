@@ -7,6 +7,7 @@ import { logger } from '../../lib/logger';
 import { sessionManager } from '../../lib/session';
 import { syncManager } from '../../lib/sync';
 import { getVideoElement } from './dom';
+import { t } from '../../lib/i18n';
 
 /**
  * Ações do usuário sobre a reprodução: play/pause, seek (nativo, por buffer ou refazendo o remux), volume, mudo,
@@ -78,7 +79,7 @@ export function usePlaybackControls(args: {
   // Control handlers
   const handlePlayToggle = () => {
     if (syncStatus.isConnected && !syncStatus.isHost) {
-      setSyncToast('A reprodução é controlada pelo Host da sala');
+      setSyncToast(t('A reprodução é controlada pelo Host da sala'));
       setTimeout(() => setSyncToast(null), 2500);
       return;
     }

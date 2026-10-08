@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { Dot, GhostButton, HomeCard, Spinner } from '../ui';
+import { t } from '../../lib/i18n';
 
 interface Check {
   id: string;
@@ -20,26 +21,26 @@ interface ToolsReport {
   python: { found: boolean; version?: string; tooOld: boolean };
 }
 
-function toolChecks(t: ToolsReport | null): Check[] {
-  if (!t) return [];
+function toolChecks(tools: ToolsReport | null): Check[] {
+  if (!tools) return [];
   return [
     {
       id: 'ffmpeg',
       label: 'FFmpeg',
-      detail: t.ffmpeg.found
-        ? `Encontrado${t.ffmpeg.version ? ` (${t.ffmpeg.version})` : ''}. Faixas, troca de áudio e legendas disponíveis.`
-        : 'Não encontrado. Troca de áudio e leitura de faixas não vão funcionar.',
-      state: t.ffmpeg.found ? 'ok' : 'down',
+      detail: tools.ffmpeg.found
+        ? t('Encontrado{version}. Faixas, troca de áudio e legendas disponíveis.', { version: tools.ffmpeg.version ? ` (${tools.ffmpeg.version})` : '' })
+        : t('Não encontrado. Troca de áudio e leitura de faixas não vão funcionar.'),
+      state: tools.ffmpeg.found ? 'ok' : 'down',
     },
     {
       id: 'python',
       label: 'Python',
-      detail: t.python.found
-        ? `Encontrado${t.python.version ? ` (${t.python.version})` : ''}. Extração rápida de legendas disponível.`
-        : t.python.tooOld
-        ? `Versão ${t.python.version} é antiga (precisa de 3.10+). Legendas usam o FFmpeg, mais lento.`
-        : 'Não encontrado. Legendas usam o FFmpeg, mais lento.',
-      state: t.python.found ? 'ok' : 'warn',
+      detail: tools.python.found
+        ? t('Encontrado{version}. Extração rápida de legendas disponível.', { version: tools.python.version ? ` (${tools.python.version})` : '' })
+        : tools.python.tooOld
+        ? t('Versão {version} é antiga (precisa de 3.10+). Legendas usam o FFmpeg, mais lento.', { version: tools.python.version ?? '' })
+        : t('Não encontrado. Legendas usam o FFmpeg, mais lento.'),
+      state: tools.python.found ? 'ok' : 'warn',
     },
   ];
 }
@@ -61,8 +62,8 @@ export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
   const run = useCallback(async () => {
     setRunning(true);
     setChecks([
-      { id: 'server', label: 'Servidor do Lunio', detail: 'Salas, proxy de mídia e envios', state: 'checking' },
-      { id: 'catalog', label: 'Catálogo', detail: 'Metadados de filmes e séries (Cinemeta)', state: 'checking' },
+      { id: 'server', label: t('Servidor do Lunio'), detail: t('Salas, proxy de mídia e envios'), state: 'checking' },
+      { id: 'catalog', label: t('Catálogo'), detail: t('Metadados de filmes e séries (Cinemeta)'), state: 'checking' },
     ]);
     const [server, catalog, tools] = await Promise.all([
       timed('/api/room?id=STATUS'),
@@ -74,15 +75,15 @@ export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
     setChecks([
       {
         id: 'server',
-        label: 'Servidor do Lunio',
-        detail: server.ok ? 'Salas, proxy de mídia e envios respondendo' : 'Sem resposta. Salas e envios não vão funcionar.',
+        label: t('Servidor do Lunio'),
+        detail: server.ok ? t('Salas, proxy de mídia e envios respondendo') : t('Sem resposta. Salas e envios não vão funcionar.'),
         state: server.ok ? 'ok' : 'down',
         ms: server.ms,
       },
       {
         id: 'catalog',
-        label: 'Catálogo',
-        detail: catalog.ok ? 'Cinemeta respondendo' : 'Cinemeta fora do ar. Links de stream continuam funcionando.',
+        label: t('Catálogo'),
+        detail: catalog.ok ? t('Cinemeta respondendo') : t('Cinemeta fora do ar. Links de stream continuam funcionando.'),
         state: catalog.ok ? 'ok' : 'warn',
         ms: catalog.ms,
       },
@@ -99,16 +100,16 @@ export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
     ...checks,
     {
       id: 'room',
-      label: 'Sala atual',
+      label: t('Sala atual'),
       detail: room.connected
-        ? `${room.code} · ${room.members} ${room.members === 1 ? 'pessoa' : 'pessoas'} · você é ${room.isHost ? 'o Host' : 'espectador'}`
-        : 'Nenhuma. Você está no Modo Solo.',
+        ? t('{code} · {n} {people} · você é {role}', { code: room.code, n: room.members, people: room.members === 1 ? t('pessoa') : t('pessoas'), role: room.isHost ? t('o Host') : t('espectador') })
+        : t('Nenhuma. Você está no Modo Solo.'),
       state: room.connected ? 'ok' : 'warn',
     },
     {
       id: 'env',
-      label: 'Ambiente',
-      detail: environment === 'discord' ? 'Discord Activity' : 'Navegador (Web Standalone)',
+      label: t('Ambiente'),
+      detail: environment === 'discord' ? 'Discord Activity' : t('Navegador (Web Standalone)'),
       state: 'ok',
     },
   ];
@@ -117,12 +118,12 @@ export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
     <HomeCard>
       <div className="flex items-start justify-between gap-4 mb-5">
         <div>
-          <h1 className="m-0 text-[22px] sm:text-[24px] font-semibold tracking-[-0.02em] leading-tight">Status</h1>
-          <p className="mt-1.5 mb-0 text-[14px] text-lu-muted">O que está de pé agora.</p>
+          <h1 className="m-0 text-[22px] sm:text-[24px] font-semibold tracking-[-0.02em] leading-tight">{t('Status')}</h1>
+          <p className="mt-1.5 mb-0 text-[14px] text-lu-muted">{t('O que está de pé agora.')}</p>
         </div>
-        <GhostButton onClick={run} disabled={running} aria-label="Verificar de novo">
+        <GhostButton onClick={run} disabled={running} aria-label={t('Verificar de novo')}>
           <RefreshCw size={16} className={running ? 'animate-lu-spin' : ''} />
-          <span className="hidden sm:inline">Verificar de novo</span>
+          <span className="hidden sm:inline">{t('Verificar de novo')}</span>
         </GhostButton>
       </div>
 
@@ -138,7 +139,7 @@ export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
             </span>
             <span className="flex-1 min-w-0">
               <span className="block text-[14px] font-semibold">{c.label}</span>
-              <span className="block text-[13px] text-lu-muted">{c.state === 'checking' ? 'Verificando…' : c.detail}</span>
+              <span className="block text-[13px] text-lu-muted">{c.state === 'checking' ? t('Verificando…') : c.detail}</span>
             </span>
             {c.ms !== undefined && c.state !== 'checking' && (
               <span className="text-[12px] tabular text-lu-muted flex-none">{c.ms} ms</span>

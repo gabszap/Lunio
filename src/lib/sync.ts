@@ -1,6 +1,7 @@
 import { discordManager } from './discord';
 import { clearRoomToken, setRoomToken } from './access';
 import { logger } from './logger';
+import { t } from './/i18n';
 import type {
   ClientMessage,
   ServerMessage,
@@ -291,7 +292,7 @@ class SyncManager {
             this.reconnectTimer = null;
           }
           this.reconnectAttempts = 999;
-          const msg = event.code === 4002 ? 'Você foi banido desta sala pelo Host.' : 'Você foi expulso da sala pelo Host.';
+          const msg = event.code === 4002 ? t('Você foi banido desta sala pelo Host.') : t('Você foi expulso da sala pelo Host.');
           for (const listener of this.errorListeners) {
             listener(msg, event.code === 4002 ? 'banned' : 'kicked');
           }

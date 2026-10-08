@@ -1,6 +1,7 @@
 // O SDK (~200 kB) só é baixado quando o app roda dentro de uma Discord Activity
 import type { DiscordSDK } from '@discord/embedded-app-sdk';
 import { logger } from './logger';
+import { t } from './i18n';
 
 export interface DiscordUser {
   id: string;
@@ -83,7 +84,7 @@ class DiscordActivityManager {
       this.state.user = {
         id: 'mock_discord_user',
         username: 'Discord Guest',
-        globalName: 'Convidado Discord',
+        globalName: t('Convidado Discord'),
       };
       this.notify();
       return this.state;
@@ -221,8 +222,8 @@ class DiscordActivityManager {
     const playing = hasTimeline && !pb!.paused;
     const start = playing ? Math.floor(Date.now() / 1000 - pb!.position) : undefined;
 
-    const room = people > 1 ? `Em sala com ${people} pessoas` : 'Sozinho na sala';
-    const state = hasTimeline && pb!.paused ? `Pausado em ${fmtClock(pb!.position)} de ${fmtClock(pb!.duration)} · ${room}` : room;
+    const room = people > 1 ? t('Em sala com {n} pessoas', { n: people }) : t('Sozinho na sala');
+    const state = hasTimeline && pb!.paused ? t('Pausado em {pos} de {dur} · {room}', { pos: fmtClock(pb!.position), dur: fmtClock(pb!.duration), room }) : room;
     const key = JSON.stringify({ title, state, playing, hasTimeline });
     // Tocando: só reenvia se o início calculado mudou (seek/pausa), não a cada tick
     if (key === this.sentPresence.key && (!playing || Math.abs((start ?? 0) - (this.sentPresence.start ?? 0)) <= 3)) return;
@@ -231,7 +232,7 @@ class DiscordActivityManager {
     const timestamps = playing ? { start: start!, end: start! + Math.floor(pb!.duration) } : { start: this.presenceStart };
     const activity = {
       type: 0,
-      details: title ? `Assistindo ${title}`.slice(0, 128) : 'Escolhendo um vídeo',
+      details: title ? t('Assistindo {title}', { title }).slice(0, 128) : t('Escolhendo um vídeo'),
       state: state.slice(0, 128),
       timestamps,
     };

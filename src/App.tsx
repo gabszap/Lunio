@@ -28,6 +28,7 @@ import { discordManager, DiscordContextState } from './lib/discord';
 import { syncManager } from './lib/sync';
 import { generateRoomCode, roomCodeFrom } from './lib/roomCode';
 import { RecentStream, loadRecentStreams, pushRecentStream, saveRecentStreams } from './lib/recent';
+import { t, useLang } from './lib/i18n';
 
 type HomeStep = 'menu' | 'join' | SourceStep;
 
@@ -55,6 +56,8 @@ function setRoomInUrl(code: string | null) {
 }
 
 export default function App() {
+  // Trocar o idioma remonta a árvore inteira (a troca só existe na Home, sem vídeo tocando)
+  const lang = useLang();
   const [view, setView] = useState<'home' | 'player'>('home');
   const [homeTab, setHomeTab] = useState<HomeTab>('room');
   const [homeStep, setHomeStep] = useState<HomeStep>('menu');
@@ -146,7 +149,7 @@ export default function App() {
     (code: string) => {
       withName(
         () => joinRoom(code),
-        'Entrar na sala',
+        t('Entrar na sala'),
         () => {
           setRoomInUrl(null);
           goHome('room');
@@ -254,20 +257,20 @@ export default function App() {
         setKickBanAlert(
           kickedFromInside
             ? {
-                title: 'Você foi banido da sala',
-                message: 'O Host desta sala baniu você permanentemente. Você voltou para a tela inicial.',
+                title: t('Você foi banido da sala'),
+                message: t('O Host desta sala baniu você permanentemente. Você voltou para a tela inicial.'),
                 type: 'banned',
               }
             : {
-                title: 'Você está banido desta sala',
-                message: 'O Host desta sala baniu você, então não dá pra entrar nela de novo.',
+                title: t('Você está banido desta sala'),
+                message: t('O Host desta sala baniu você, então não dá pra entrar nela de novo.'),
                 type: 'banned',
               }
         );
       } else if (code === 'kicked') {
         setKickBanAlert({
-          title: 'Você foi expulso da sala',
-          message: 'O Host removeu você da sala. Você voltou para a tela inicial.',
+          title: t('Você foi expulso da sala'),
+          message: t('O Host removeu você da sala. Você voltou para a tela inicial.'),
           type: 'kicked',
         });
       }
@@ -315,7 +318,7 @@ export default function App() {
 
   const commitMedia = (payload: MediaPayload, mode: CommitMode, options: CommitOptions = {}, named = false) => {
     if (mode === 'room' && !named && !isHostingRoom()) {
-      withName(() => commitMedia(payload, mode, options, true), 'Criar sala');
+      withName(() => commitMedia(payload, mode, options, true), t('Criar sala'));
       return;
     }
     const merged: MediaPayload = { ...payload, subtitles: [...(payload.subtitles || []), ...pendingSubtitles] };
@@ -448,7 +451,7 @@ export default function App() {
           />
         );
       case 'upload':
-        return <UploadStep onBack={backToMenu} onCommit={commitMedia} ensureRoom={ensureRoom} requireName={(cb) => (isHostingRoom() ? cb() : withName(cb, 'Criar sala'))} onPickSource={setHomeStep} />;
+        return <UploadStep onBack={backToMenu} onCommit={commitMedia} ensureRoom={ensureRoom} requireName={(cb) => (isHostingRoom() ? cb() : withName(cb, t('Criar sala')))} onPickSource={setHomeStep} />;
       case 'youtube':
         return <YouTubeStep onBack={backToMenu} onCommit={commitMedia} />;
       case 'drive':
@@ -471,7 +474,7 @@ export default function App() {
   };
 
   return (
-    <>
+    <React.Fragment key={lang}>
       {view === 'home' ? (
         <HomeLayout
           tab={homeTab}
@@ -579,9 +582,9 @@ export default function App() {
           <p className="mt-2 mb-0 text-[14px] text-lu-muted">{kickBanAlert?.message}</p>
         </div>
         <PrimaryButton size="lg" block className="mt-1" onClick={() => setKickBanAlert(null)}>
-          Entendido
+          {t('Entendido')}
         </PrimaryButton>
       </Modal>
-    </>
+    </React.Fragment>
   );
 }

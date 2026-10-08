@@ -1,0 +1,12 @@
+:root{--bg:#080a0f;--bg2:#10131a;--accent:#a78bfa;--strong:#7c3aed;--blue:#38bdf8;--text:#f4f7fa;--muted:#9ba4b2}
+*{box-sizing:border-box;margin:0}
+html,body{width:1024px;height:576px;overflow:hidden;background:var(--bg);font-family:Inter,"Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;color:var(--text)}
+.stage{position:relative;width:1024px;height:576px;overflow:hidden;
+ background:radial-gradient(60% 80% at 0% 0%,rgba(124,58,237,.38),transparent 70%),radial-gradient(60% 80% at 100% 100%,rgba(56,189,248,.28),transparent 70%),radial-gradient(50% 60% at 100% 0%,rgba(124,58,237,.16),transparent 70%),var(--bg)}
+.grid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);background-size:32px 32px;-webkit-mask-image:radial-gradient(70% 90% at 50% 50%,#000,transparent);mask-image:radial-gradient(70% 90% at 50% 50%,#000,transparent)}
+.card{position:absolute;border-radius:14px;background:linear-gradient(160deg,#1e2430,#12161e);border:1px solid rgba(255,255,255,.09);box-shadow:0 20px 50px rgba(0,0,0,.5)}
+.card .bar{position:absolute;left:12px;right:12px;bottom:12px;height:5px;border-radius:3px;background:rgba(255,255,255,.1)}
+.card .bar i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--accent),var(--blue))}
+.card .play{position:absolute;left:50%;top:44%;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;background:rgba(167,139,250,.2);display:grid;place-items:center}
+.card .play:after{content:"";border-left:11px solid var(--accent);border-top:7px solid transparent;border-bottom:7px solid transparent;margin-left:3px}
+.avatar{position:absolute;width:44px;height:44px;border-radius:50%;border:3px solid var(--bg);box-shadow:0 0 0 2px rgba(167,139,250,.5)}

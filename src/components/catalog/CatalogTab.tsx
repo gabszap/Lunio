@@ -14,6 +14,7 @@ import {
   toggleMyList,
 } from '../../lib/catalog';
 import { GhostButton, IconButton, PillTabs, PrimaryButton, Spinner, TextButton, cx } from '../ui';
+import { t } from '../../lib/i18n';
 
 export interface WatchIntent {
   title: string;
@@ -73,7 +74,7 @@ const PosterCard: React.FC<{ item: CatalogItem; onOpen: (item: CatalogItem) => v
     <span className="flex flex-col min-w-0 w-full">
       <span className="text-[13px] font-semibold text-lu-text truncate">{item.name}</span>
       <span className="text-[12px] text-lu-muted">
-        {showType ? `${item.type === 'series' ? 'Série' : 'Filme'}${item.year ? ` · ${item.year}` : ''}` : item.year || ' '}
+        {showType ? `${item.type === 'series' ? t('Série') : t('Filme')}${item.year ? ` · ${item.year}` : ''}` : item.year || ' '}
       </span>
     </span>
   </button>
@@ -116,20 +117,20 @@ const Row: React.FC<{ title: string; load: () => Promise<CatalogItem[]>; onOpen:
       <div className="flex items-center justify-between h-11">
         <h2 className="m-0 text-[18px] font-semibold tracking-[-0.01em]">{title}</h2>
         <div className="hidden sm:flex">
-          <IconButton label="Anterior" onClick={() => scrollBy(-1)}>
+          <IconButton label={t('Anterior')} onClick={() => scrollBy(-1)}>
             <ChevronLeft size={20} />
           </IconButton>
-          <IconButton label="Próximo" onClick={() => scrollBy(1)}>
+          <IconButton label={t('Próximo')} onClick={() => scrollBy(1)}>
             <ChevronRight size={20} />
           </IconButton>
         </div>
       </div>
       {error ? (
         <div className="flex items-center gap-3 h-[120px] text-[14px] text-lu-muted">
-          Não deu pra carregar essa lista.
+          {t('Não deu pra carregar essa lista.')}
           <TextButton tone="accent" size="sm" onClick={fetchItems}>
             <RefreshCw size={14} />
-            Tentar de novo
+            {t('Tentar de novo')}
           </TextButton>
         </div>
       ) : (
@@ -185,8 +186,8 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
 
   const metaLine = [
     data.year,
-    isSeries && seasons.length ? `${seasons.length} ${seasons.length === 1 ? 'temporada' : 'temporadas'}` : data.runtime,
-    data.genres.slice(0, 3).map((g) => GENRES_PT[g] || g).join(', '),
+    isSeries && seasons.length ? `${seasons.length} ${seasons.length === 1 ? t('temporada') : t('temporadas')}` : data.runtime,
+    data.genres.slice(0, 3).map((g) => t(GENRES_PT[g] || g)).join(', '),
   ].filter(Boolean);
 
   return (
@@ -210,14 +211,14 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
         <div className="relative">
           <TextButton onClick={onBack} className="!pl-2 -ml-2">
             <ChevronLeft size={18} />
-            <span>Catálogo</span>
+            <span>{t('Catálogo')}</span>
           </TextButton>
           <div className="flex flex-col sm:flex-row gap-6 sm:gap-10 mt-4 sm:items-end">
             <Poster item={data} iconSize={48} className="w-[160px] sm:w-[240px] aspect-[2/3]" />
             <div className="flex-1 min-w-0 flex flex-col gap-3.5 sm:pb-2">
               <span className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-lu-tint text-lu-accent text-[12px] font-semibold self-start">
                 {isSeries ? <Tv size={14} /> : <Film size={14} />}
-                {isSeries ? 'Série' : 'Filme'}
+                {isSeries ? t('Série') : t('Filme')}
               </span>
               <h1 className="m-0 text-[32px] sm:text-[48px] font-bold tracking-[-0.03em] leading-[1.05]">{data.name}</h1>
               {metaLine.length > 0 && (
@@ -241,23 +242,23 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
               ) : !meta && !error ? (
                 <span className="flex items-center gap-2 text-[14px] text-lu-muted">
                   <Spinner size={16} className="text-lu-accent" />
-                  Carregando detalhes…
+                  {t('Carregando detalhes…')}
                 </span>
               ) : null}
-              {error && <p className="m-0 text-[14px] text-lu-error">Não deu pra carregar os detalhes desse título.</p>}
+              {error && <p className="m-0 text-[14px] text-lu-error">{t('Não deu pra carregar os detalhes desse título.')}</p>}
               <div className="flex flex-wrap gap-3 mt-2">
                 <PrimaryButton size="lg" onClick={() => watchTitle(false)}>
                   <Users size={18} />
-                  <span>Assistir com amigos</span>
+                  <span>{t('Assistir com amigos')}</span>
                 </PrimaryButton>
                 <GhostButton size="lg" onClick={() => watchTitle(true)}>
                   <Play size={16} />
-                  <span>Assistir sozinho</span>
+                  <span>{t('Assistir sozinho')}</span>
                 </GhostButton>
                 <GhostButton
                   size="lg"
-                  aria-label={saved ? 'Tirar da minha lista' : 'Salvar na lista'}
-                  title={saved ? 'Tirar da minha lista' : 'Salvar na lista'}
+                  aria-label={saved ? t('Tirar da minha lista') : t('Salvar na lista')}
+                  title={saved ? t('Tirar da minha lista') : t('Salvar na lista')}
                   aria-pressed={saved}
                   className={cx('!w-12 !px-0', saved && '!text-lu-accent')}
                   onClick={() => setSaved(toggleMyList(data))}
@@ -271,16 +272,16 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
       </section>
 
       {isSeries && seasons.length > 0 && (
-        <section aria-label="Episódios" className="px-4 sm:px-12 pt-2 flex flex-col gap-4">
+        <section aria-label={t('Episódios')} className="px-4 sm:px-12 pt-2 flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="m-0 text-[18px] font-semibold">Episódios</h2>
+            <h2 className="m-0 text-[18px] font-semibold">{t('Episódios')}</h2>
             <div className="max-w-full overflow-x-auto no-scrollbar">
               <PillTabs
-                label="Temporadas"
+                label={t('Temporadas')}
                 size="sm"
                 value={String(season)}
                 onChange={(v) => setSeason(Number(v))}
-                options={seasons.map((s) => ({ value: String(s), label: `Temporada ${s}` }))}
+                options={seasons.map((s) => ({ value: String(s), label: t('Temporada {s}', { s }) }))}
               />
             </div>
           </div>
@@ -380,12 +381,12 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ onWatch, onCreateRoom })
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Busque um filme ou série…"
-            aria-label="Buscar filmes e séries"
+            placeholder={t('Busque um filme ou série…')}
+            aria-label={t('Buscar filmes e séries')}
             className="flex-1 min-w-0 h-11 border-0 outline-0 bg-transparent text-lu-text font-[inherit] text-[15px] focus-visible:outline-none [&::-webkit-search-cancel-button]:hidden"
           />
           {query && (
-            <IconButton label="Limpar busca" size={40} tone="muted" onClick={() => setQuery('')}>
+            <IconButton label={t('Limpar busca')} size={40} tone="muted" onClick={() => setQuery('')}>
               <X size={16} />
             </IconButton>
           )}
@@ -396,7 +397,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ onWatch, onCreateRoom })
         results === null && !searchError ? (
           <div className="flex items-center justify-center gap-2 py-16 text-lu-muted">
             <Spinner size={18} className="text-lu-accent" />
-            Buscando…
+            {t('Buscando…')}
           </div>
         ) : searchError || (results && results.length === 0) ? (
           <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
@@ -404,21 +405,21 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ onWatch, onCreateRoom })
               <SearchX size={32} />
             </span>
             <h1 className="mt-2 mb-0 text-[22px] font-semibold tracking-[-0.02em]">
-              {searchError ? 'A busca não respondeu' : `Nada encontrado pra “${debounced}”`}
+              {searchError ? t('A busca não respondeu') : t('Nada encontrado pra “{debounced}”', { debounced })}
             </h1>
             <p className="m-0 max-w-[440px] text-[14px] text-lu-muted">
               {searchError
-                ? 'O catálogo está fora do ar agora. Se você já tem o vídeo, dá pra criar a sala direto.'
-                : 'Confira a ortografia ou tente o nome original. Se você já tem o vídeo, dá pra criar a sala direto.'}
+                ? t('O catálogo está fora do ar agora. Se você já tem o vídeo, dá pra criar a sala direto.')
+                : t('Confira a ortografia ou tente o nome original. Se você já tem o vídeo, dá pra criar a sala direto.')}
             </p>
             <div className="flex flex-wrap justify-center gap-3 mt-3">
               <GhostButton onClick={() => setQuery('')}>
                 <X size={16} />
-                <span>Limpar busca</span>
+                <span>{t('Limpar busca')}</span>
               </GhostButton>
               <PrimaryButton onClick={onCreateRoom}>
                 <Users size={18} />
-                <span>Criar sala com um vídeo</span>
+                <span>{t('Criar sala com um vídeo')}</span>
               </PrimaryButton>
             </div>
           </div>
@@ -427,19 +428,19 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ onWatch, onCreateRoom })
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="m-0 text-[14px] text-lu-muted">
                 <strong className="text-lu-text font-semibold">
-                  {results!.length} {results!.length === 1 ? 'resultado' : 'resultados'}
+                  {results!.length} {results!.length === 1 ? t('resultado') : t('resultados')}
                 </strong>{' '}
                 pra “{debounced}”
               </p>
               <PillTabs
-                label="Filtrar"
+                label={t('Filtrar')}
                 size="sm"
                 value={filter}
                 onChange={setFilter}
                 options={[
-                  { value: 'all' as Filter, label: 'Tudo' },
-                  { value: 'movie' as Filter, label: `Filmes · ${movies.length}` },
-                  { value: 'series' as Filter, label: `Séries · ${series.length}` },
+                  { value: 'all' as Filter, label: t('Tudo') },
+                  { value: 'movie' as Filter, label: t('Filmes · {length}', { length: movies.length }) },
+                  { value: 'series' as Filter, label: t('Séries · {length}', { length: series.length }) },
                 ]}
               />
             </div>
@@ -452,10 +453,10 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ onWatch, onCreateRoom })
         )
       ) : (
         <>
-          {myList.length > 0 && <Row title="Minha lista" load={async () => myList} items={myList} onOpen={setSelected} />}
-          <Row title="Filmes populares" load={() => fetchTop('movie')} onOpen={setSelected} />
-          <Row title="Séries populares" load={() => fetchTop('series')} onOpen={setSelected} />
-          <Row title="Ação" load={() => fetchTop('movie', 'Action')} onOpen={setSelected} />
+          {myList.length > 0 && <Row title={t('Minha lista')} load={async () => myList} items={myList} onOpen={setSelected} />}
+          <Row title={t('Filmes populares')} load={() => fetchTop('movie')} onOpen={setSelected} />
+          <Row title={t('Séries populares')} load={() => fetchTop('series')} onOpen={setSelected} />
+          <Row title={t('Ação')} load={() => fetchTop('movie', 'Action')} onOpen={setSelected} />
         </>
       )}
     </div>

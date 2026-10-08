@@ -3,32 +3,33 @@ import { Check, Keyboard, Share2, Users } from 'lucide-react';
 import { formatRoomUrl } from '../lib/roomCode';
 import { copyText } from '../lib/recent';
 import { Dot, IconButton, Kbd, Logo, cx, useDismiss } from './ui';
+import { t, msg } from '../lib/i18n';
 
 const SHORTCUTS: Array<{ group: string; items: Array<{ label: string; keys: string[]; accent?: boolean }> }> = [
   {
-    group: 'Reprodução',
+    group: msg('Reprodução'),
     items: [
-      { label: 'Play / Pause', keys: ['Espaço', 'K'] },
-      { label: 'Voltar 10 s', keys: ['J', '←'] },
-      { label: 'Avançar 10 s', keys: ['L', '→'] },
-      { label: 'Pular abertura (+90 s)', keys: ['N', 'O'], accent: true },
+      { label: msg('Play / Pause'), keys: [msg('Espaço'), 'K'] },
+      { label: msg('Voltar 10 s'), keys: ['J', '←'] },
+      { label: msg('Avançar 10 s'), keys: ['L', '→'] },
+      { label: msg('Pular abertura (+90 s)'), keys: ['N', 'O'], accent: true },
     ],
   },
   {
-    group: 'Áudio e legendas',
+    group: msg('Áudio e legendas'),
     items: [
-      { label: 'Volume ±5%', keys: ['↑', '↓'] },
+      { label: msg('Volume ±5%'), keys: ['↑', '↓'] },
       { label: 'Silenciar', keys: ['M'] },
-      { label: 'Alternar legendas', keys: ['C'] },
-      { label: 'Sincronia da legenda ±50 ms', keys: ['G', 'H'] },
-      { label: 'Atraso do áudio ±50 ms', keys: ['[', ']'] },
+      { label: msg('Alternar legendas'), keys: ['C'] },
+      { label: msg('Sincronia da legenda ±50 ms'), keys: ['G', 'H'] },
+      { label: msg('Atraso do áudio ±50 ms'), keys: ['[', ']'] },
     ],
   },
   {
     group: 'Vídeo',
     items: [
-      { label: 'Ajuste de tela', keys: ['Z'] },
-      { label: 'Tela cheia', keys: ['F'] },
+      { label: msg('Ajuste de tela'), keys: ['Z'] },
+      { label: msg('Tela cheia'), keys: ['F'] },
       { label: 'Watch Party', keys: ['W'] },
     ],
   },
@@ -41,27 +42,27 @@ const ShortcutsMenu: React.FC = () => {
 
   return (
     <div ref={ref} className="relative hidden sm:block">
-      <IconButton label="Atalhos do teclado" size={40} tone="muted" active={open} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+      <IconButton label={t('Atalhos do teclado')} size={40} tone="muted" active={open} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <Keyboard size={18} />
       </IconButton>
       {open && (
         <div
           role="dialog"
-          aria-label="Atalhos do teclado"
+          aria-label={t('Atalhos do teclado')}
           className="absolute right-0 top-[calc(100%+8px)] z-50 w-[440px] max-w-[calc(100vw-32px)] box-border p-2.5 rounded-[14px] bg-lu-elevated border border-lu-border shadow-[0_16px_40px_rgba(0,0,0,0.5)]"
         >
-          <div className="px-2.5 pt-2 pb-1 text-[14px] font-semibold">Atalhos do teclado</div>
+          <div className="px-2.5 pt-2 pb-1 text-[14px] font-semibold">{t('Atalhos do teclado')}</div>
           {SHORTCUTS.map((section, i) => (
             <React.Fragment key={section.group}>
               {i > 0 && <div className="h-px bg-lu-border mx-2.5" />}
               <div className="py-1.5">
-                <div className="px-2.5 py-1.5 text-[12px] font-medium text-lu-muted">{section.group}</div>
+                <div className="px-2.5 py-1.5 text-[12px] font-medium text-lu-muted">{t(section.group)}</div>
                 {section.items.map((item) => (
                   <div key={item.label} className="flex items-center justify-between gap-4 h-9 px-2.5">
-                    <span className={cx('text-[14px]', item.accent ? 'text-lu-accent' : 'text-lu-text')}>{item.label}</span>
+                    <span className={cx('text-[14px]', item.accent ? 'text-lu-accent' : 'text-lu-text')}>{t(item.label)}</span>
                     <span className="flex gap-1">
                       {item.keys.map((k) => (
-                        <Kbd key={k}>{k}</Kbd>
+                        <Kbd key={k}>{t(k)}</Kbd>
                       ))}
                     </span>
                   </div>
@@ -106,9 +107,9 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({ onHome, room, environmen
         <div className="min-w-0 hidden md:flex justify-center">
           {room.connected && (
             <div className="flex items-center gap-3 h-11 pl-4 pr-1.5 box-border rounded-[10px] bg-lu-surface border border-lu-border">
-              <span className="text-[12px] text-lu-muted">Sala</span>
+              <span className="text-[12px] text-lu-muted">{t('Sala')}</span>
               {environment === 'discord' ? (
-                <span className="text-[14px] font-semibold pr-3">Canal de voz do Discord</span>
+                <span className="text-[14px] font-semibold pr-3">{t('Canal de voz do Discord')}</span>
               ) : (
                 <span className="text-[14px] font-semibold tracking-[0.14em] tabular">{room.code}</span>
               )}
@@ -119,7 +120,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({ onHome, room, environmen
                 className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-lu-tint text-lu-accent text-[13px] font-semibold hover:bg-lu-accent/20"
               >
                 {copied ? <Check size={14} /> : <Share2 size={14} />}
-                {copied ? 'Link copiado' : 'Compartilhar'}
+                {copied ? t('Link copiado') : t('Compartilhar')}
               </button>
               )}
             </div>
@@ -135,7 +136,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({ onHome, room, environmen
           <button
             type="button"
             onClick={onToggleWatchParty}
-            aria-label={`Watch Party${room.connected ? `, ${room.members} na sala` : ''}${unreadChat ? `, ${unreadChat} mensagens novas` : ''}`}
+            aria-label={`${t('Watch Party')}${room.connected ? t(', {n} na sala', { n: room.members }) : ''}${unreadChat ? t(', {n} mensagens novas', { n: unreadChat }) : ''}`}
             className={cx(
               'relative inline-flex items-center gap-2 h-10 px-3.5 rounded-[10px] text-[13px] font-semibold border transition-colors',
               room.connected
@@ -144,7 +145,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({ onHome, room, environmen
             )}
           >
             <Users size={16} />
-            <span className="hidden sm:inline">Watch Party</span>
+            <span className="hidden sm:inline">{t('Watch Party')}</span>
             {room.connected && <span className="text-[12px] tabular">{room.members}</span>}
             {unreadChat > 0 && (
               <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 box-border rounded-full bg-lu-error text-lu-bg text-[10px] font-bold leading-[18px] text-center">

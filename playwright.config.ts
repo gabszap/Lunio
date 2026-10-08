@@ -16,6 +16,7 @@ export default defineConfig({
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
+    locale: 'pt-BR',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] },

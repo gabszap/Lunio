@@ -1,6 +1,7 @@
 import React from 'react';
 import { Volume2, Volume1, VolumeX } from 'lucide-react';
 import { IconButton } from './ui';
+import { t } from '../lib/i18n';
 
 interface VolumeDisplayProps {
   volume: number; // 0 to 1
@@ -34,7 +35,7 @@ export const VolumeDisplay: React.FC<VolumeDisplayProps> = ({
     <div id="volume-display-container" className="hidden md:flex items-center gap-1">
       <IconButton
         id="btn-volume-mute-toggle"
-        label={muted ? 'Ativar som (M)' : 'Silenciar (M)'}
+        label={muted ? t('Ativar som (M)') : t('Silenciar (M)')}
         disabled={disabled}
         onClick={onMuteToggle}
       >
@@ -46,7 +47,7 @@ export const VolumeDisplay: React.FC<VolumeDisplayProps> = ({
         min="0"
         max="1"
         step="0.01"
-        aria-label="Volume"
+        aria-label={t('Volume')}
         disabled={disabled}
         value={effectiveVolume}
         onChange={handleSliderChange}

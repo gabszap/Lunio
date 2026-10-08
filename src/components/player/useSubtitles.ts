@@ -4,6 +4,7 @@ import type { AudioTrackOption, PlaybackReadiness, ResolvedMediaRef, SubtitleTra
 import { logger } from '../../lib/logger';
 import { subtitleManager, subtitleResolver } from '../../lib/subtitles';
 import { getVideoElement } from './dom';
+import { t } from '../../lib/i18n';
 
 /**
  * Legendas do player: faixas detectadas, a escolhida (local, nunca vai para a sala), preparação (JASSUB/nativa),
@@ -160,11 +161,11 @@ export function useSubtitles(args: {
             }));
             const isRequired = readinessRef.current.selectedSubtitle.required;
             if (isRequired) {
-              let friendlyMessage = err.message || 'Falha ao renderizar a faixa de legenda.';
+              let friendlyMessage = err.message || t('Falha ao renderizar a faixa de legenda.');
               if (err.code === 'BITMAP_NOT_SUPPORTED') {
-                friendlyMessage = 'Formato de legenda baseado em imagem (PGS/VobSub) não é suportado pelo renderizador.';
+                friendlyMessage = t('Formato de legenda baseado em imagem (PGS/VobSub) não é suportado pelo renderizador.');
               } else if (err.code === 'EXTRACTION_FAILED') {
-                friendlyMessage = 'Não foi possível extrair a legenda embutida do arquivo.';
+                friendlyMessage = t('Não foi possível extrair a legenda embutida do arquivo.');
               }
               setSubtitleFailurePrompt({
                 track: activeSubtitle,
@@ -228,7 +229,7 @@ export function useSubtitles(args: {
         prev
           ? {
               ...prev,
-              error: 'Nenhuma legenda compatível pôde ser carregada.',
+              error: t('Nenhuma legenda compatível pôde ser carregada.'),
             }
           : null
       );
