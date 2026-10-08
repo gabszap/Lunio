@@ -102,6 +102,11 @@ class DiscordActivityManager {
         { prefix: '/.proxy/api', target: `${currentOrigin}/api` },
         { prefix: '/ws', target: `${currentOrigin}/ws` },
         { prefix: '/.proxy/ws', target: `${currentOrigin}/ws` },
+        // Hosts externos do catálogo (Cinemeta e imagens): dentro da Activity só passam por mapeamento de URL.
+        // Cada um precisa existir também em Developer Portal > Activities > URL Mappings, com o mesmo prefixo.
+        { prefix: '/cinemeta', target: 'v3-cinemeta.strem.io' },
+        { prefix: '/metahub', target: 'images.metahub.space' },
+        { prefix: '/metahub-ep', target: 'episodes.metahub.space' },
       ], {
         patchFetch: true,
         patchWebSocket: true,

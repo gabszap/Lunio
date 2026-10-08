@@ -105,7 +105,12 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({ onHome, room, environmen
           {room.connected && (
             <div className="flex items-center gap-3 h-11 pl-4 pr-1.5 box-border rounded-[10px] bg-lu-surface border border-lu-border">
               <span className="text-[12px] text-lu-muted">Sala</span>
-              <span className="text-[14px] font-semibold tracking-[0.14em] tabular">{room.code}</span>
+              {environment === 'discord' ? (
+                <span className="text-[14px] font-semibold pr-3">Canal de voz do Discord</span>
+              ) : (
+                <span className="text-[14px] font-semibold tracking-[0.14em] tabular">{room.code}</span>
+              )}
+              {environment !== 'discord' && (
               <button
                 type="button"
                 onClick={shareRoom}
@@ -114,6 +119,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({ onHome, room, environmen
                 {copied ? <Check size={14} /> : <Share2 size={14} />}
                 {copied ? 'Link copiado' : 'Compartilhar'}
               </button>
+              )}
             </div>
           )}
         </div>
