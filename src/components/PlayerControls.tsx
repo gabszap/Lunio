@@ -13,6 +13,7 @@ import {
   RotateCcw,
   RotateCw,
   Plus,
+  SkipForward,
 } from 'lucide-react';
 import { Chapter, SubtitleTrack, AudioTrackOption } from '../types/media';
 import { formatTime, getCurrentChapter } from '../lib/chapters';
@@ -84,6 +85,9 @@ interface PlayerControlsProps {
   unreadChatCount?: number;
   onBack?: () => void;
   onAddSubtitle?: () => void;
+  /** Próximo da fila da sala (só existe dentro de uma sala, para o Host). Sem itens na fila o botão fica desativado. */
+  onNext?: () => void;
+  hasNext?: boolean;
   /** Avisado quando algum menu abre/fecha, para o player não esconder os controles com menu aberto. */
   onMenuOpenChange?: (open: boolean) => void;
 }
@@ -228,6 +232,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   unreadChatCount = 0,
   onBack,
   onAddSubtitle,
+  onNext,
+  hasNext = false,
   onMenuOpenChange,
 }) => {
   const [openMenu, setOpenMenuState] = useState<MenuId>(null);
@@ -378,6 +384,17 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   {paused ? <Play size={20} /> : <Pause size={20} />}
                 </button>
                 <SeekButtons currentTime={currentTime} duration={duration} onSeek={onSeek} />
+                {onNext && (
+                  <IconButton
+                    id="btn-next-in-queue"
+                    label={hasNext ? t('Próximo da fila') : t('Nenhum vídeo na fila')}
+                    size={44}
+                    disabled={!hasNext}
+                    onClick={onNext}
+                  >
+                    <SkipForward size={20} />
+                  </IconButton>
+                )}
               </>
             )}
 

@@ -21,6 +21,8 @@ export function useMediaInspection(args: {
   initialAudioTracks: AudioTrackOption[];
   audio: ReturnType<typeof useAlternateAudio>;
   subs: ReturnType<typeof useSubtitles>;
+  /** Vídeo que começa sozinho (vindo da fila): não pergunta "continuar de onde parou?". */
+  autoPlay?: boolean;
   currentChapterRef: MutableRefObject<Chapter | null>;
   pendingPlayRef: MutableRefObject<boolean>;
   totalDurationRef: MutableRefObject<number>;
@@ -31,7 +33,7 @@ export function useMediaInspection(args: {
   setDuration: Dispatch<SetStateAction<number>>;
 }) {
   const {
-    source, hasSource, title, initialChapters, initialSubtitles, initialAudioTracks, audio, subs,
+    source, hasSource, title, autoPlay, initialChapters, initialSubtitles, initialAudioTracks, audio, subs,
     currentChapterRef, pendingPlayRef, totalDurationRef, setPlaybackError, setResumePrompt, setMediaTitle, setParsedMetadata, setDuration,
   } = args;
   const { setResolvedStreamUrl, setDetectedAudioTracks, setActiveAudioTrack } = audio;
@@ -62,7 +64,7 @@ export function useMediaInspection(args: {
     // Checa se há progresso salvo para sugerir retomada em popup (o vídeo sempre inicia do 0)
     try {
       const savedTime = parseFloat(localStorage.getItem(getProgressStorageKey(source.src)) || '0');
-      if (savedTime > 10) {
+      if (savedTime > 10 && !autoPlay) {
         setResumePrompt({ time: savedTime, formatted: formatTime(savedTime) });
       } else {
         setResumePrompt(null);

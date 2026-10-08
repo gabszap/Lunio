@@ -418,5 +418,7 @@ export const EN: Record<string, string> = {
   "Escolhendo um vídeo": "Picking a video",
   "Em sala com {n} pessoas": "In a room with {n} people",
   "Sozinho na sala": "Alone in the room",
+  "Próximo da fila": "Next in queue",
+  "Nenhum vídeo na fila": "No video in the queue",
   "Pausado em {pos} de {dur} · {room}": "Paused at {pos} of {dur} · {room}",
 };
