@@ -1,10 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { issueSoloToken, tokenFromRequest, verifyToken } from './access';
+import { tokenFromRequest, verifyToken } from './access';
 import { handleCors } from './cors';
-import { sendApiError, sendJson } from './http';
+import { sendApiError } from './http';
 import { checkRate, clientIp, type RateRule } from './limits';
 import { roomManager } from './roomServer';
-import { getTools } from './tools';
 
 /**
  * Porta de entrada de /api/*: CORS → rate limit por IP → token de sessão.
@@ -78,22 +77,4 @@ export function apiGate(req: IncomingMessage, res: ServerResponse, next: (err?: 
     }
   }
   next();
-}
-
-/** POST /api/session — token para quem assiste sozinho (a sala usa o do WebSocket). */
-export function handleSession(req: IncomingMessage, res: ServerResponse) {
-  if (req.method !== 'POST') return sendApiError(res, 405, 'method_not_allowed');
-  const { token, expiresAt } = issueSoloToken();
-  res.setHeader('Cache-Control', 'no-store');
-  sendJson(res, 200, { token, expiresAt });
-}
-
-/** GET /api/status — FFmpeg e Python foram encontrados? Só versões: o caminho no disco não sai do servidor. */
-export function handleStatus(_req: IncomingMessage, res: ServerResponse) {
-  const { ffmpeg, python } = getTools();
-  res.setHeader('Cache-Control', 'no-store');
-  sendJson(res, 200, {
-    ffmpeg: { found: ffmpeg.found, version: ffmpeg.version },
-    python: { found: python.found, version: python.version, tooOld: python.tooOld === true },
-  });
 }

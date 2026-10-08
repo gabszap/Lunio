@@ -43,7 +43,7 @@ Lunio is a web video player built for watching together. Paste a stream link, up
 ```bash
 npm install
 npm run dev      # development (hot reload)
-npm start        # production: builds, then serves the optimized build
+npm start        # production: builds, then runs the production server (no Vite)
 ```
 
 Open <http://localhost:3000>. The dev server also listens on your local network, so friends on the same network can join using your machine's IP.
@@ -73,13 +73,14 @@ Copy `.env.example` to `.env`. Locally nothing is required (only the Discord Act
 | Command | What it does |
 |---|---|
 | `npm run dev` | Development: app + API + WebSocket on port 3000, with hot reload |
-| `npm start` | Production: builds into `dist/`, then serves it with the API and WebSocket on port 3000 |
+| `npm start` | Production: `npm run build`, then `npm run serve` |
+| `npm run serve` | Production server (`src/server/main.ts`): Express serving `dist/` + API + WebSocket on `PORT` (default 3000), without Vite. Needs a previous `npm run build` |
 | `npm run build` | Builds the frontend into `dist/` |
-| `npm run preview` | Serves an existing `dist/` build with the API and WebSocket (no rebuild) |
+| `npm run preview` | Vite's preview of an existing `dist/` with the API plugged in (handy for quick checks; production uses `serve`) |
 | `npm run lint` | Type-checks the project (`tsc --noEmit`) |
 | `python -m pytest tests` | Runs the `mkv_extractor` tests |
 
-> The backend (media proxy, uploads, rooms) is a Vite plugin registered in both the dev server and the preview server, so `npm start` runs the full app from the optimized build: minified, no hot reload and no source files exposed. Use `npm run dev` only while developing.
+> The backend lives in `src/server/` and is independent of Vite: `npm run serve` runs it as a plain Express app, and `npm run dev` / `npm run preview` just plug the same router into Vite. In development, editing a server file restarts the dev server (and drops open rooms); in production nothing watches the code, so rooms only drop on a restart or deploy.
 
 ## How it works
 
@@ -88,7 +89,8 @@ Browser (React + Vidstack)
    │  HTTP  ── /api/proxy, /api/tracks, /api/subtitle, /api/upload …
    │  WebSocket ── /api/ws (rooms, sync, chat)
    ▼
-Vite server, dev or preview (vite.config.ts)
+Backend: Express router (src/server/app.ts), served by src/server/main.ts in production
+or plugged into the Vite dev/preview server (vite.config.ts)
    ├─ media proxy: HTTP Range passthrough, FFmpeg fMP4 remux for alternate audio
    ├─ track inspection and subtitle/font extraction (FFmpeg + mkv_extractor)
    ├─ uploads (.uploads/) and Google Drive resolver
@@ -117,7 +119,7 @@ Empty rooms are closed about 30 seconds after the last person leaves (`EMPTY_ROO
 
 ## Deploying to a Linux server (Ubuntu 24.04)
 
-A small VPS is enough. Lunio runs as a single Node process (`npm start`); Caddy sits in front for HTTPS and WebSocket, and systemd keeps it running. Replace `lunio.example.com` with your domain (its DNS must point to the server) and open ports 80 and 443.
+A small VPS is enough. Lunio runs as a single Node process (`npm run serve`); Caddy sits in front for HTTPS and WebSocket, and systemd keeps it running. Replace `lunio.example.com` with your domain (its DNS must point to the server) and open ports 80 and 443.
 
 **1. Install Node 22, FFmpeg, Python and Caddy**
 
@@ -137,6 +139,7 @@ sudo useradd --system --create-home --home-dir /opt/lunio --shell /usr/sbin/nolo
 sudo -u lunio git clone https://github.com/gabszap/Lunio.git /opt/lunio/app
 cd /opt/lunio/app
 sudo -u lunio npm ci
+sudo -u lunio npm run build
 sudo -u lunio cp .env.example .env
 sudo -u lunio nano .env
 ```
@@ -153,7 +156,7 @@ DISCORD_CLIENT_SECRET=...
 
 Leave `ALLOW_PRIVATE_URLS` empty. It exists only for local tests and turns off the protection that keeps the server from reaching your internal network.
 
-**3. systemd service** — `/etc/systemd/system/lunio.service`
+**3. Build and systemd service** — `/etc/systemd/system/lunio.service`
 
 ```ini
 [Unit]
@@ -163,7 +166,7 @@ After=network.target
 [Service]
 User=lunio
 WorkingDirectory=/opt/lunio/app
-ExecStart=/usr/bin/npm start
+ExecStart=/usr/bin/npm run serve
 Restart=always
 RestartSec=3
 Environment=NODE_ENV=production
@@ -177,7 +180,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now lunio
 journalctl -u lunio -f      # at startup it logs which FFmpeg and Python it found
 ```
 
-`WorkingDirectory` matters: `.uploads/`, `.cache/` and `.env` live there. `npm start` rebuilds the frontend on every start (about 30 s); to skip that after a deploy, run `npm run build` once and use `ExecStart=/usr/bin/npx vite preview` instead.
+`WorkingDirectory` matters: `.uploads/`, `.cache/`, `dist/` and `.env` live there. `npm run serve` does not build, so run `npm run build` once after each `git pull` (restarts are then instant). `PORT` and `HOST` in `.env` change where it listens (default `0.0.0.0:3000`).
 
 **4. Caddy (HTTPS + WebSocket)** — `/etc/caddy/Caddyfile`
 
@@ -199,7 +202,7 @@ Caddy gets the certificate by itself and proxies WebSocket with no extra configu
 
 Open `https://lunio.example.com`, go to **Status**: Server, FFmpeg and Python should all be green. Then create a room, open it in a second browser, and switch an audio track.
 
-**Updating:** `cd /opt/lunio/app && sudo -u lunio git pull && sudo -u lunio npm ci && sudo systemctl restart lunio`. Restarting closes open rooms.
+**Updating:** `cd /opt/lunio/app && sudo -u lunio git pull && sudo -u lunio npm ci && sudo -u lunio npm run build && sudo systemctl restart lunio`. Restarting closes open rooms.
 
 ## Development on Windows
 
@@ -218,7 +221,8 @@ src/
     WatchPartyPanel.tsx   Chat and participants
     ui.tsx                Shared UI primitives (design system)
   lib/                    Sync client, subtitles, media helpers, catalog, Discord
-  server/                 Room server and upload/Drive routes
+  server/                 Backend: app.ts (API router), main.ts (production entry), routes/ (one file per
+                          endpoint), media/ (FFmpeg remux, tracks, subtitles, cache), roomServer.ts, security
 mkv_extractor/            Python extractor for subtitles inside remote MKV files (HTTP Range)
 public/                   Static files: JASSUB (libass), fallback fonts, Sintel sample
 docs/                     README images

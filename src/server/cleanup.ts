@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config';
 import { roomManager } from './roomServer';
-import { UPLOAD_DIR, UPLOAD_META } from './sources';
+import { UPLOAD_DIR, UPLOAD_META } from './media/uploads';
 
 /**
  * Limpeza automática de disco:
