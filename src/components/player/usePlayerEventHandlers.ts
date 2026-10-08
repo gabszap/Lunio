@@ -169,7 +169,6 @@ export function usePlayerEventHandlers(args: {
   };
   const onWaiting = () => {
     setIsBuffering(true);
-    logger.warn('[Player] Carregando buffer…');
   };
   const onError = (err: any) => {
     sessionManager.updateRunStatus('failed');

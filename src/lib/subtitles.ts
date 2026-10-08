@@ -194,6 +194,9 @@ export interface SubtitleProvider {
 /** Falhas que não mudam ao tentar de novo (as transitórias, como 503, podem ser repetidas). */
 const PERMANENT_SUBTITLE_ERRORS = new Set(['BITMAP_NOT_SUPPORTED', 'EXTRACTION_FAILED']);
 
+/** Inicializar o LibASS (WASM + fontes) numa conexão lenta (ex.: Tailscale) passou de 25 s e derrubava a legenda escolhida. */
+const LIBASS_INIT_TIMEOUT_MS = 90_000;
+
 export class SubtitleResolver {
   private providers: SubtitleProvider[] = [];
   private activeExtractionAbort: AbortController | null = null;
@@ -774,7 +777,7 @@ export class SubtitleManager {
       await Promise.race([
         this.jassubInstance.ready,
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Tempo limite de 25s esgotado ao inicializar LibASS WASM.')), 25000)
+          setTimeout(() => reject(new Error(`Tempo limite de ${LIBASS_INIT_TIMEOUT_MS / 1000}s esgotado ao inicializar LibASS WASM.`)), LIBASS_INIT_TIMEOUT_MS)
         ),
       ]);
 

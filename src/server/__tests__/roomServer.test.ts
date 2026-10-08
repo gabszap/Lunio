@@ -49,6 +49,57 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('fila (playlist)', () => {
+  const item = (n: number) => ({ type: 'playlist:add', url: `https://exemplo.test/ep${n}.mkv`, title: `Ep ${n}` });
+
+  it('qualquer membro adiciona; o estado da sala traz a fila na ordem', () => {
+    const host = connect('FILA1', 'h', 'Host');
+    const guest = connect('FILA1', 'g', 'Gui');
+    send(host, item(1));
+    send(guest, item(2));
+    const list = stateOf('FILA1').playlist!;
+    expect(list.map((i) => i.title)).toEqual(['Ep 1', 'Ep 2']);
+    expect(list[1]).toMatchObject({ addedById: 'g', addedBy: 'Gui' });
+    expect(guest.last('playlist:update').playlist).toHaveLength(2);
+  });
+
+  it('recusa link inválido e limita o tamanho da fila', () => {
+    const host = connect('FILA2', 'h');
+    send(host, { type: 'playlist:add', url: 'javascript:alert(1)', title: 'x' });
+    send(host, { type: 'playlist:add', url: 'file:///etc/passwd', title: 'x' });
+    expect(stateOf('FILA2').playlist).toHaveLength(0);
+    for (let i = 0; i < 60; i++) send(host, item(i));
+    expect(stateOf('FILA2').playlist).toHaveLength(50);
+  });
+
+  it('só o Host reordena e toca; o espectador só remove o que ele mesmo adicionou', () => {
+    const host = connect('FILA3', 'h');
+    const guest = connect('FILA3', 'g');
+    send(host, item(1));
+    send(guest, item(2));
+    const [a, b] = stateOf('FILA3').playlist!;
+    send(guest, { type: 'playlist:move', itemId: b.id, direction: 'up' });
+    send(guest, { type: 'playlist:take', itemId: a.id });
+    send(guest, { type: 'playlist:remove', itemId: a.id });
+    expect(stateOf('FILA3').playlist!.map((i) => i.id)).toEqual([a.id, b.id]);
+
+    send(host, { type: 'playlist:move', itemId: b.id, direction: 'up' });
+    expect(stateOf('FILA3').playlist!.map((i) => i.id)).toEqual([b.id, a.id]);
+
+    send(guest, { type: 'playlist:remove', itemId: b.id });
+    expect(stateOf('FILA3').playlist!.map((i) => i.id)).toEqual([a.id]);
+  });
+
+  it('o Host toca um item: ele sai da fila', () => {
+    const host = connect('FILA4', 'h');
+    send(host, item(1));
+    send(host, item(2));
+    const [a] = stateOf('FILA4').playlist!;
+    send(host, { type: 'playlist:take', itemId: a.id });
+    expect(stateOf('FILA4').playlist!.map((i) => i.title)).toEqual(['Ep 2']);
+  });
+});
+
 describe('entrar e sair', () => {
   it('o primeiro a entrar vira Host e recebe o estado e um token de sessão', () => {
     const host = connect('SALA1', 'u1', 'Ana');
@@ -273,6 +324,36 @@ describe('moderação', () => {
     const back = connect('SALA1', 'u2', 'Bia');
     expect(back.last('room:state')).toBeTruthy();
     expect(back.closeCode).toBeNull();
+  });
+
+  it('o ban vale para a pessoa, não para a aba: abas extras (_tab) caem juntas e não voltam', () => {
+    const host = connect('SALA1', 'u1');
+    const first = connect('SALA1', 'u2', 'Bia');
+    const second = connect('SALA1', 'u2', 'Bia'); // outra aba da mesma pessoa
+    const tabId = second.last('room:state').assignedUserId as string;
+    expect(tabId).toMatch(/^u2_tab\d{4}$/);
+
+    // o Host bane pelo ID que vê na lista (o da segunda aba)
+    send(host, { type: 'room:ban', targetUserId: tabId });
+    expect(first.closeCode).toBe(4002);
+    expect(second.closeCode).toBe(4002);
+    expect(host.last('room:bans_update').bannedMembers.map((b: any) => b.userId)).toEqual(['u2']);
+
+    // nem pelo ID-base nem por uma terceira aba
+    expect(connect('SALA1', 'u2').last('error')).toMatchObject({ code: 'banned' });
+    expect(rm.isMember('SALA1', tabId)).toBe(false);
+
+    send(host, { type: 'room:unban', targetUserId: 'u2' });
+    expect(connect('SALA1', 'u2').last('room:state')).toBeTruthy();
+  });
+
+  it('o Host não consegue banir a si mesmo por outra aba', () => {
+    const host = connect('SALA1', 'u1');
+    const hostTab = connect('SALA1', 'u1');
+    const tabId = hostTab.last('room:state').assignedUserId as string;
+    send(host, { type: 'room:ban', targetUserId: tabId });
+    expect(host.closeCode).toBeNull();
+    expect(hostTab.closeCode).toBeNull();
   });
 
   it('só o Host bane e desbane', () => {

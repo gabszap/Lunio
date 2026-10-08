@@ -3,6 +3,7 @@ import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Server as HttpsServer } from 'node:https';
 import { issueRoomToken } from './access';
 import { isOriginAllowed } from './cors';
+import { PLAYLIST_MAX_ITEMS } from '../types/sync';
 import type {
   ClientMessage,
   ServerMessage,
@@ -12,6 +13,7 @@ import type {
   ChatMessage,
   MemberPlaybackState,
   BannedMember,
+  PlaylistItem,
 } from '../types/sync';
 
 interface ClientSession {
@@ -32,6 +34,7 @@ interface RoomInternal {
   roomId: string;
   hostId: string;
   media: RoomMedia | null;
+  playlist: PlaylistItem[];
   playback: {
     playing: boolean;
     position: number;
@@ -45,6 +48,9 @@ interface RoomInternal {
   announcedJoins: Set<string>;
   bannedMembers: Map<string, BannedMember>;
 }
+
+/** O servidor dá `<id>_tab####` à segunda aba aberta pela mesma pessoa; o ban vale para o ID de verdade (todas as abas). */
+export const baseUserId = (id: string) => id.replace(/_tab\d{4}$/, '');
 
 /** Quanto tempo uma sala sem ninguém continua existindo (dá tempo de recarregar a página e voltar). */
 const EMPTY_ROOM_TTL_MS = 30 * 1000;
@@ -65,7 +71,7 @@ export class RoomManager {
   /** A pessoa está (ou acabou de cair e pode voltar) na sala, e não foi banida? */
   public isMember(roomId: string, userId: string): boolean {
     const room = this.rooms.get(roomId);
-    if (!room || room.bannedMembers.has(userId)) return false;
+    if (!room || room.bannedMembers.has(baseUserId(userId))) return false;
     if (room.pendingLeaves.has(userId)) return true;
     for (const s of room.clients.values()) if (s.userId === userId) return true;
     return false;
@@ -103,6 +109,7 @@ export class RoomManager {
         roomId,
         hostId: initialHostId || '',
         media: null,
+        playlist: [],
         playback: {
           playing: false,
           position: 0,
@@ -147,6 +154,7 @@ export class RoomManager {
       roomId: room.roomId,
       hostId: room.hostId,
       media: room.media,
+      playlist: room.playlist,
       playback: {
         playing: room.playback.playing,
         position: currentPos,
@@ -196,7 +204,7 @@ export class RoomManager {
   ) {
     const room = this.getOrCreateRoom(roomId, user.id);
 
-    if (room.bannedMembers && room.bannedMembers.has(user.id)) {
+    if (room.bannedMembers && room.bannedMembers.has(baseUserId(user.id))) {
       console.log(`[WatchParty] ⛔ Usuário banido "${user.username}" (${user.id}) tentou entrar na sala "${roomId}".`);
       this.send(ws, { type: 'error', message: 'Você foi banido desta sala pelo Host.', code: 'banned' });
       try {
@@ -523,6 +531,52 @@ export class RoomManager {
         break;
       }
 
+      case 'playlist:add': {
+        const url = typeof msg.url === 'string' ? msg.url.trim() : '';
+        if (!/^https?:\/\//i.test(url) || url.length > 4096) return;
+        if (currentRoom.playlist.length >= PLAYLIST_MAX_ITEMS) return;
+        const title = (typeof msg.title === 'string' ? msg.title.trim() : '').slice(0, 200) || 'Vídeo';
+        currentRoom.playlist.push({
+          id: `pl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+          url,
+          title,
+          mimeType: typeof msg.mimeType === 'string' ? msg.mimeType.slice(0, 100) : undefined,
+          addedById: clientSession.userId,
+          addedBy: clientSession.username,
+        });
+        this.sendSystemChat(currentRoom, `➕ ${clientSession.username} adicionou à fila: "${title}"`);
+        this.broadcast(currentRoom, { type: 'playlist:update', playlist: currentRoom.playlist });
+        break;
+      }
+
+      case 'playlist:remove': {
+        const item = currentRoom.playlist.find((i) => i.id === msg.itemId);
+        // Quem adicionou pode tirar o próprio item; o Host tira qualquer um
+        if (!item || (!isHost && item.addedById !== clientSession.userId)) return;
+        currentRoom.playlist = currentRoom.playlist.filter((i) => i.id !== item.id);
+        this.broadcast(currentRoom, { type: 'playlist:update', playlist: currentRoom.playlist });
+        break;
+      }
+
+      case 'playlist:move': {
+        if (!isHost) return;
+        const from = currentRoom.playlist.findIndex((i) => i.id === msg.itemId);
+        const to = msg.direction === 'up' ? from - 1 : from + 1;
+        if (from < 0 || to < 0 || to >= currentRoom.playlist.length) return;
+        const [moved] = currentRoom.playlist.splice(from, 1);
+        currentRoom.playlist.splice(to, 0, moved);
+        this.broadcast(currentRoom, { type: 'playlist:update', playlist: currentRoom.playlist });
+        break;
+      }
+
+      case 'playlist:take': {
+        if (!isHost) return;
+        if (!currentRoom.playlist.some((i) => i.id === msg.itemId)) return;
+        currentRoom.playlist = currentRoom.playlist.filter((i) => i.id !== msg.itemId);
+        this.broadcast(currentRoom, { type: 'playlist:update', playlist: currentRoom.playlist });
+        break;
+      }
+
       case 'media:set': {
         if (!isHost) return;
         const newGeneration = (currentRoom.media?.generation || 0) + 1;
@@ -645,15 +699,15 @@ export class RoomManager {
 
       case 'room:ban': {
         if (!isHost) return;
-        const targetUserId = msg.targetUserId;
-        if (targetUserId === clientSession.userId) return;
+        const targetUserId = baseUserId(String(msg.targetUserId));
+        if (targetUserId === baseUserId(clientSession.userId)) return; // o Host não bane a si mesmo (nem a própria outra aba)
 
         let bannedName = 'Usuário';
         let bannedAvatar: string | undefined;
         let bannedPlatform: 'discord' | 'web' = 'web';
 
         for (const [targetWs, targetSession] of Array.from(currentRoom.clients.entries())) {
-          if (targetSession.userId === targetUserId) {
+          if (baseUserId(targetSession.userId) === targetUserId) {
             bannedName = targetSession.username;
             bannedAvatar = targetSession.avatarUrl;
             bannedPlatform = targetSession.platform || 'web';
@@ -695,7 +749,7 @@ export class RoomManager {
 
       case 'room:unban': {
         if (!isHost) return;
-        const targetUserId = msg.targetUserId;
+        const targetUserId = baseUserId(String(msg.targetUserId));
         if (currentRoom.bannedMembers && currentRoom.bannedMembers.has(targetUserId)) {
           const unbanned = currentRoom.bannedMembers.get(targetUserId);
           currentRoom.bannedMembers.delete(targetUserId);

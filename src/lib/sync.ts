@@ -11,6 +11,7 @@ import type {
   ChatMessage,
   MemberPlaybackState,
   BannedMember,
+  PlaylistItem,
 } from '../types/sync';
 
 export interface DriftCorrectionResult {
@@ -70,22 +71,27 @@ class SyncManager {
     this.user = this.resolveLocalUser();
   }
 
-  private isPageReload(): boolean {
+  /**
+   * ID do usuário neste navegador: persistente (localStorage), então abrir o link da sala em outra aba ou janela mantém a
+   * mesma identidade (um ban não é contornado com aba nova). Duas abas abertas ao mesmo tempo são distinguidas pelo servidor
+   * (sufixo `_tab####`), e o ID persistente nunca é sobrescrito por esse sufixo.
+   */
+  private resolvePersistentId(): string {
+    const KEY = 'lunio_user_id';
     try {
-      if (typeof performance !== 'undefined') {
-        const navEntries = performance.getEntriesByType('navigation');
-        if (navEntries.length > 0) {
-          return (navEntries[0] as PerformanceNavigationTiming).type === 'reload';
-        }
-        return (performance as any).navigation?.type === 1;
-      }
+      const saved = localStorage.getItem(KEY);
+      if (saved && /^usr_[\w-]{8,64}$/.test(saved)) return saved;
     } catch {}
-    return false;
+    const bytes = new Uint8Array(12);
+    crypto.getRandomValues(bytes);
+    const id = `usr_${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+    try {
+      localStorage.setItem(KEY, id);
+    } catch {}
+    return id;
   }
 
   private resolveLocalUser(): { id: string; username: string; avatarUrl?: string } {
-    const isReload = this.isPageReload();
-    let savedId = '';
     let savedUsername = '';
     let savedAvatarUrl: string | undefined;
 
@@ -97,16 +103,11 @@ class SyncManager {
           savedUsername = parsed.username;
         }
         savedAvatarUrl = parsed.avatarUrl;
-        // Somente reaproveita o ID se for recarregamento da mesma aba (F5/Reload).
-        // Se for nova aba, aba duplicada ou nova janela, gera um ID 100% novo e exclusivo!
-        if (isReload && parsed.id) {
-          savedId = parsed.id;
-        }
       }
     } catch {}
 
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-    const userId = savedId || `usr_${Date.now()}_${randomSuffix}_${Math.random().toString(36).slice(2, 6)}`;
+    const userId = this.resolvePersistentId();
     const username = savedUsername || `Espectador #${randomSuffix}`;
 
     const isDiscord = discordManager.getState().isEmbedded;
@@ -539,6 +540,13 @@ class SyncManager {
         break;
       }
 
+      case 'playlist:update': {
+        if (!this.roomState) return;
+        this.roomState.playlist = msg.playlist;
+        this.notifyState();
+        break;
+      }
+
       case 'members:update': {
         if (!this.roomState) return;
         this.roomState.members = msg.members;
@@ -693,6 +701,30 @@ class SyncManager {
       position: Math.max(0, position),
       rate,
     });
+  }
+
+  public getPlaylist(): PlaylistItem[] {
+    return this.roomState?.playlist || [];
+  }
+
+  public emitPlaylistAdd(item: { url: string; title: string; mimeType?: string }) {
+    if (!this.isConnected) return;
+    this.send({ type: 'playlist:add', ...item });
+  }
+
+  public emitPlaylistRemove(itemId: string) {
+    if (!this.isConnected) return;
+    this.send({ type: 'playlist:remove', itemId });
+  }
+
+  public emitPlaylistMove(itemId: string, direction: 'up' | 'down') {
+    if (!this.isConnected || !this.isRoomHost()) return;
+    this.send({ type: 'playlist:move', itemId, direction });
+  }
+
+  public emitPlaylistTake(itemId: string) {
+    if (!this.isConnected || !this.isRoomHost()) return;
+    this.send({ type: 'playlist:take', itemId });
   }
 
   public emitKick(targetUserId: string) {

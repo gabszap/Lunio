@@ -83,10 +83,12 @@ interface PlayerPageProps {
   unreadChat: number;
   onToggleWatchParty: () => void;
   children: React.ReactNode;
+  /** Fila de vídeos da sala, mostrada abaixo do player (estilo YouTube). */
+  queue?: React.ReactNode;
   console: React.ReactNode;
 }
 
-export const PlayerPage: React.FC<PlayerPageProps> = ({ onHome, room, environment, unreadChat, onToggleWatchParty, children, console }) => {
+export const PlayerPage: React.FC<PlayerPageProps> = ({ onHome, room, environment, unreadChat, onToggleWatchParty, children, queue, console }) => {
   const [copied, setCopied] = useState(false);
 
   const shareRoom = async () => {
@@ -106,15 +108,21 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({ onHome, room, environmen
           {room.connected && (
             <div className="flex items-center gap-3 h-11 pl-4 pr-1.5 box-border rounded-[10px] bg-lu-surface border border-lu-border">
               <span className="text-[12px] text-lu-muted">{t('Sala')}</span>
-              <span className="text-[14px] font-semibold tracking-[0.14em] tabular">{room.code}</span>
+              {environment === 'discord' ? (
+                <span className="text-[14px] font-semibold pr-3">{t('Canal de voz do Discord')}</span>
+              ) : (
+                <span className="text-[14px] font-semibold tracking-[0.14em] tabular">{room.code}</span>
+              )}
+              {environment !== 'discord' && (
               <button
                 type="button"
                 onClick={shareRoom}
                 className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-lu-tint text-lu-accent text-[13px] font-semibold hover:bg-lu-accent/20"
               >
                 {copied ? <Check size={14} /> : <Share2 size={14} />}
-                {copied ? t('Link copiado') : 'Compartilhar'}
+                {copied ? t('Link copiado') : t('Compartilhar')}
               </button>
+              )}
             </div>
           )}
         </div>
@@ -150,6 +158,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({ onHome, room, environmen
 
       <main className="w-full max-w-[1320px] mx-auto px-0 sm:px-8 pt-0 sm:pt-6 pb-14 box-border flex flex-col gap-5">
         {children}
+        {room.connected && queue && <div className="px-4 sm:px-0">{queue}</div>}
         <div className="px-4 sm:px-0">{console}</div>
       </main>
     </div>

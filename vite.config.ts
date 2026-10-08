@@ -55,6 +55,10 @@ export default defineConfig(() => {
     worker: {
       format: 'es' as const,
     },
+    build: {
+      // O hls.js (~595 kB) é um pedaço sob demanda que não dá para dividir; o aviso do Vite deve valer só para o pacote inicial
+      chunkSizeWarningLimit: 650,
+    },
     server: {
       port: 3000,
       host: '0.0.0.0',

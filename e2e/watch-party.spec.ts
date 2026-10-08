@@ -1,7 +1,62 @@
 import { test, expect } from '@playwright/test';
-import { createRoom, joinRoom, newUser, openParticipants, state, togglePlay, trackHls, waitReady } from './helpers';
+import { SUBTITLES_URL, createRoom, joinRoom, newUser, openParticipants, state, togglePlay, trackHls, video, waitReady } from './helpers';
 
 test.describe('Watch Party', () => {
+  test('fila: quando o vídeo acaba, o próximo começa sozinho para todos', async ({ browser }) => {
+    const host = await newUser(browser);
+    const guest = await newUser(browser);
+    const code = await createRoom(host.page, 'Ana');
+    await joinRoom(guest.page, code, 'Bia');
+    await waitReady(host.page);
+    await waitReady(guest.page);
+
+    await host.page.getByLabel('Link para adicionar à fila').fill(SUBTITLES_URL);
+    await host.page.getByRole('button', { name: 'Adicionar à fila' }).click();
+    await expect(host.page.getByText('por Ana')).toBeVisible();
+
+    // Leva o vídeo para 1 s do fim e deixa acabar
+    await video(host.page).evaluate((v: HTMLVideoElement) => {
+      v.muted = true;
+      v.currentTime = Math.max(0, v.duration - 1);
+      void v.play();
+    });
+    await expect.poll(async () => (await state(host.page)).src, { timeout: 40_000 }).toContain('legendas');
+    await expect.poll(async () => (await state(guest.page)).src, { timeout: 40_000 }).toContain('legendas');
+    await expect(host.page.getByText('A fila está vazia.')).toBeVisible();
+    // e começa a tocar sem ninguém apertar play
+    await expect.poll(async () => (await state(host.page)).paused, { timeout: 30_000 }).toBe(false);
+
+    await host.context.close();
+    await guest.context.close();
+  });
+
+  test('fila: o espectador adiciona, o Host toca agora e o vídeo troca para todos', async ({ browser }) => {
+    const host = await newUser(browser);
+    const guest = await newUser(browser);
+    const code = await createRoom(host.page, 'Ana');
+    await joinRoom(guest.page, code, 'Bia');
+    await waitReady(host.page);
+    await waitReady(guest.page);
+
+    // Bia (espectador) adiciona um vídeo à fila (seção abaixo do player)
+    await guest.page.getByLabel('Link para adicionar à fila').fill(SUBTITLES_URL);
+    await guest.page.getByRole('button', { name: 'Adicionar à fila' }).click();
+    await expect(guest.page.getByText('por Bia')).toBeVisible();
+
+    // O Host vê o item, não vê o do outro como removível por engano e toca agora
+    await expect(host.page.getByText('por Bia')).toBeVisible();
+    await host.page.getByRole('button', { name: 'Tocar agora' }).click();
+
+    // A fila esvazia nos dois e o vídeo trocou nos dois
+    await expect(host.page.getByText('A fila está vazia.')).toBeVisible();
+    await expect(guest.page.getByText('A fila está vazia.')).toBeVisible();
+    await expect.poll(async () => (await state(host.page)).src, { timeout: 30_000 }).toContain('legendas');
+    await expect.poll(async () => (await state(guest.page)).src, { timeout: 30_000 }).toContain('legendas');
+
+    await host.context.close();
+    await guest.context.close();
+  });
+
   test('play, pause e seek do Host chegam ao espectador', async ({ browser }) => {
     const host = await newUser(browser);
     const guest = await newUser(browser);
@@ -84,9 +139,8 @@ test.describe('Watch Party', () => {
   });
 });
 
-// Hoje o ID do usuário é por aba (sessionStorage): quem foi banido volta abrindo uma aba nova.
-// O servidor já recusa o ID banido (testes unitários); falta o ID persistente da Fase 8.1 do plano.
-test.fixme('banido não consegue voltar abrindo o link de novo (depende do ID persistente, Fase 8.1)', async ({ browser }) => {
+// O ID do usuário é persistente (localStorage): quem foi banido não volta abrindo o link numa aba nova do mesmo navegador.
+test('banido não consegue voltar abrindo o link de novo (nem em outra aba)', async ({ browser }) => {
   const host = await newUser(browser);
   const guest = await newUser(browser);
   const code = await createRoom(host.page, 'Ana');
@@ -99,6 +153,24 @@ test.fixme('banido não consegue voltar abrindo o link de novo (depende do ID pe
   if (await dialog.isVisible({ timeout: 3000 }).catch(() => false)) await dialog.locator('form button[type="submit"]').click();
   await expect(guest.page.getByText(/banid/i).first()).toBeVisible({ timeout: 15_000 });
   await expect(guest.page.locator('video')).toHaveCount(0);
+});
+
+test('a mesma pessoa em duas abas aparece nas duas e o ban derruba as duas', async ({ browser }) => {
+  const host = await newUser(browser);
+  const guest = await newUser(browser);
+  const code = await createRoom(host.page, 'Ana');
+  await joinRoom(guest.page, code, 'Bia');
+  const secondTab = await guest.context.newPage();
+  await joinRoom(secondTab, code, 'Bia');
+
+  await openParticipants(host.page);
+  await expect(host.page.getByRole('button', { name: 'Banir da sala' })).toHaveCount(2, { timeout: 15_000 });
+  await host.page.getByRole('button', { name: 'Banir da sala' }).first().click();
+
+  await expect(guest.page).not.toHaveURL(/room=/, { timeout: 15_000 });
+  await expect(secondTab).not.toHaveURL(/room=/, { timeout: 15_000 });
+  await host.context.close();
+  await guest.context.close();
 });
 
 test.describe('Player', () => {

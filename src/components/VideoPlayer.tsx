@@ -14,6 +14,7 @@ import { getVideoElement } from './player/dom';
 import { MediaSource, Chapter, SubtitleTrack, AudioTrackOption } from '../types/media';
 import { PlayerControls } from './PlayerControls';
 import { WatchPartyPanel } from './WatchPartyPanel';
+import type { PlaylistItem } from '../types/sync';
 import { audioBoost } from '../lib/audioBoost';
 import { normalizeChapters, getCurrentChapter, getSkippableChapter } from '../lib/chapters';
 import { logger } from '../lib/logger';
@@ -36,6 +37,7 @@ import { useAlternateAudio } from './player/useAlternateAudio';
 import { useControlsVisibility } from './player/useControlsVisibility';
 import { useFullscreen } from './player/useFullscreen';
 import { useMediaInspection } from './player/useMediaInspection';
+import { useDiscordPresence } from './player/useDiscordPresence';
 import { useNativeVideoEvents } from './player/useNativeVideoEvents';
 import { usePlaybackControls } from './player/usePlaybackControls';
 import { usePlaybackReadiness } from './player/usePlaybackReadiness';
@@ -68,6 +70,8 @@ interface VideoPlayerProps {
   onChooseVideo?: () => void;
   /** Botão "Sair" do painel da Watch Party. */
   onLeaveRoom?: () => void;
+  /** Host: toca um item da fila (tira da fila e carrega o vídeo). Também é chamado sozinho quando o vídeo acaba. */
+  onPlayPlaylistItem?: (item: PlaylistItem) => void;
 }
 
 /**
@@ -94,6 +98,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onAddSubtitle,
   onChooseVideo,
   onLeaveRoom,
+  onPlayPlaylistItem,
 }) => {
   const playerRef = useRef<MediaPlayerInstance>(null);
   const mediaProviderRef = useRef<MediaProviderInstance>(null);
@@ -238,6 +243,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return () => clearTimeout(timer);
   }, [source.src, resolvedStreamUrl]);
 
+  useDiscordPresence({ paused, currentTime, duration });
   useNativeVideoEvents({
     playerRef,
     resolvedStreamUrl,
@@ -446,6 +452,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onDurationChange={playerEvents.onDurationChange}
         onProgress={playerEvents.onProgress}
         onWaiting={playerEvents.onWaiting}
+        onEnded={() => {
+          // Fim do vídeo: o Host passa para o próximo da fila (os outros seguem o Host)
+          const next = syncManager.getPlaylist()[0];
+          if (next && syncManager.isRoomHost()) onPlayPlaylistItem?.(next);
+        }}
         onError={playerEvents.onError}
         className={`w-full h-full aspect-${aspectMode} ${
           aspectMode === 'stretch'
@@ -533,7 +544,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       )}
 
       {/* Pular abertura / encerramento / resumo (Player · Pular abertura) */}
-      {skippableChapter && !isViewer && (
+      {/* Some enquanto um menu (ajustes, legendas, áudio…) está aberto, para não ficar por cima dele */}
+      {skippableChapter && !isViewer && !controls.menuOpen && (
         <SkipChapterButton
           chapter={skippableChapter}
           showControls={showControls}

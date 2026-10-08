@@ -11,6 +11,7 @@ Lunio is a web video player built for watching together. Paste a stream link, up
 ## Features
 
 - **Rooms (Watch Party)** — create a room from any source and share an 8-character code or link. The Host controls play, pause, seek and speed; everyone else follows with continuous drift correction. Chat, member list, Host transfer, kick and ban.
+- **Queue (playlist)** — inside a room, anyone can add links to a queue; the Host reorders it, plays an item now, and the next one starts by itself when the video ends.
 - **Video sources**
   - Direct stream links: Stremio, TorBox, and other debrids, `.mkv`/`.mp4`/`.webm`/HLS, proxied through the local server (HTTP Range, CORS bypass).
   - File upload (up to 50 GB) — the room exists while the file uploads. Watching alone plays the file locally without uploading.
@@ -19,8 +20,8 @@ Lunio is a web video player built for watching together. Paste a stream link, up
 - **MKV support** — audio and subtitle tracks are detected with FFmpeg. Switching to another audio track plays it through a **shared HLS stream**: the video is copied (not re-encoded) and the chosen audio becomes AAC in ~6 s segments cached on the server, so everyone in the room who picks the same audio shares one FFmpeg, and seeking takes a fraction of a second. Files without a Matroska index or without H.264 video fall back to an on-the-fly fMP4 remux.
 - **Subtitles** — embedded ASS/SSA rendered with libass (JASSUB, WebAssembly) including embedded fonts; external `.ass`, `.srt` (converted to WebVTT) and `.vtt` by file or URL; sync offset and font size.
 - **Player** — chapter-segmented timeline, "Skip intro/outro" for detected chapters, playback speed, audio delay, volume boost, aspect modes, picture-in-picture, resume where you left off, keyboard shortcuts.
-- **Catalog** — browse and search movies and series (metadata from Stremio's public Cinemeta addon), with seasons, episodes and a personal list. The catalog only provides metadata: to watch, you still pick a video source.
-- **Status page** — checks the local server, the catalog and your current room.
+- **Catalog** *(experimental)* — browse and search movies and series (metadata from Stremio's public Cinemeta addon), with seasons, episodes and a personal list. The catalog only provides metadata: to watch, you still pick a video source.
+- **Status page** *(early version)* — checks the local server, FFmpeg, Python, the catalog and your current room.
 - **Languages** — Portuguese and English; follows the browser language, switchable on the home screen.
 
 ## Screenshots
@@ -252,6 +253,7 @@ DESIGN.md                 Design system notes
 
 ## Known limitations
 
-- Torrent links and screen sharing appear in the menu as "Coming soon"; they need a torrent engine and WebRTC on the server.
+- **Catalog** and **Status** are experimental: they work, but are an initial implementation and will change.
+- Torrent links and screen sharing appear in the menu as "Coming soon". Torrent needs a torrent engine on the server. Screen sharing is planned on **MoQ/WebTransport** (not WebRTC): `getDisplayMedia()` → WebCodecs → MoQ/WebTransport → relay → viewers, which needs HTTP/3 and a relay on the server.
 - Uploaded files stay in `.uploads/` until you delete them.
-- A ban applies to the browser tab's identity; a new tab or another browser gets a new identity.
+- A ban applies to the browser's identity (kept in `localStorage`): a new tab keeps it, but another browser, a private window or cleared site data gets a new identity. There are no accounts, so that is as far as it goes.
