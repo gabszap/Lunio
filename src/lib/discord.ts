@@ -1,4 +1,5 @@
-import { DiscordSDK, patchUrlMappings } from '@discord/embedded-app-sdk';
+// O SDK (~200 kB) só é baixado quando o app roda dentro de uma Discord Activity
+import type { DiscordSDK } from '@discord/embedded-app-sdk';
 import { logger } from './logger';
 
 export interface DiscordUser {
@@ -90,7 +91,8 @@ class DiscordActivityManager {
 
     try {
       logger.info(`[Discord] Iniciando o SDK (Client ID: ${appClientId})…`);
-      this.sdk = new DiscordSDK(appClientId);
+      const { DiscordSDK: DiscordSDKClass, patchUrlMappings } = await import('@discord/embedded-app-sdk');
+      this.sdk = new DiscordSDKClass(appClientId);
 
       // Fase 4 — Discord Networking: Patch URL Mappings
       // Permite que chamadas para /api passem pelo proxy transparente do Discord
