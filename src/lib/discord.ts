@@ -1,4 +1,5 @@
-import { DiscordSDK, patchUrlMappings } from '@discord/embedded-app-sdk';
+// O SDK (~200 kB) só é baixado quando o app roda dentro de uma Discord Activity
+import type { DiscordSDK } from '@discord/embedded-app-sdk';
 import { logger } from './logger';
 
 export interface DiscordUser {
@@ -90,7 +91,8 @@ class DiscordActivityManager {
 
     try {
       logger.info(`[Discord] Iniciando o SDK (Client ID: ${appClientId})…`);
-      this.sdk = new DiscordSDK(appClientId);
+      const { DiscordSDK: DiscordSDKClass, patchUrlMappings } = await import('@discord/embedded-app-sdk');
+      this.sdk = new DiscordSDKClass(appClientId);
 
       // Fase 4 — Discord Networking: Patch URL Mappings
       // Permite que chamadas para /api passem pelo proxy transparente do Discord
@@ -100,6 +102,11 @@ class DiscordActivityManager {
         { prefix: '/.proxy/api', target: `${currentOrigin}/api` },
         { prefix: '/ws', target: `${currentOrigin}/ws` },
         { prefix: '/.proxy/ws', target: `${currentOrigin}/ws` },
+        // Hosts externos do catálogo (Cinemeta e imagens): dentro da Activity só passam por mapeamento de URL.
+        // Cada um precisa existir também em Developer Portal > Activities > URL Mappings, com o mesmo prefixo.
+        { prefix: '/cinemeta', target: 'v3-cinemeta.strem.io' },
+        { prefix: '/metahub', target: 'images.metahub.space' },
+        { prefix: '/metahub-ep', target: 'episodes.metahub.space' },
       ], {
         patchFetch: true,
         patchWebSocket: true,

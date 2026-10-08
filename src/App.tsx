@@ -1,12 +1,15 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { Ban, UserX } from 'lucide-react';
-import { VideoPlayer } from './components/VideoPlayer';
+// Player (Vidstack, legendas, hooks) e Catálogo saem do pacote inicial: a Home abre sem baixá-los.
+const loadVideoPlayer = () => import('./components/VideoPlayer').then((m) => ({ default: m.VideoPlayer }));
+const VideoPlayer = lazy(loadVideoPlayer);
+const CatalogTab = lazy(() => import('./components/catalog/CatalogTab').then((m) => ({ default: m.CatalogTab })));
 import { PlayerConsole } from './components/PlayerConsole';
 import { PlayerPage } from './components/PlayerPage';
 import { RoomLobbyModal } from './components/RoomLobbyModal';
 import { UsernameModal, getLastUsername, shouldSkipNamePrompt } from './components/UsernameModal';
 import { SubtitleModal } from './components/SubtitleModal';
-import { Modal, PrimaryButton } from './components/ui';
+import { Modal, PrimaryButton, Spinner } from './components/ui';
 import { HomeLayout, HomeTab } from './components/home/HomeLayout';
 import { RoomMenu, SourceStep } from './components/home/RoomMenu';
 import { StreamStep } from './components/home/StreamStep';
@@ -14,7 +17,7 @@ import { UploadStep } from './components/home/UploadStep';
 import { DriveStep, YouTubeStep } from './components/home/LinkSourceSteps';
 import { JoinError, JoinStep, checkRoom } from './components/home/RoomSteps';
 import { StatusTab } from './components/home/StatusTab';
-import { CatalogTab, WatchIntent } from './components/catalog/CatalogTab';
+import type { WatchIntent } from './components/catalog/CatalogTab';
 import type { CommitMode, CommitOptions } from './components/home/types';
 import { PRESETS } from './lib/media';
 import { MediaPayload, SubtitleTrack } from './types/media';
@@ -25,6 +28,13 @@ import { generateRoomCode, roomCodeFrom } from './lib/roomCode';
 import { RecentStream, loadRecentStreams, pushRecentStream, saveRecentStreams } from './lib/recent';
 
 type HomeStep = 'menu' | 'join' | SourceStep;
+
+/** Enquanto o pedaço sob demanda (player/catálogo) baixa. */
+const PanelFallback: React.FC = () => (
+  <div role="status" aria-label="Carregando" className="w-full min-h-[320px] flex items-center justify-center">
+    <Spinner size={28} className="text-lu-accent" />
+  </div>
+);
 
 const EMPTY_PAYLOAD: MediaPayload = {
   url: '',
@@ -65,6 +75,16 @@ export default function App() {
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [kickBanAlert, setKickBanAlert] = useState<{ title: string; message: string; type: 'kicked' | 'banned' } | null>(null);
 
+  // Com a Home aberta e a rede livre, já baixa o player: entrar numa sala fica instantâneo
+  useEffect(() => {
+    const idle = (window as any).requestIdleCallback as ((cb: () => void) => number) | undefined;
+    const run = () => void loadVideoPlayer().catch(() => {});
+    const handle = idle ? idle(run) : window.setTimeout(run, 1500);
+    return () => {
+      if (!idle) window.clearTimeout(handle);
+    };
+  }, []);
+
   // Já recebeu o estado da sala nesta conexão? (entrada recusada por ban nunca chega a recebê-lo)
   const wasInRoomRef = useRef(false);
   const isWatchPartyOpenRef = useRef(isWatchPartyOpen);
@@ -82,6 +102,8 @@ export default function App() {
     setView('home');
     setHomeTab(tab);
     setHomeStep(step);
+    // A intenção "assistir este título" vale só para o passo aberto pelo catálogo
+    setWatchIntent(null);
     setIsWatchPartyOpen(false);
   }, []);
 
@@ -408,7 +430,10 @@ export default function App() {
       default:
         return (
           <RoomMenu
-            onPick={(step) => setHomeStep(step)}
+            onPick={(step) => {
+              setWatchIntent(null);
+              setHomeStep(step);
+            }}
             onJoin={() => {
               setJoinPrefill({ code: '', error: null });
               setHomeStep('join');
@@ -426,20 +451,23 @@ export default function App() {
           tab={homeTab}
           onTabChange={(tab) => {
             setHomeTab(tab);
+            setWatchIntent(null);
             if (tab !== 'room') setHomeStep('menu');
           }}
           onLogo={() => goHome('room')}
           centered={homeTab !== 'catalog'}
         >
           {homeTab === 'catalog' ? (
-            <CatalogTab
-              onWatch={(intent) => {
-                setWatchIntent(intent);
-                setHomeTab('room');
-                setHomeStep('stream');
-              }}
-              onCreateRoom={() => goHome('room')}
-            />
+            <Suspense fallback={<PanelFallback />}>
+              <CatalogTab
+                onWatch={(intent) => {
+                  setWatchIntent(intent);
+                  setHomeTab('room');
+                  setHomeStep('stream');
+                }}
+                onCreateRoom={() => goHome('room')}
+              />
+            </Suspense>
           ) : homeTab === 'status' ? (
             <StatusTab environment={environment} room={roomInfo} />
           ) : (
@@ -455,32 +483,34 @@ export default function App() {
           onToggleWatchParty={() => setIsWatchPartyOpen((v) => !v)}
           console={<PlayerConsole />}
         >
-          <VideoPlayer
-            source={{ src: currentPayload.url, type: currentPayload.mimeType }}
-            title={currentPayload.title}
-            chapters={currentPayload.chapters}
-            subtitles={currentPayload.subtitles}
-            audioTracks={currentPayload.audioTracks}
-            onResetToWorkingPreset={() => handleSelectPreset('sintel-local')}
-            onOpenRoomLobby={() => setShowRoomModal(true)}
-            isWatchPartyOpen={isWatchPartyOpen}
-            onToggleWatchParty={() => setIsWatchPartyOpen((prev) => !prev)}
-            onCloseWatchParty={() => setIsWatchPartyOpen(false)}
-            onBack={leaveToHome}
-            onLeaveRoom={leaveToHome}
-            onAddSubtitle={() => setSubtitleModal('current')}
-            onChooseVideo={() => goHome('room')}
-            onMediaChangeRequested={(media) => {
-              setCurrentPayload({
-                url: media.url,
-                title: media.title,
-                mimeType: 'video/x-matroska',
-                chapters: media.chapters || [],
-                subtitles: media.subtitles || [],
-                audioTracks: media.audioTracks || [],
-              });
-            }}
-          />
+          <Suspense fallback={<PanelFallback />}>
+            <VideoPlayer
+              source={{ src: currentPayload.url, type: currentPayload.mimeType }}
+              title={currentPayload.title}
+              chapters={currentPayload.chapters}
+              subtitles={currentPayload.subtitles}
+              audioTracks={currentPayload.audioTracks}
+              onResetToWorkingPreset={() => handleSelectPreset('sintel-local')}
+              onOpenRoomLobby={() => setShowRoomModal(true)}
+              isWatchPartyOpen={isWatchPartyOpen}
+              onToggleWatchParty={() => setIsWatchPartyOpen((prev) => !prev)}
+              onCloseWatchParty={() => setIsWatchPartyOpen(false)}
+              onBack={leaveToHome}
+              onLeaveRoom={leaveToHome}
+              onAddSubtitle={() => setSubtitleModal('current')}
+              onChooseVideo={() => goHome('room')}
+              onMediaChangeRequested={(media) => {
+                setCurrentPayload({
+                  url: media.url,
+                  title: media.title,
+                  mimeType: 'video/x-matroska',
+                  chapters: media.chapters || [],
+                  subtitles: media.subtitles || [],
+                  audioTracks: media.audioTracks || [],
+                });
+              }}
+            />
+          </Suspense>
         </PlayerPage>
       )}
 

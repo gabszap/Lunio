@@ -7,6 +7,7 @@ export function useControlsVisibility(paused: boolean) {
   const hideControlsTimeout = useRef<number | null>(null);
   // Com um menu (legendas, áudio, ajustes…) aberto os controles não somem
   const menuOpenRef = useRef<boolean>(false);
+  const [menuOpen, setMenuOpen] = useState<boolean>(false);
 
   const resetControlsTimer = useCallback(() => {
     setControlsVisible((prev) => (prev ? prev : true));
@@ -23,10 +24,11 @@ export function useControlsVisibility(paused: boolean) {
   const handleMenuOpenChange = useCallback(
     (open: boolean) => {
       menuOpenRef.current = open;
+      setMenuOpen(open);
       resetControlsTimer();
     },
     [resetControlsTimer]
   );
 
-  return { controlsVisible, setControlsVisible, resetControlsTimer, handleMenuOpenChange };
+  return { controlsVisible, setControlsVisible, resetControlsTimer, handleMenuOpenChange, menuOpen };
 }

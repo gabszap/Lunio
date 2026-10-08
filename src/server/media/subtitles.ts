@@ -13,6 +13,11 @@ import { tracksCache } from './tracks';
 const pendingSubtitleExtractions = new Map<string, Promise<string>>();
 const activeSubtitleProcesses = new Map<string, () => void>();
 
+/** A extração remota (HTTP Range) falha por motivos passageiros (CDN lenta, conexão cortada): tenta algumas vezes antes do FFmpeg. */
+const REMOTE_ATTEMPT_TIMEOUT_MS = 40_000;
+const REMOTE_ATTEMPTS = 3;
+const REMOTE_RETRY_DELAY_MS = 1500;
+
 /**
  * Extração de alta performance via mkv_extractor (HTTP Range + EBML Cues)
  * Baixa apenas ~1-2 MB da legenda em 3-8s em vez de GBs pelo FFmpeg.
@@ -66,8 +71,8 @@ async function extractRemoteMkvSubtitle(
 
     const timer = setTimeout(() => {
       killTree(proc);
-      reject(new Error('Tempo limite de 60s excedido no mkv_extractor.'));
-    }, 60000);
+      reject(new Error(`Tempo limite de ${REMOTE_ATTEMPT_TIMEOUT_MS / 1000}s excedido no mkv_extractor.`));
+    }, REMOTE_ATTEMPT_TIMEOUT_MS);
 
     proc.on('close', (code) => {
       clearTimeout(timer);
@@ -115,6 +120,9 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
       const cachedTracks = tracksCache.get(targetUrl);
       const subInfo = cachedTracks?.subtitles?.find((s: any) => String(s.index) === String(track));
       const subCodec = (subInfo?.codec || '').toLowerCase();
+      // Nos logs, "#3" sozinho não diz qual é a legenda: junta o idioma e o título da faixa
+      const subName = [subInfo?.language, subInfo?.title].filter(Boolean).join(' · ');
+      const trackLabel = subName ? `#${track} (${subName})` : `#${track}`;
 
       // Se for formato bitmap (PGS, VobSub), rejeita com código específico para o resolver dar fallback
       if (subCodec === 'none' || /pgs|pgssub|dvd_sub|dvb_sub|xsub|dvdsub|vobsub|bitmap/i.test(subCodec)) {
@@ -133,25 +141,37 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
 
       if (isCandidateMkv) {
         try {
-          console.log(`[Subtitle] 🚀 Tentando extração remota ultrarrápida (HTTP Range / EBML) para faixa #${track}...`);
+          console.log(`[Subtitle] 🚀 Tentando extração remota ultrarrápida (HTTP Range / EBML) para faixa ${trackLabel}...`);
           const t0 = Date.now();
-          const content = await extractRemoteMkvSubtitle(streamUrl, track, tmpFile, extractionKey);
+          let content = '';
+          for (let attempt = 1; ; attempt++) {
+            try {
+              content = await extractRemoteMkvSubtitle(streamUrl, track, tmpFile, extractionKey);
+              break;
+            } catch (attemptErr: any) {
+              // Sem Python ou servidor ocupado não melhora tentando de novo
+              if (attempt >= REMOTE_ATTEMPTS || attemptErr?.code === 'busy' || /Python 3\.10\+ não encontrado/.test(attemptErr?.message || '')) throw attemptErr;
+              console.warn(`[Subtitle] ↻ Tentativa ${attempt}/${REMOTE_ATTEMPTS} falhou na faixa ${trackLabel} (${attemptErr.message?.slice(0, 100)}). Tentando de novo…`);
+              try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
+              await new Promise((r) => setTimeout(r, REMOTE_RETRY_DELAY_MS * attempt));
+            }
+          }
 
           if (fs.existsSync(tmpFile)) {
             if (fs.existsSync(cacheFile)) fs.unlinkSync(cacheFile);
             fs.renameSync(tmpFile, cacheFile);
           }
           const elapsedSec = ((Date.now() - t0) / 1000).toFixed(1);
-          console.log(`[Subtitle] ⚡ Sucesso! Faixa #${track} extraída via mkv_extractor em ${elapsedSec}s (${content.length} bytes).`);
+          console.log(`[Subtitle] ⚡ Sucesso! Faixa ${trackLabel} extraída via mkv_extractor em ${elapsedSec}s (${content.length} bytes).`);
           return content;
         } catch (mkvErr: any) {
-          console.warn(`[Subtitle] ⚠️ mkv_extractor não conseguiu processar faixa #${track} (${mkvErr.message?.slice(0, 150)}). Acionando fallback FFmpeg...`);
+          console.warn(`[Subtitle] ⚠️ mkv_extractor não conseguiu processar faixa ${trackLabel} (${mkvErr.message?.slice(0, 150)}). Acionando fallback FFmpeg...`);
           try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
         }
       }
 
       // 2. Fallback resiliente com FFmpeg completo
-      console.log(`[Subtitle] 🔄 Iniciando extração de compatibilidade via FFmpeg para faixa #${track}...`);
+      console.log(`[Subtitle] 🔄 Iniciando extração de compatibilidade via FFmpeg para faixa ${trackLabel}...`);
 
       const subCodecArgs = (subCodec.includes('ass') || subCodec.includes('ssa'))
         ? ['-c:s', 'copy']
@@ -194,7 +214,7 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
 
         activeSubtitleProcesses.set(extractionKey, () => {
           try {
-            console.log(`[Subtitle] ⏹ Cancelando extração da faixa #${track} (processo descartado/obsoleto)...`);
+            console.log(`[Subtitle] ⏹ Cancelando extração da faixa ${trackLabel} (processo descartado/obsoleto)...`);
             killTree(proc);
           } catch {}
         });
@@ -214,14 +234,14 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
               if (fs.existsSync(cacheFile)) fs.unlinkSync(cacheFile);
               fs.renameSync(tmpFile, cacheFile);
               const content = fs.readFileSync(cacheFile, 'utf-8');
-              console.log(`[Subtitle] ✅ Legenda #${track} extraída com sucesso (${content.length} bytes).`);
+              console.log(`[Subtitle] ✅ Legenda ${trackLabel} extraída com sucesso (${content.length} bytes).`);
               resolve(content);
             } catch {
               resolve(fs.readFileSync(tmpFile, 'utf-8'));
             }
           } else {
             try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
-            console.warn(`[Subtitle] Falha ao extrair #${track} (code ${code}): ${stderr}`);
+            console.warn(`[Subtitle] Falha ao extrair ${trackLabel} (code ${code}): ${stderr}`);
             const err: any = new Error(`Falha ao extrair legenda #${track}: ${stderr.slice(-300) || 'Erro no processo FFmpeg'}`);
             err.code = 'EXTRACTION_FAILED';
             reject(err);
