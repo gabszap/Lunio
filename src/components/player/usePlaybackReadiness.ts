@@ -23,6 +23,8 @@ export function usePlaybackReadiness(args: {
   const { readiness, autoPlay, paused, setPaused, playerRef, source, handleSeekRef, pendingPlayRef } = args;
   // Vídeo para o qual o Host já retomou a posição da sala (evita repetir a cada mudança de readiness)
   const hostResumedSrcRef = useRef<string>('');
+  // O autoplay vale uma vez por vídeo: sem isso, pausar disparava o play de novo (loop) e o usuário não conseguia pausar
+  const autoStartedSrcRef = useRef<string>('');
 
   // PlaybackReadiness (v8): Autoplay inicia SOMENTE quando vídeo + áudio + legenda obrigatória estiverem prontos
   useEffect(() => {
@@ -72,9 +74,11 @@ export function usePlaybackReadiness(args: {
       }
     }
 
-    if (!autoPlay && !pendingPlayRef.current) return;
+    const wantsAutoPlay = autoPlay && autoStartedSrcRef.current !== source.src;
+    if (!wantsAutoPlay && !pendingPlayRef.current) return;
 
     if (paused) {
+      if (autoPlay) autoStartedSrcRef.current = source.src;
       logger.info('[Player] Vídeo, áudio e legenda prontos; iniciando');
       const videoEl = getVideoElement(playerRef);
 
