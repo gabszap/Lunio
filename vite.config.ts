@@ -68,6 +68,12 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       watch: {
         ignored: [
+          // Testes e relatórios não fazem parte do app: mexer neles não deve recarregar nem reiniciar o dev server
+          '**/e2e/**',
+          '**/logs/**',
+          '**/test-results/**',
+          '**/playwright-report/**',
+          '**/.playwright/**',
           '**/.cache/**',
           '**/.uploads/**',
           '**/cache/**',
