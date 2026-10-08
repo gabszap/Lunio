@@ -19,6 +19,7 @@ from mkv_extractor.subtitles import (
     select_subtitle_track,
 )
 from mkv_extractor.errors import TrackNotFoundError, CodecNotSupportedError
+from mkv_extractor.extractor import cue_times_seconds
 
 
 class TestEbml(unittest.TestCase):
@@ -186,6 +187,30 @@ class TestExtractedFiles(unittest.TestCase):
             lines = f.readlines()
         dialogues = [line for line in lines if line.startswith("Dialogue:")]
         self.assertEqual(len(dialogues), 400, f"Esperado 400 eventos no EP2, obteve {len(dialogues)}")
+
+
+
+class TestKeyframeCues(unittest.TestCase):
+    def _cue(self, time, track):
+        return {"time": time, "positions": [{"track": track, "cluster_position": 0, "relative_position": 0, "duration": None}]}
+
+    def test_cue_times_use_timecode_scale_and_only_the_video_track(self):
+        cues = [self._cue(0, 1), self._cue(4000, 1), self._cue(4000, 2), self._cue(9500, 1), self._cue(2000, 2)]
+        # escala padrão do Matroska: 1 ms por unidade
+        self.assertEqual(cue_times_seconds(cues, 1, 1_000_000), [0.0, 4.0, 9.5])
+        self.assertEqual(cue_times_seconds(cues, 2, 1_000_000), [2.0, 4.0])
+
+    def test_cue_times_with_other_scale(self):
+        cues = [self._cue(10, 1), self._cue(20, 1)]
+        # 100 ms por unidade
+        self.assertEqual(cue_times_seconds(cues, 1, 100_000_000), [1.0, 2.0])
+
+    def test_cue_times_sorted_and_deduplicated(self):
+        cues = [self._cue(9000, 1), self._cue(1000, 1), self._cue(1000, 1)]
+        self.assertEqual(cue_times_seconds(cues, 1, 1_000_000), [1.0, 9.0])
+
+    def test_no_cues_for_track(self):
+        self.assertEqual(cue_times_seconds([self._cue(1000, 2)], 1, 1_000_000), [])
 
 
 if __name__ == "__main__":

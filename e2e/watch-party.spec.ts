@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createRoom, joinRoom, newUser, openParticipants, state, togglePlay, waitReady } from './helpers';
+import { createRoom, joinRoom, newUser, openParticipants, state, togglePlay, trackHls, waitReady } from './helpers';
 
 test.describe('Watch Party', () => {
   test('play, pause e seek do Host chegam ao espectador', async ({ browser }) => {
@@ -102,15 +102,20 @@ test.fixme('banido não consegue voltar abrindo o link de novo (depende do ID pe
 });
 
 test.describe('Player', () => {
+  const pickPortugueseAudio = async (page: import('@playwright/test').Page) => {
+    await page.getByRole('button', { name: 'Faixas de áudio' }).click();
+    await page.getByRole('menuitemradio', { name: /Português/ }).click();
+  };
+
   test('com áudio alternativo, pausar e dar play não volta ao começo do trecho', async ({ browser }) => {
     const host = await newUser(browser);
+    const hls = trackHls(host.page);
     await createRoom(host.page, 'Ana');
     await waitReady(host.page);
 
-    // troca para a segunda faixa de áudio (remux fMP4)
-    await host.page.getByRole('button', { name: 'Faixas de áudio' }).click();
-    await host.page.getByRole('menuitemradio', { name: /Português/ }).click();
-    await expect.poll(async () => (await state(host.page)).src, { timeout: 20_000 }).toMatch(/audio=/);
+    // troca para a segunda faixa de áudio (HLS compartilhado: o vídeo é MKV H.264 com Cues)
+    await pickPortugueseAudio(host.page);
+    await expect.poll(() => hls.playlist(), { timeout: 20_000 }).toMatch(/\/api\/hls\/[a-f0-9]+\/\d+\/index\.m3u8/);
 
     await togglePlay(host.page);
     await expect.poll(async () => (await state(host.page)).t, { timeout: 30_000 }).toBeGreaterThan(4);
@@ -127,6 +132,71 @@ test.describe('Player', () => {
     // antes do conserto, o play depois do pause reiniciava do 00:00 do trecho remuxado
     expect(after.t).toBeGreaterThan(pausedAt - 0.5);
     expect(after.t).toBeGreaterThan(pausedAt + 1);
+    await host.context.close();
+  });
+
+  test('com áudio alternativo por HLS, o seek é rápido e o tempo é absoluto', async ({ browser }) => {
+    const host = await newUser(browser);
+    const hls = trackHls(host.page);
+    await createRoom(host.page, 'Ana');
+    await waitReady(host.page);
+    await pickPortugueseAudio(host.page);
+    await expect.poll(() => hls.playlist(), { timeout: 20_000 }).toMatch(/index\.m3u8/);
+
+    await togglePlay(host.page);
+    await expect.poll(async () => (await state(host.page)).t, { timeout: 30_000 }).toBeGreaterThan(3);
+
+    // pula ~50 s à frente (muito além do que já foi baixado): com o remux isso reiniciava o FFmpeg (3–5 s)
+    const before = (await state(host.page)).t;
+    const t0 = Date.now();
+    for (let i = 0; i < 5; i++) await host.page.keyboard.press('l'); // 5 × 10 s
+    await expect
+      .poll(async () => {
+        const s = await state(host.page);
+        return s.t > before + 45 && s.rs >= 3 && !s.paused;
+      }, { timeout: 20_000, intervals: [100] })
+      .toBe(true);
+    const took = Date.now() - t0;
+    // linha do tempo absoluta: depois do pulo o relógio do vídeo está em ~55 s, não perto de 0 (como no remux com offset)
+    expect((await state(host.page)).t).toBeGreaterThan(before + 45);
+    expect(took).toBeLessThan(8000);
+    await host.context.close();
+  });
+
+  test('quem está na sala usa a mesma playlist: o áudio é gerado uma vez para todos', async ({ browser }) => {
+    const host = await newUser(browser);
+    const guest = await newUser(browser);
+    const hostHls = trackHls(host.page);
+    const guestHls = trackHls(guest.page);
+    const code = await createRoom(host.page, 'Ana');
+    await joinRoom(guest.page, code, 'Bia');
+    await waitReady(host.page);
+    await waitReady(guest.page);
+
+    await pickPortugueseAudio(host.page);
+    await pickPortugueseAudio(guest.page);
+    await expect.poll(() => hostHls.playlist(), { timeout: 20_000 }).toMatch(/index\.m3u8/);
+    await expect.poll(() => guestHls.playlist(), { timeout: 20_000 }).toMatch(/index\.m3u8/);
+    expect(hostHls.playlist()).toBe(guestHls.playlist());
+
+    // e o Host controla os dois: play chega ao convidado mesmo com cada um no seu áudio
+    await togglePlay(host.page);
+    await expect.poll(async () => (await state(guest.page)).paused, { timeout: 25_000 }).toBe(false);
+    await host.context.close();
+    await guest.context.close();
+  });
+
+  test('se o HLS não estiver disponível, o áudio alternativo cai no remux e toca do mesmo jeito', async ({ browser }) => {
+    const host = await newUser(browser);
+    await host.page.route('**/api/hls/start', (route) =>
+      route.fulfill({ status: 501, contentType: 'application/json', body: JSON.stringify({ error: 'x', code: 'no_keyframes' }) })
+    );
+    await createRoom(host.page, 'Ana');
+    await waitReady(host.page);
+    await pickPortugueseAudio(host.page);
+    await expect.poll(async () => (await state(host.page)).src, { timeout: 20_000 }).toMatch(/audio=/);
+    await togglePlay(host.page);
+    await expect.poll(async () => (await state(host.page)).t, { timeout: 30_000 }).toBeGreaterThan(3);
     await host.context.close();
   });
 

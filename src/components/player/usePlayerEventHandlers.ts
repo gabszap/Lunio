@@ -30,17 +30,36 @@ export function usePlayerEventHandlers(args: {
   setBuffered: Dispatch<SetStateAction<number>>;
   setBufferedRanges: Dispatch<SetStateAction<{ start: number; end: number }[]>>;
   setControlsVisible: Dispatch<SetStateAction<boolean>>;
+  /** HLS compartilhado de áudio alternativo (ver useAlternateAudio). */
+  hlsModeRef: MutableRefObject<boolean>;
+  pendingSeekRef: MutableRefObject<number | null>;
+  fallbackToRemux: () => void;
 }) {
   const {
     playerRef, source, autoPlay, paused, currentTime, resolvedStreamUrl, setResolvedStreamUrl,
     isSwitchingAudioRef, audioOffsetRef, totalDurationRef, wasPlayingBeforeAudioSwitchRef, pendingPlayRef, lastKnownTimeRef,
     setPlaybackError, setReadiness, setDuration, setPaused, setCurrentTime, setIsBuffering, setBuffered, setBufferedRanges, setControlsVisible,
+    hlsModeRef, pendingSeekRef, fallbackToRemux,
   } = args;
 
   const onCanPlay = () => {
     setPlaybackError(null);
     logger.info('[Player] Pronto para tocar');
     setReadiness((prev) => ({ ...prev, video: true, audio: true }));
+
+    // Troca de áudio por HLS: o stream novo abre do começo; volta ao ponto em que a pessoa estava e retoma se estava tocando
+    if (pendingSeekRef.current !== null) {
+      const target = pendingSeekRef.current;
+      pendingSeekRef.current = null;
+      const videoEl = getVideoElement(playerRef);
+      if (videoEl) videoEl.currentTime = target;
+      lastKnownTimeRef.current = target;
+      setCurrentTime(target);
+      if (wasPlayingBeforeAudioSwitchRef.current) {
+        videoEl?.play().catch(() => {});
+        setPaused(false);
+      }
+    }
 
     if (isSwitchingAudioRef.current) {
       // Em modo remux fMP4, o elemento de vídeo só conhece os fragmentos recebidos (ex: 9s ou 15s).
@@ -153,6 +172,11 @@ export function usePlayerEventHandlers(args: {
   };
   const onError = (err: any) => {
     sessionManager.updateRunStatus('failed');
+    if (hlsModeRef.current) {
+      // HLS compartilhado falhou (segmento, rede, codec): continua pelo remux em vez de mostrar erro
+      fallbackToRemux();
+      return;
+    }
     if (isSwitchingAudioRef.current) {
       // Ignora erro transitório durante a reconexão da dublagem
       return;

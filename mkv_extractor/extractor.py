@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import (
+    CuesNotFoundError,
     MatroskaStructureError,
     NoRelativePositionError,
     RemoteMkvError,
@@ -249,6 +250,42 @@ def extract_remote_subtitle(
     return results[0]
 
 
+def cue_times_seconds(cues: list[dict[str, Any]], track_number: int, scale: int) -> list[float]:
+    """Instantes (em segundos, sem repetição e em ordem) dos pontos de Cue da faixa: onde há keyframe de vídeo."""
+    times = {round(c["time"] * scale / 1_000_000_000, 3) for c in get_track_cues(cues, track_number)}
+    return sorted(times)
+
+
+def extract_video_keyframes(url: str, timeout: int = 60, verbose: bool = False) -> dict[str, Any]:
+    """
+    Lê só o cabeçalho e os Cues do MKV remoto e devolve onde estão os keyframes da primeira faixa de vídeo.
+    É a base do HLS compartilhado: os segmentos precisam começar em keyframes para o vídeo ser copiado sem recodificar.
+    """
+    final_url, total_size = resolve_url(url, timeout=timeout, verbose=verbose)
+    head = read_range(final_url, 0, min(HEAD_SCAN_SIZE, total_size) - 1, timeout=timeout, verbose=verbose)
+
+    segment_data_start, _ = find_segment(head)
+    scale = get_timecode_scale(head)
+    _, tracks = find_tracks(head)
+
+    video = next((t for t in tracks if t.get("track_type") == 1), None)
+    if video is None:
+        raise MatroskaStructureError("O arquivo não tem faixa de vídeo.")
+
+    cues_data = discover_cues(final_url, total_size, segment_data_start, head, timeout=timeout, verbose=verbose)
+    cues = parse_cues(cues_data)
+    times = cue_times_seconds(cues, video["track_number"], scale)
+    if not times:
+        raise CuesNotFoundError("Os Cues não têm entradas para a faixa de vídeo.")
+
+    return {
+        "video_track": video["track_number"],
+        "video_codec": video.get("codec_id"),
+        "timecode_scale": scale,
+        "keyframes": times,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Remote Subtitle Extractor: extração ultrarrápida de legendas ASS via HTTP Range."
@@ -264,12 +301,17 @@ def main():
     parser.add_argument("--stream-index", type=int, default=None, help="Índice global do stream como o FFmpeg numera (0:N)")
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="Tamanho do lote multi-range")
     parser.add_argument("--timeout", type=int, default=60, help="Timeout HTTP em segundos")
+    parser.add_argument("--keyframes", action="store_true", help="Em vez de legenda, imprimir (JSON) os keyframes do vídeo lidos dos Cues")
     parser.add_argument("--json", action="store_true", help="Imprimir metadados como JSON")
     parser.add_argument("-v", "--verbose", action="store_true", help="Logs detalhados")
 
     args = parser.parse_args()
 
     try:
+        if args.keyframes:
+            print(json.dumps(extract_video_keyframes(args.url, timeout=args.timeout, verbose=args.verbose)))
+            return
+
         result = extract_remote_subtitle(
             args.url,
             language=args.language,
