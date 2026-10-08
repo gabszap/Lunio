@@ -132,7 +132,7 @@ class DiscordActivityManager {
           response_type: 'code',
           state: '',
           prompt: 'none',
-          scope: ['identify', 'guilds'],
+          scope: ['identify', 'guilds', 'rpc.activities.write'],
         });
 
         if (code) {
@@ -195,6 +195,53 @@ class DiscordActivityManager {
     return this.state;
   }
 
+  private presenceBase: { title?: string; people: number } = { people: 1 };
+  private playback: { paused: boolean; position: number; duration: number } | null = null;
+  private sentPresence: { key: string; start?: number } = { key: '' };
+  private presenceStart = Math.floor(Date.now() / 1000);
+
+  /** Rich Presence ("Jogando Lunio"): título do vídeo e quantas pessoas estão na sala. Falha em silêncio (scope não concedido). */
+  public setPresence(opts: { title?: string; people: number }) {
+    this.presenceBase = opts;
+    if (!opts.title) this.playback = null;
+    void this.pushPresence();
+  }
+
+  /** Ponto do vídeo: tocando mostra "restante" no contador do Discord; pausado mostra a posição no texto. */
+  public setPlayback(pb: { paused: boolean; position: number; duration: number } | null) {
+    this.playback = pb;
+    void this.pushPresence();
+  }
+
+  private async pushPresence(): Promise<void> {
+    if (!this.sdk || !this.state.user || this.state.user.id === 'mock_discord_user') return;
+    const { title, people } = this.presenceBase;
+    const pb = title ? this.playback : null;
+    const hasTimeline = !!pb && pb.duration > 0;
+    const playing = hasTimeline && !pb!.paused;
+    const start = playing ? Math.floor(Date.now() / 1000 - pb!.position) : undefined;
+
+    const room = people > 1 ? `Em sala com ${people} pessoas` : 'Sozinho na sala';
+    const state = hasTimeline && pb!.paused ? `Pausado em ${fmtClock(pb!.position)} de ${fmtClock(pb!.duration)} · ${room}` : room;
+    const key = JSON.stringify({ title, state, playing, hasTimeline });
+    // Tocando: só reenvia se o início calculado mudou (seek/pausa), não a cada tick
+    if (key === this.sentPresence.key && (!playing || Math.abs((start ?? 0) - (this.sentPresence.start ?? 0)) <= 3)) return;
+    this.sentPresence = { key, start };
+
+    const timestamps = playing ? { start: start!, end: start! + Math.floor(pb!.duration) } : { start: this.presenceStart };
+    const activity = {
+      type: 0,
+      details: title ? `Assistindo ${title}`.slice(0, 128) : 'Escolhendo um vídeo',
+      state: state.slice(0, 128),
+      timestamps,
+    };
+    try {
+      await this.sdk.commands.setActivity({ activity: activity as never });
+    } catch (e: any) {
+      logger.warn('[Discord] Não deu pra atualizar a Rich Presence:', e?.message);
+    }
+  }
+
   public getSdk(): DiscordSDK | null {
     return this.sdk;
   }
@@ -215,3 +262,11 @@ class DiscordActivityManager {
 }
 
 export const discordManager = new DiscordActivityManager();
+
+function fmtClock(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}

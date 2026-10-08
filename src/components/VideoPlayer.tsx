@@ -36,6 +36,7 @@ import { useAlternateAudio } from './player/useAlternateAudio';
 import { useControlsVisibility } from './player/useControlsVisibility';
 import { useFullscreen } from './player/useFullscreen';
 import { useMediaInspection } from './player/useMediaInspection';
+import { useDiscordPresence } from './player/useDiscordPresence';
 import { useNativeVideoEvents } from './player/useNativeVideoEvents';
 import { usePlaybackControls } from './player/usePlaybackControls';
 import { usePlaybackReadiness } from './player/usePlaybackReadiness';
@@ -238,6 +239,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return () => clearTimeout(timer);
   }, [source.src, resolvedStreamUrl]);
 
+  useDiscordPresence({ paused, currentTime, duration });
   useNativeVideoEvents({
     playerRef,
     resolvedStreamUrl,
