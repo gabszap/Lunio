@@ -218,7 +218,8 @@ src/
   components/
     home/                 Menu da sala e passos de cada fonte (stream, envio, YouTube, Drive, entrar)
     catalog/              Catálogo, busca e detalhes do título
-    VideoPlayer.tsx       Núcleo do player (Vidstack), sincronia, overlays
+    VideoPlayer.tsx       Composição do player (Vidstack): estado compartilhado, ordem dos hooks e renderização
+    player/               Hooks do player (sala, áudio alternativo, legendas, controles, atalhos…) e overlays
     PlayerControls.tsx    Barra de controles e menus
     WatchPartyPanel.tsx   Chat e participantes
     ui.tsx                Componentes visuais compartilhados (design system)
