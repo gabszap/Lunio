@@ -139,9 +139,8 @@ test.describe('Watch Party', () => {
   });
 });
 
-// Hoje o ID do usuário é por aba (sessionStorage): quem foi banido volta abrindo uma aba nova.
-// O servidor já recusa o ID banido (testes unitários); falta o ID persistente da Fase 8.1 do plano.
-test.fixme('banido não consegue voltar abrindo o link de novo (depende do ID persistente, Fase 8.1)', async ({ browser }) => {
+// O ID do usuário é persistente (localStorage): quem foi banido não volta abrindo o link numa aba nova do mesmo navegador.
+test('banido não consegue voltar abrindo o link de novo (nem em outra aba)', async ({ browser }) => {
   const host = await newUser(browser);
   const guest = await newUser(browser);
   const code = await createRoom(host.page, 'Ana');
@@ -154,6 +153,24 @@ test.fixme('banido não consegue voltar abrindo o link de novo (depende do ID pe
   if (await dialog.isVisible({ timeout: 3000 }).catch(() => false)) await dialog.locator('form button[type="submit"]').click();
   await expect(guest.page.getByText(/banid/i).first()).toBeVisible({ timeout: 15_000 });
   await expect(guest.page.locator('video')).toHaveCount(0);
+});
+
+test('a mesma pessoa em duas abas aparece nas duas e o ban derruba as duas', async ({ browser }) => {
+  const host = await newUser(browser);
+  const guest = await newUser(browser);
+  const code = await createRoom(host.page, 'Ana');
+  await joinRoom(guest.page, code, 'Bia');
+  const secondTab = await guest.context.newPage();
+  await joinRoom(secondTab, code, 'Bia');
+
+  await openParticipants(host.page);
+  await expect(host.page.getByRole('button', { name: 'Banir da sala' })).toHaveCount(2, { timeout: 15_000 });
+  await host.page.getByRole('button', { name: 'Banir da sala' }).first().click();
+
+  await expect(guest.page).not.toHaveURL(/room=/, { timeout: 15_000 });
+  await expect(secondTab).not.toHaveURL(/room=/, { timeout: 15_000 });
+  await host.context.close();
+  await guest.context.close();
 });
 
 test.describe('Player', () => {

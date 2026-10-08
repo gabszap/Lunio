@@ -146,11 +146,33 @@ export function useNativeVideoEvents(args: {
       }
     };
 
+    // Diagnóstico de lag: onde o buffer travou, quanto durou e o que o navegador estava fazendo
+    let stall: { at: number; pos: number } | null = null;
+    const describeStall = () => {
+      if (!videoEl) return '';
+      const offset = isSwitchingAudioRef.current ? audioOffsetRef.current : 0;
+      const src = videoEl.currentSrc || '';
+      const kind = src.startsWith('blob:') ? 'HLS' : src.includes('audio=') ? 'remux' : 'direto';
+      const cur = videoEl.currentTime || 0;
+      let ahead = 0;
+      for (let i = 0; i < videoEl.buffered.length; i++) {
+        if (cur >= videoEl.buffered.start(i) - 0.2 && cur <= videoEl.buffered.end(i) + 0.2) ahead = videoEl.buffered.end(i) - cur;
+      }
+      return `modo ${kind}, ${ahead.toFixed(1)} s à frente, readyState ${videoEl.readyState}, rede ${videoEl.networkState}`;
+    };
+    const endStall = () => {
+      if (!stall) return;
+      const secs = ((Date.now() - stall.at) / 1000).toFixed(1);
+      logger.info(`[Player] Buffer resolvido após ${secs} s (travou em ${formatTime(stall.pos)})`);
+      stall = null;
+    };
+
     const onNativePlay = () => {
       setPaused(false);
       setIsBuffering(false);
     };
     const onNativePlaying = () => {
+      endStall();
       setPaused(false);
       setIsBuffering(false);
     };
@@ -173,7 +195,11 @@ export function useNativeVideoEvents(args: {
       }
       if (!hasBufferedAhead) {
         setIsBuffering(true);
-        logger.warn('[Player] Carregando buffer…');
+        if (!stall) {
+          const pos = cur + (isSwitchingAudioRef.current ? audioOffsetRef.current : 0);
+          stall = { at: Date.now(), pos };
+          logger.warn(`[Player] Buffer esgotado em ${formatTime(pos)} (${describeStall()})`);
+        }
       }
     };
     const onNativeSeeking = () => {
@@ -189,9 +215,15 @@ export function useNativeVideoEvents(args: {
         }
       }
       setIsBuffering(true);
+      if (!stall) {
+        const pos = (videoEl?.currentTime || 0) + (isSwitchingAudioRef.current ? audioOffsetRef.current : 0);
+        stall = { at: Date.now(), pos };
+        logger.warn(`[Player] Seek para ${formatTime(pos)} sem buffer carregado (${describeStall()})`);
+      }
       updateBufferInfo();
     };
     const onNativeSeeked = () => {
+      endStall();
       setIsBuffering(false);
       updateBufferInfo();
       if (wasPlayingBeforeSeekRef.current) {
@@ -202,6 +234,7 @@ export function useNativeVideoEvents(args: {
       }
     };
     const onNativeCanPlay = () => {
+      endStall();
       setIsBuffering(false);
       updateBufferInfo();
       if (wasPlayingBeforeSeekRef.current) {

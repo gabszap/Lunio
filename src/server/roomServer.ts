@@ -49,6 +49,9 @@ interface RoomInternal {
   bannedMembers: Map<string, BannedMember>;
 }
 
+/** O servidor dá `<id>_tab####` à segunda aba aberta pela mesma pessoa; o ban vale para o ID de verdade (todas as abas). */
+export const baseUserId = (id: string) => id.replace(/_tab\d{4}$/, '');
+
 /** Quanto tempo uma sala sem ninguém continua existindo (dá tempo de recarregar a página e voltar). */
 const EMPTY_ROOM_TTL_MS = 30 * 1000;
 
@@ -68,7 +71,7 @@ export class RoomManager {
   /** A pessoa está (ou acabou de cair e pode voltar) na sala, e não foi banida? */
   public isMember(roomId: string, userId: string): boolean {
     const room = this.rooms.get(roomId);
-    if (!room || room.bannedMembers.has(userId)) return false;
+    if (!room || room.bannedMembers.has(baseUserId(userId))) return false;
     if (room.pendingLeaves.has(userId)) return true;
     for (const s of room.clients.values()) if (s.userId === userId) return true;
     return false;
@@ -201,7 +204,7 @@ export class RoomManager {
   ) {
     const room = this.getOrCreateRoom(roomId, user.id);
 
-    if (room.bannedMembers && room.bannedMembers.has(user.id)) {
+    if (room.bannedMembers && room.bannedMembers.has(baseUserId(user.id))) {
       console.log(`[WatchParty] ⛔ Usuário banido "${user.username}" (${user.id}) tentou entrar na sala "${roomId}".`);
       this.send(ws, { type: 'error', message: 'Você foi banido desta sala pelo Host.', code: 'banned' });
       try {
@@ -696,15 +699,15 @@ export class RoomManager {
 
       case 'room:ban': {
         if (!isHost) return;
-        const targetUserId = msg.targetUserId;
-        if (targetUserId === clientSession.userId) return;
+        const targetUserId = baseUserId(String(msg.targetUserId));
+        if (targetUserId === baseUserId(clientSession.userId)) return; // o Host não bane a si mesmo (nem a própria outra aba)
 
         let bannedName = 'Usuário';
         let bannedAvatar: string | undefined;
         let bannedPlatform: 'discord' | 'web' = 'web';
 
         for (const [targetWs, targetSession] of Array.from(currentRoom.clients.entries())) {
-          if (targetSession.userId === targetUserId) {
+          if (baseUserId(targetSession.userId) === targetUserId) {
             bannedName = targetSession.username;
             bannedAvatar = targetSession.avatarUrl;
             bannedPlatform = targetSession.platform || 'web';
@@ -746,7 +749,7 @@ export class RoomManager {
 
       case 'room:unban': {
         if (!isHost) return;
-        const targetUserId = msg.targetUserId;
+        const targetUserId = baseUserId(String(msg.targetUserId));
         if (currentRoom.bannedMembers && currentRoom.bannedMembers.has(targetUserId)) {
           const unbanned = currentRoom.bannedMembers.get(targetUserId);
           currentRoom.bannedMembers.delete(targetUserId);

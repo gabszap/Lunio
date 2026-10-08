@@ -542,7 +542,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       )}
 
       {/* Pular abertura / encerramento / resumo (Player · Pular abertura) */}
-      {skippableChapter && !isViewer && (
+      {/* Some enquanto um menu (ajustes, legendas, áudio…) está aberto, para não ficar por cima dele */}
+      {skippableChapter && !isViewer && !controls.menuOpen && (
         <SkipChapterButton
           chapter={skippableChapter}
           showControls={showControls}
