@@ -82,10 +82,12 @@ interface PlayerPageProps {
   unreadChat: number;
   onToggleWatchParty: () => void;
   children: React.ReactNode;
+  /** Fila de vídeos da sala, mostrada abaixo do player (estilo YouTube). */
+  queue?: React.ReactNode;
   console: React.ReactNode;
 }
 
-export const PlayerPage: React.FC<PlayerPageProps> = ({ onHome, room, environment, unreadChat, onToggleWatchParty, children, console }) => {
+export const PlayerPage: React.FC<PlayerPageProps> = ({ onHome, room, environment, unreadChat, onToggleWatchParty, children, queue, console }) => {
   const [copied, setCopied] = useState(false);
 
   const shareRoom = async () => {
@@ -155,6 +157,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({ onHome, room, environmen
 
       <main className="w-full max-w-[1320px] mx-auto px-0 sm:px-8 pt-0 sm:pt-6 pb-14 box-border flex flex-col gap-5">
         {children}
+        {room.connected && queue && <div className="px-4 sm:px-0">{queue}</div>}
         <div className="px-4 sm:px-0">{console}</div>
       </main>
     </div>

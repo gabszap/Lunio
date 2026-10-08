@@ -10,6 +10,7 @@ import type {
   ChatMessage,
   MemberPlaybackState,
   BannedMember,
+  PlaylistItem,
 } from '../types/sync';
 
 export interface DriftCorrectionResult {
@@ -538,6 +539,13 @@ class SyncManager {
         break;
       }
 
+      case 'playlist:update': {
+        if (!this.roomState) return;
+        this.roomState.playlist = msg.playlist;
+        this.notifyState();
+        break;
+      }
+
       case 'members:update': {
         if (!this.roomState) return;
         this.roomState.members = msg.members;
@@ -692,6 +700,30 @@ class SyncManager {
       position: Math.max(0, position),
       rate,
     });
+  }
+
+  public getPlaylist(): PlaylistItem[] {
+    return this.roomState?.playlist || [];
+  }
+
+  public emitPlaylistAdd(item: { url: string; title: string; mimeType?: string }) {
+    if (!this.isConnected) return;
+    this.send({ type: 'playlist:add', ...item });
+  }
+
+  public emitPlaylistRemove(itemId: string) {
+    if (!this.isConnected) return;
+    this.send({ type: 'playlist:remove', itemId });
+  }
+
+  public emitPlaylistMove(itemId: string, direction: 'up' | 'down') {
+    if (!this.isConnected || !this.isRoomHost()) return;
+    this.send({ type: 'playlist:move', itemId, direction });
+  }
+
+  public emitPlaylistTake(itemId: string) {
+    if (!this.isConnected || !this.isRoomHost()) return;
+    this.send({ type: 'playlist:take', itemId });
   }
 
   public emitKick(targetUserId: string) {

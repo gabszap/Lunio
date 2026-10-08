@@ -3,6 +3,7 @@ import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Server as HttpsServer } from 'node:https';
 import { issueRoomToken } from './access';
 import { isOriginAllowed } from './cors';
+import { PLAYLIST_MAX_ITEMS } from '../types/sync';
 import type {
   ClientMessage,
   ServerMessage,
@@ -12,6 +13,7 @@ import type {
   ChatMessage,
   MemberPlaybackState,
   BannedMember,
+  PlaylistItem,
 } from '../types/sync';
 
 interface ClientSession {
@@ -32,6 +34,7 @@ interface RoomInternal {
   roomId: string;
   hostId: string;
   media: RoomMedia | null;
+  playlist: PlaylistItem[];
   playback: {
     playing: boolean;
     position: number;
@@ -106,6 +109,7 @@ export class RoomManager {
         roomId,
         hostId: initialHostId || '',
         media: null,
+        playlist: [],
         playback: {
           playing: false,
           position: 0,
@@ -150,6 +154,7 @@ export class RoomManager {
       roomId: room.roomId,
       hostId: room.hostId,
       media: room.media,
+      playlist: room.playlist,
       playback: {
         playing: room.playback.playing,
         position: currentPos,
@@ -523,6 +528,52 @@ export class RoomManager {
           triggeredBy: clientSession.userId,
           username: clientSession.username,
         });
+        break;
+      }
+
+      case 'playlist:add': {
+        const url = typeof msg.url === 'string' ? msg.url.trim() : '';
+        if (!/^https?:\/\//i.test(url) || url.length > 4096) return;
+        if (currentRoom.playlist.length >= PLAYLIST_MAX_ITEMS) return;
+        const title = (typeof msg.title === 'string' ? msg.title.trim() : '').slice(0, 200) || 'Vídeo';
+        currentRoom.playlist.push({
+          id: `pl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+          url,
+          title,
+          mimeType: typeof msg.mimeType === 'string' ? msg.mimeType.slice(0, 100) : undefined,
+          addedById: clientSession.userId,
+          addedBy: clientSession.username,
+        });
+        this.sendSystemChat(currentRoom, `➕ ${clientSession.username} adicionou à fila: "${title}"`);
+        this.broadcast(currentRoom, { type: 'playlist:update', playlist: currentRoom.playlist });
+        break;
+      }
+
+      case 'playlist:remove': {
+        const item = currentRoom.playlist.find((i) => i.id === msg.itemId);
+        // Quem adicionou pode tirar o próprio item; o Host tira qualquer um
+        if (!item || (!isHost && item.addedById !== clientSession.userId)) return;
+        currentRoom.playlist = currentRoom.playlist.filter((i) => i.id !== item.id);
+        this.broadcast(currentRoom, { type: 'playlist:update', playlist: currentRoom.playlist });
+        break;
+      }
+
+      case 'playlist:move': {
+        if (!isHost) return;
+        const from = currentRoom.playlist.findIndex((i) => i.id === msg.itemId);
+        const to = msg.direction === 'up' ? from - 1 : from + 1;
+        if (from < 0 || to < 0 || to >= currentRoom.playlist.length) return;
+        const [moved] = currentRoom.playlist.splice(from, 1);
+        currentRoom.playlist.splice(to, 0, moved);
+        this.broadcast(currentRoom, { type: 'playlist:update', playlist: currentRoom.playlist });
+        break;
+      }
+
+      case 'playlist:take': {
+        if (!isHost) return;
+        if (!currentRoom.playlist.some((i) => i.id === msg.itemId)) return;
+        currentRoom.playlist = currentRoom.playlist.filter((i) => i.id !== msg.itemId);
+        this.broadcast(currentRoom, { type: 'playlist:update', playlist: currentRoom.playlist });
         break;
       }
 
