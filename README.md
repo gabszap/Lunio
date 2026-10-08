@@ -35,8 +35,8 @@ Lunio is a web video player built for watching together. Paste a stream link, up
 | Tool | Needed for | Notes |
 |---|---|---|
 | Node.js 20+ | Everything | |
-| FFmpeg | Track detection, audio track switching, subtitle extraction fallback | Looked up at `C:\Program Files\mpv\ffmpeg.exe`, then `C:\ffmpeg\ffmpeg.exe`, then `ffmpeg` on the `PATH` |
-| Python 3.10+ | Fast embedded subtitle extraction (`mkv_extractor`) | Standard library only. Without it, subtitles fall back to FFmpeg (slower). Set `PYTHON_PATH` if `python` isn't on the `PATH` |
+| FFmpeg | Track detection, audio track switching, subtitle extraction fallback | `FFMPEG_PATH`, then `ffmpeg` on the `PATH`, then known Windows paths (mpv, `C:\ffmpeg`) |
+| Python 3.10+ | Fast embedded subtitle extraction (`mkv_extractor`) | Standard library only. Found as `PYTHON_PATH`, `python3`, `python` or `py -3`. Without it, subtitles fall back to FFmpeg (slower) |
 
 ## Getting started
 
@@ -50,13 +50,22 @@ Open <http://localhost:3000>. The dev server also listens on your local network,
 
 ### Environment variables
 
-Copy `.env.example` to `.env` (only needed for the Discord Activity):
+Copy `.env.example` to `.env`. Locally nothing is required (only the Discord Activity needs the first two); on a server set at least `SESSION_SECRET` and `TRUST_PROXY`. Variables already in the environment (systemd, Docker) win over the file.
 
 | Variable | Description |
 |---|---|
 | `VITE_DISCORD_CLIENT_ID` | Discord application ID used by the Activity |
 | `DISCORD_CLIENT_SECRET` | Discord application secret, used by `/api/token` for the OAuth2 exchange |
-| `PYTHON_PATH` | *(optional)* Python interpreter for the subtitle extractor |
+| `SESSION_SECRET` | Signs the session tokens. Without it a new one is generated at each start |
+| `ALLOWED_ORIGINS` | Extra origins (comma separated) allowed to call the API and open the WebSocket. Default: same origin + the Discord Activity |
+| `TRUST_PROXY` | `1` behind Caddy/nginx: the client IP (used for rate limits) comes from `X-Forwarded-For` |
+| `FFMPEG_PATH` | *(optional)* FFmpeg executable. Otherwise `ffmpeg` on the `PATH`, then known Windows paths |
+| `PYTHON_PATH` | *(optional)* Python 3.10+ for the subtitle extractor. Otherwise `python3`, `python`, `py -3` |
+| `MAX_UPLOAD_DISK_GB` / `MAX_UPLOAD_FILE_GB` | Disk quota for uploads (default 20) and size limit per upload (default 50) |
+| `UPLOAD_TTL_HOURS` | Hours an upload is kept after its room closes (default 6) |
+| `MAX_CACHE_GB` | Limit for `.cache/` (default 2); the least recently used is deleted first |
+| `MAX_FFMPEG_PROCS` | FFmpeg/Python processes at once (default 8) |
+| `ALLOW_PRIVATE_URLS` | Local tests only: lets the proxy reach private network addresses. Keep empty in production |
 | `DISABLE_HMR` | *(optional)* `true` disables Vite hot reload |
 
 ## Scripts
@@ -99,10 +108,102 @@ Vite server, dev or preview (vite.config.ts)
 | `POST /api/upload?name=` | Uploads a file (raw body, up to 50 GB) into `.uploads/` |
 | `GET /api/uploads/<id>/<name>` | Serves an uploaded file with Range support |
 | `GET /api/drive?url=` | Resolves a Google Drive share link to a playable URL |
+| `POST /api/session` | Session token for watching alone (room members get theirs over the WebSocket). The media routes require it |
+| `GET /api/status` | Whether FFmpeg and Python were found (versions only) |
 | `POST /api/token` | Discord OAuth2 code exchange |
 | `WS /api/ws` | Rooms: membership, playback sync, chat, moderation |
 
 Empty rooms are closed about 30 seconds after the last person leaves (`EMPTY_ROOM_TTL_MS` in `src/server/roomServer.ts`).
+
+## Deploying to a Linux server (Ubuntu 24.04)
+
+A small VPS is enough. Lunio runs as a single Node process (`npm start`); Caddy sits in front for HTTPS and WebSocket, and systemd keeps it running. Replace `lunio.example.com` with your domain (its DNS must point to the server) and open ports 80 and 443.
+
+**1. Install Node 22, FFmpeg, Python and Caddy**
+
+```bash
+sudo apt update && sudo apt install -y ffmpeg python3 git curl debian-keyring debian-archive-keyring apt-transport-https
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs
+# Caddy: https://caddyserver.com/docs/install#debian-ubuntu-raspbian
+sudo apt install -y caddy
+```
+
+Ubuntu's `python3` is 3.12 (Lunio needs 3.10+) and is detected automatically; there is no `python` command and none is needed.
+
+**2. Get the code and configure**
+
+```bash
+sudo useradd --system --create-home --home-dir /opt/lunio --shell /usr/sbin/nologin lunio
+sudo -u lunio git clone https://github.com/gabszap/Lunio.git /opt/lunio/app
+cd /opt/lunio/app
+sudo -u lunio npm ci
+sudo -u lunio cp .env.example .env
+sudo -u lunio nano .env
+```
+
+In `.env` set at least:
+
+```ini
+SESSION_SECRET=<output of: openssl rand -hex 32>
+TRUST_PROXY=1                              # Caddy is in front: use the real client IP
+ALLOWED_ORIGINS=                           # only if the site is served from other origins too
+VITE_DISCORD_CLIENT_ID=...                 # only for the Discord Activity
+DISCORD_CLIENT_SECRET=...
+```
+
+Leave `ALLOW_PRIVATE_URLS` empty. It exists only for local tests and turns off the protection that keeps the server from reaching your internal network.
+
+**3. systemd service** — `/etc/systemd/system/lunio.service`
+
+```ini
+[Unit]
+Description=Lunio
+After=network.target
+
+[Service]
+User=lunio
+WorkingDirectory=/opt/lunio/app
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl enable --now lunio
+journalctl -u lunio -f      # at startup it logs which FFmpeg and Python it found
+```
+
+`WorkingDirectory` matters: `.uploads/`, `.cache/` and `.env` live there. `npm start` rebuilds the frontend on every start (about 30 s); to skip that after a deploy, run `npm run build` once and use `ExecStart=/usr/bin/npx vite preview` instead.
+
+**4. Caddy (HTTPS + WebSocket)** — `/etc/caddy/Caddyfile`
+
+```caddyfile
+lunio.example.com {
+	reverse_proxy 127.0.0.1:3000 {
+		flush_interval -1
+	}
+}
+```
+
+```bash
+sudo systemctl reload caddy
+```
+
+Caddy gets the certificate by itself and proxies WebSocket with no extra configuration, so the browser connects to `wss://lunio.example.com/api/ws`. `flush_interval -1` sends the alternate-audio stream to viewers as FFmpeg produces it, with no buffering.
+
+**5. Check**
+
+Open `https://lunio.example.com`, go to **Status**: Server, FFmpeg and Python should all be green. Then create a room, open it in a second browser, and switch an audio track.
+
+**Updating:** `cd /opt/lunio/app && sudo -u lunio git pull && sudo -u lunio npm ci && sudo systemctl restart lunio`. Restarting closes open rooms.
+
+## Development on Windows
+
+Everything runs on Windows without extra setup: `npm install` then `npm run dev`. FFmpeg is looked up in this order: `FFMPEG_PATH` → `ffmpeg` on the `PATH` → `C:\Program Files\mpv\ffmpeg.exe` → `C:\ffmpeg\ffmpeg.exe`. Python: `PYTHON_PATH` → `python3` → `python` → `py -3`. The server prints what it found when it starts, and **Status** shows it too. To run a second copy beside `npm run dev`, use `npx vite --port=3001 --strictPort`.
 
 ## Project structure
 
