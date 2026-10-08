@@ -12,3 +12,6 @@ logs/
 .uploads/
 __pycache__/
 .vite
+e2e/.fixtures/
+playwright-report/
+test-results/
