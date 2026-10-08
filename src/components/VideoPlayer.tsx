@@ -642,7 +642,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           enquanto nada está por cima do vídeo; em tela cheia não há cantos, por isso lá não acontecia. */}
       {!isFullscreen && <RoundedCornersFrame />}
 
-      <WatchPartyPanel isOpen={isWatchPartyOpen} onClose={handleCloseWatchParty} onOpenRoomLobby={onOpenRoomLobby} onLeaveRoom={onLeaveRoom} onPlayPlaylistItem={onPlayPlaylistItem} />
+      <WatchPartyPanel isOpen={isWatchPartyOpen} onClose={handleCloseWatchParty} onOpenRoomLobby={onOpenRoomLobby} onLeaveRoom={onLeaveRoom} />
     </div>
   );
 };

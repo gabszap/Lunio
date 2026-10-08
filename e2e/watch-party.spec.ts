@@ -10,8 +10,6 @@ test.describe('Watch Party', () => {
     await waitReady(host.page);
     await waitReady(guest.page);
 
-    await host.page.keyboard.press('w');
-    await host.page.getByRole('tab', { name: /Fila/ }).click();
     await host.page.getByLabel('Link para adicionar à fila').fill(SUBTITLES_URL);
     await host.page.getByRole('button', { name: 'Adicionar à fila' }).click();
     await expect(host.page.getByText('por Ana')).toBeVisible();
@@ -40,16 +38,12 @@ test.describe('Watch Party', () => {
     await waitReady(host.page);
     await waitReady(guest.page);
 
-    // Bia (espectador) adiciona um vídeo à fila
-    await guest.page.keyboard.press('w');
-    await guest.page.getByRole('tab', { name: /Fila/ }).click();
+    // Bia (espectador) adiciona um vídeo à fila (seção abaixo do player)
     await guest.page.getByLabel('Link para adicionar à fila').fill(SUBTITLES_URL);
     await guest.page.getByRole('button', { name: 'Adicionar à fila' }).click();
     await expect(guest.page.getByText('por Bia')).toBeVisible();
 
     // O Host vê o item, não vê o do outro como removível por engano e toca agora
-    await host.page.keyboard.press('w');
-    await host.page.getByRole('tab', { name: /Fila/ }).click();
     await expect(host.page.getByText('por Bia')).toBeVisible();
     await host.page.getByRole('button', { name: 'Tocar agora' }).click();
 

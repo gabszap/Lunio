@@ -19,6 +19,7 @@ import type { CommitMode, CommitOptions } from './components/home/types';
 import { PRESETS } from './lib/media';
 import { MediaPayload, SubtitleTrack } from './types/media';
 import type { PlaylistItem } from './types/sync';
+import { PlaylistPanel } from './components/PlaylistPanel';
 import { logger } from './lib/logger';
 import { discordManager, DiscordContextState } from './lib/discord';
 import { syncManager } from './lib/sync';
@@ -467,6 +468,7 @@ export default function App() {
           environment={environment}
           unreadChat={unreadChatCount}
           onToggleWatchParty={() => setIsWatchPartyOpen((v) => !v)}
+          queue={<PlaylistPanel onPlayItem={playPlaylistItem} />}
           console={<PlayerConsole />}
         >
           <VideoPlayer

@@ -11,7 +11,7 @@ interface PlaylistPanelProps {
   onPlayItem: (item: PlaylistItem) => void;
 }
 
-/** Aba "Fila" da Watch Party: vídeos para assistir em sequência, dentro da sala. */
+/** Fila da sala, abaixo do player (estilo YouTube): vídeos para assistir em sequência. */
 export const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ onPlayItem }) => {
   const [playlist, setPlaylist] = useState<PlaylistItem[]>(() => syncManager.getPlaylist());
   const [link, setLink] = useState('');
@@ -50,40 +50,45 @@ export const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ onPlayItem }) => {
   };
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
-      <form onSubmit={add} className="px-5 pt-4 pb-3 flex flex-col gap-2 border-b border-lu-border">
-        <div className="flex gap-2">
-          <TextInput
-            value={link}
-            onChange={(e) => {
-              setLink(e.target.value);
-              setError('');
-            }}
-            placeholder="Link do vídeo ou do YouTube"
-            aria-label="Link para adicionar à fila"
-            className="flex-1 min-w-0"
-          />
-          <PrimaryButton type="submit" disabled={!link.trim()} aria-label="Adicionar à fila">
-            <ListPlus size={16} />
-          </PrimaryButton>
-        </div>
-        {error && <span className="text-[12px] text-lu-error">{error}</span>}
-      </form>
-
-      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-5 py-4 flex flex-col gap-2">
-        {playlist.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center text-lu-muted text-[13px]">
-            <ListVideo size={28} />
-            <span>A fila está vazia.</span>
-            <span>Adicione links e o próximo toca sozinho quando o vídeo acabar.</span>
+    <section aria-label="Fila de vídeos" className="rounded-[14px] bg-lu-surface border border-lu-border overflow-hidden">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-4 border-b border-lu-border">
+        <h2 className="inline-flex items-center gap-2 text-[15px] font-semibold">
+          <ListVideo size={18} />
+          Fila
+          <span className="text-[13px] tabular text-lu-muted font-medium">{playlist.length}</span>
+        </h2>
+        <form onSubmit={add} className="flex-1 min-w-[240px] flex flex-col gap-1.5">
+          <div className="flex gap-2">
+            <TextInput
+              value={link}
+              onChange={(e) => {
+                setLink(e.target.value);
+                setError('');
+              }}
+              placeholder="Adicionar link do vídeo ou do YouTube"
+              aria-label="Link para adicionar à fila"
+              className="flex-1 min-w-0"
+            />
+            <PrimaryButton type="submit" disabled={!link.trim()} aria-label="Adicionar à fila">
+              <ListPlus size={16} />
+            </PrimaryButton>
           </div>
-        ) : (
-          playlist.map((item, i) => (
-            <div key={item.id} className="flex items-center gap-2 p-2.5 pl-3 rounded-[12px] bg-lu-surface border border-lu-border">
-              <span className="text-[12px] tabular text-lu-muted w-5 flex-none">{i + 1}</span>
+          {error && <span className="text-[12px] text-lu-error">{error}</span>}
+        </form>
+      </div>
+
+      {playlist.length === 0 ? (
+        <p className="px-5 py-6 text-[13px] text-lu-muted text-center">
+          A fila está vazia. Adicione links e o próximo toca sozinho quando o vídeo acabar.
+        </p>
+      ) : (
+        <ol className="max-h-[360px] overflow-y-auto custom-scrollbar p-3 flex flex-col gap-2">
+          {playlist.map((item, i) => (
+            <li key={item.id} className="flex items-center gap-3 p-2.5 pl-3 rounded-[12px] bg-lu-elevated/60 border border-lu-border">
+              <span className="text-[12px] tabular text-lu-muted w-5 flex-none text-center">{i + 1}</span>
               <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-semibold truncate" title={item.title}>{item.title}</div>
-                <div className="text-[12px] text-lu-muted truncate">por {item.addedBy}</div>
+                <div className="text-[14px] font-semibold truncate" title={item.title}>{item.title}</div>
+                <div className="text-[12px] text-lu-muted truncate">Adicionado por {item.addedBy}</div>
               </div>
               {isHost && (
                 <>
@@ -103,10 +108,10 @@ export const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ onPlayItem }) => {
                   <X size={15} />
                 </IconButton>
               )}
-            </div>
-          ))
-        )}
-      </div>
-    </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
   );
 };
