@@ -3,6 +3,7 @@ import { ChevronLeft, Copy, FileVideo, FolderOpen, Link, Play, Upload, Users, X,
 import { formatRoomUrl } from '../../lib/roomCode';
 import { copyText, formatBytes } from '../../lib/recent';
 import { logger } from '../../lib/logger';
+import { waitForRoomToken } from '../../lib/access';
 import { BigInput, CardFooter, FieldLabel, GhostButton, HomeCard, HomeCardTitle, PrimaryButton, TextButton, cx } from '../ui';
 import type { SourceCommit } from './types';
 import type { SourceStep } from './RoomMenu';
@@ -33,8 +34,16 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
   const [copied, setCopied] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const xhrRef = useRef<XMLHttpRequest | null>(null);
+  /** Invalida um envio que ainda esperava a entrada na sala quando a pessoa cancela. */
+  const attemptRef = useRef(0);
 
-  useEffect(() => () => xhrRef.current?.abort(), []);
+  useEffect(
+    () => () => {
+      attemptRef.current++;
+      xhrRef.current?.abort();
+    },
+    []
+  );
 
   const choose = (file: File | undefined) => {
     if (!file) return;
@@ -51,12 +60,26 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
     );
   };
 
-  const startUpload = (file: File) => {
+  const startUpload = async (file: File) => {
     const roomCode = ensureRoom();
+    const attempt = ++attemptRef.current;
+    setPhase({ kind: 'uploading', file, loaded: 0, speed: 0, roomCode });
+
+    // O servidor só aceita envio do Host de uma sala ativa: espera a entrada na sala devolver o token
+    let token: string;
+    try {
+      token = await waitForRoomToken(roomCode);
+    } catch {
+      if (attemptRef.current === attempt) {
+        setPhase({ kind: 'error', file, message: 'Não deu pra entrar na sala para enviar. Tente de novo.' });
+      }
+      return;
+    }
+    if (attemptRef.current !== attempt) return;
+
     const xhr = new XMLHttpRequest();
     xhrRef.current = xhr;
     const startedAt = performance.now();
-    setPhase({ kind: 'uploading', file, loaded: 0, speed: 0, roomCode });
 
     xhr.upload.onprogress = (e) => {
       const elapsed = (performance.now() - startedAt) / 1000;
@@ -76,7 +99,14 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
       } else if (xhr.status === 413) {
         setPhase({ kind: 'too_large', file });
       } else {
-        setPhase({ kind: 'error', file, message: `O envio falhou (HTTP ${xhr.status}).` });
+        // O servidor responde { error: frase em português, code }
+        let reason = '';
+        try {
+          reason = JSON.parse(xhr.responseText)?.error || '';
+        } catch {
+          // corpo não-JSON
+        }
+        setPhase({ kind: 'error', file, message: reason || `O envio falhou (HTTP ${xhr.status}).` });
       }
     };
     xhr.onerror = () => {
@@ -85,10 +115,12 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
     };
     xhr.open('POST', `/api/upload?name=${encodeURIComponent(file.name)}`);
     xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.setRequestHeader('X-Lunio-Token', token);
     xhr.send(file);
   };
 
   const cancelUpload = () => {
+    attemptRef.current++;
     xhrRef.current?.abort();
     xhrRef.current = null;
     setPhase({ kind: 'pick' });

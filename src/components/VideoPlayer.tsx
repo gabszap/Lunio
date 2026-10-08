@@ -14,6 +14,7 @@ import { PlayerControls } from './PlayerControls';
 import { WatchPartyPanel } from './WatchPartyPanel';
 import { Avatar, Dot, GhostButton, IconButton, Kbd, PrimaryButton, Spinner } from './ui';
 import { logger } from '../lib/logger';
+import { useAccessReady, withAccess } from '../lib/access';
 import { audioBoost } from '../lib/audioBoost';
 import { normalizeChapters, getCurrentChapter, formatTime, getSkippableChapter } from '../lib/chapters';
 import { subtitleManager, subtitleResolver } from '../lib/subtitles';
@@ -425,14 +426,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Fonte de mídia estável memorizada por URL para evitar recarregamento indevido no Vidstack
   const isRemuxStream = /[?&]audio=/.test(resolvedStreamUrl);
 
+  // O token da sessão só precisa existir; trocar token solo por token de sala não recarrega o vídeo
+  const accessReady = useAccessReady();
   const mediaSource = React.useMemo(() => {
     if (!resolvedStreamUrl) return undefined;
     // YouTube toca pelo provider próprio do Vidstack (iframe), sem proxy nem remux
     if (resolvedStreamUrl.startsWith('youtube/')) {
       return { src: resolvedStreamUrl, type: 'video/youtube' as const };
     }
-    return { src: resolvedStreamUrl, type: 'video/mp4' as const };
-  }, [resolvedStreamUrl]);
+    // O <video> não manda cabeçalhos: a API (/api/proxy, /api/uploads) recebe o token na URL
+    return { src: withAccess(resolvedStreamUrl), type: 'video/mp4' as const };
+  }, [resolvedStreamUrl, accessReady]);
 
   useEffect(() => {
     if (title) setMediaTitle(title);

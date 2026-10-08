@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronLeft, CircleAlert, CircleCheck, ExternalLink, FileVideo, FolderOpen, Info, Link, Lock, Play, RotateCw, Users, Youtube } from 'lucide-react';
+import { apiFetch } from '../../lib/access';
 import { getYouTubeId } from '../../lib/media';
 import { formatBytes } from '../../lib/recent';
 import { BigInput, CardFooter, ClearButton, FieldLabel, GhostButton, Hint, HomeCard, HomeCardTitle, PrimaryButton, Spinner, TextButton } from '../ui';
@@ -183,12 +184,12 @@ export const DriveStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
     const controller = new AbortController();
     setState({ kind: 'checking' });
     const timer = window.setTimeout(() => {
-      fetch(`/api/drive?url=${encodeURIComponent(trimmed)}`, { signal: controller.signal })
+      apiFetch(`/api/drive?url=${encodeURIComponent(trimmed)}`, { signal: controller.signal })
         .then(async (r) => {
           const body = await r.json().catch(() => ({}));
           if (r.ok) setState({ kind: 'ok', file: body });
-          else if (body.error === 'no_access') setState({ kind: 'no_access' });
-          else if (body.error === 'invalid_link') setState({ kind: 'invalid' });
+          else if (body.code === 'forbidden') setState({ kind: 'no_access' });
+          else if (body.code === 'bad_request') setState({ kind: 'invalid' });
           else setState({ kind: 'error', message: 'Não deu pra falar com o Google Drive agora.' });
         })
         .catch((err) => {

@@ -10,6 +10,7 @@ import {
   EmbeddedFontRef,
 } from '../types/media';
 import { logger } from './logger';
+import { apiFetch, withAccess } from './access';
 
 export function detectMimeType(url: string, providedMime?: string): string {
   if (providedMime && providedMime.trim().length > 0) {
@@ -100,7 +101,7 @@ export function srtToVtt(srtContent: string): string {
  */
 export async function inspectMediaTracks(url: string) {
   try {
-    const res = await fetch(`/api/tracks?url=${encodeURIComponent(url)}`);
+    const res = await apiFetch(`/api/tracks?url=${encodeURIComponent(url)}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
@@ -159,7 +160,8 @@ export async function resolveMediaRef(
     filename: f.filename || `font_${f.index}`,
     mimetype: f.mimetype,
     codec: f.codec,
-    url: `/api/font?url=${encodeURIComponent(url)}&track=${f.index}&name=${encodeURIComponent(f.filename || '')}`,
+    // O JASSUB busca a fonte sem cabeçalhos: o token vai na URL
+    url: withAccess(`/api/font?url=${encodeURIComponent(url)}&track=${f.index}&name=${encodeURIComponent(f.filename || '')}`),
   }));
 
   return {
