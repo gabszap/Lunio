@@ -17,7 +17,7 @@ export type SubtitleFormat = 'ass' | 'ssa' | 'srt' | 'vtt' | 'unknown';
 export type SubtitleSourceType = 'stream' | 'addon' | 'sidecar' | 'embedded';
 
 // Ciclo de disponibilidade da legenda (descoberta vs pronta)
-export type SubtitleAvailability = 'known' | 'pending' | 'ready';
+export type SubtitleAvailability = 'known' | 'pending' | 'ready' | 'failed';
 
 // SubtitleCandidate (v8): Descoberta desacoplada, validação e ranking de candidatos
 export interface SubtitleCandidate {
@@ -33,6 +33,9 @@ export interface SubtitleCandidate {
   title: string;
   availability: SubtitleAvailability;
   content?: string;
+  /** Preenchidos quando `availability === 'failed'` (BITMAP_NOT_SUPPORTED, EXTRACTION_FAILED, HTTP_503…) */
+  errorCode?: string;
+  errorMessage?: string;
 }
 
 // Preferências do usuário para resolução automática de legendas
@@ -106,6 +109,8 @@ export interface ResolvedMediaRef {
   infoHash?: string;
   fileIndex?: number;
   videoHash?: string;
+  /** Identidade lógica da mídia (estável entre tokens/URLs efêmeras). Gerada uma vez por `buildMediaFingerprint`. */
+  mediaFingerprint?: string;
   audioTracks: AudioTrackRef[];
   subtitleTracks: SubtitleTrackRef[];
   externalSubtitleSources?: SubtitleSourceRef[];

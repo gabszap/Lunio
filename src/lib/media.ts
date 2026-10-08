@@ -96,12 +96,88 @@ export function srtToVtt(srtContent: string): string {
   return `WEBVTT\n\n${normalized.trim()}\n`;
 }
 
+// Parâmetros comprovadamente efêmeros (autenticação/expiração). Só estes saem da URL no fallback.
+const EPHEMERAL_PARAMS = new Set([
+  'token', 'expires', 'expiry', 'auth', 'api_key', 'apikey', 'session', 'ts', 'hmac', 'sig', 'signature',
+  'x-amz-signature', 'x-amz-date', 'x-amz-expires', 'x-amz-credential', 'x-amz-security-token',
+]);
+
+export interface MediaIdentityInput {
+  url: string;
+  /** Identidade já conhecida (vence tudo). */
+  explicit?: string;
+  infoHash?: string;
+  fileIndex?: number;
+  videoHash?: string;
+  size?: number;
+  filename?: string;
+}
+
+/**
+ * Extrai infoHash/fileIndex/filename de URLs de resolve do Torrentio:
+ * `/resolve/<provedor>/<chave>/<infoHash>/<id|null>/<fileIdx>/<arquivo>`. A chave do usuário fica de fora.
+ */
+export function parseStreamIdentity(url: string): { infoHash?: string; fileIndex?: number; filename?: string } {
+  try {
+    const segs = new URL(url).pathname.split('/').filter(Boolean).map((s) => {
+      try {
+        return decodeURIComponent(s);
+      } catch {
+        return s;
+      }
+    });
+    const at = segs.findIndex((s) => /^[a-f0-9]{40}$/i.test(s));
+    if (at < 0) return {};
+    const idx = segs[at + 2];
+    return {
+      infoHash: segs[at].toLowerCase(),
+      fileIndex: idx !== undefined && /^\d+$/.test(idx) ? Number(idx) : undefined,
+      filename: segs.slice(at + 3).join('/') || undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function normalizeUrlForIdentity(url: string): string {
+  try {
+    const u = new URL(url);
+    const kept = [...u.searchParams.entries()]
+      .filter(([k]) => !EPHEMERAL_PARAMS.has(k.toLowerCase()))
+      .sort(([a], [b]) => a.localeCompare(b));
+    const query = kept.length ? `?${kept.map(([k, v]) => `${k}=${v}`).join('&')}` : '';
+    return `${u.origin}${u.pathname}${query}`;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Identidade lógica da mídia, a mesma para legenda, fontes e sessão. Prioridade:
+ *  1. fingerprint explícito
+ *  2. infoHash + fileIndex + arquivo + tamanho (um torrent pode ter vários vídeos)
+ *  3. videoHash + tamanho + arquivo
+ *  4. URL normalizada (sem parâmetros efêmeros)
+ * O servidor faz o hash para obter um nome de arquivo seguro.
+ */
+export function buildMediaFingerprint(input: MediaIdentityInput): string {
+  if (input.explicit && input.explicit.trim().length > 3) return input.explicit.trim();
+  const parsed = parseStreamIdentity(input.url);
+  const infoHash = (input.infoHash || parsed.infoHash || '').toLowerCase();
+  const fileIndex = input.fileIndex ?? parsed.fileIndex;
+  const filename = (input.filename || parsed.filename || '').toLowerCase();
+  if (infoHash) return `ih:${infoHash}|f:${fileIndex ?? ''}|n:${filename}|s:${input.size ?? ''}`;
+  if (input.videoHash) return `vh:${input.videoHash}|n:${filename}|s:${input.size ?? ''}`;
+  return `url:${normalizeUrlForIdentity(input.url)}`;
+}
+
 /**
  * Inspeciona as faixas embutidas (áudio, legendas e capítulos) usando o backend FFmpeg
  */
-export async function inspectMediaTracks(url: string) {
+export async function inspectMediaTracks(url: string, fingerprint?: string) {
   try {
-    const res = await apiFetch(`/api/tracks?url=${encodeURIComponent(url)}`);
+    const fp = fingerprint ? `&fingerprint=${encodeURIComponent(fingerprint)}` : '';
+    const res = await apiFetch(`/api/tracks?url=${encodeURIComponent(url)}${fp}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
@@ -117,7 +193,10 @@ export async function resolveMediaRef(
   url: string,
   externalSubs: any[] = []
 ): Promise<ResolvedMediaRef> {
-  const data = await inspectMediaTracks(url);
+  // Identidade da mídia derivada uma única vez: vai para tracks, legenda, fontes e sessão
+  const identity = parseStreamIdentity(url);
+  const mediaFingerprint = buildMediaFingerprint({ url, ...identity });
+  const data = await inspectMediaTracks(url, mediaFingerprint);
 
   const audioTracks: AudioTrackRef[] = (data?.audios || []).map((a: any) => ({
     id: String(a.index),
@@ -161,11 +240,17 @@ export async function resolveMediaRef(
     mimetype: f.mimetype,
     codec: f.codec,
     // O JASSUB busca a fonte sem cabeçalhos: o token vai na URL
-    url: withAccess(`/api/font?url=${encodeURIComponent(url)}&track=${f.index}&name=${encodeURIComponent(f.filename || '')}`),
+    url: withAccess(
+      `/api/font?url=${encodeURIComponent(url)}&track=${f.index}&name=${encodeURIComponent(f.filename || '')}&fingerprint=${encodeURIComponent(mediaFingerprint)}`
+    ),
   }));
 
   return {
     mediaUrl: url,
+    mediaFingerprint,
+    infoHash: identity.infoHash,
+    fileIndex: identity.fileIndex,
+    filename: identity.filename || data?.rawTitle || undefined,
     title: data?.title || '',
     rawTitle: data?.rawTitle || '',
     duration: data?.duration || 0,

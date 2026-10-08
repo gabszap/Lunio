@@ -49,9 +49,12 @@ export interface BannedMember {
  *    - O servidor calcula a progressão contínua da timeline e sincroniza todos os espectadores.
  *    - Heartbeats (`client:heartbeat`) transportam apenas telemetria/liveness e NUNCA mutam a timeline global da sala.
  *
- * 2. TRILHAS LOCAIS (Individuais por Espectador):
- *    - Faixas de áudio/dublagem (`audioTrack`) e legendas (`subtitleTrack`) são de controle local independente.
- *    - Cada espectador pode selecionar seu áudio (ex: Japonês original vs Português dublado) e legendas de forma individual.
+ * 2. FAIXAS (a sala só conhece QUAIS existem):
+ *    - `RoomMedia.audioTracks` e `RoomMedia.subtitles` são metadados compartilhados: as faixas que o arquivo possui.
+ *    - Qual áudio/legenda cada pessoa escolheu é estado LOCAL e nunca passa pelo servidor.
+ *      Cada espectador seleciona seu áudio (ex: Japonês original vs Português dublado) e sua legenda de forma individual.
+ *
+ * Resumo: Playback = autoritativo do Host · Faixas disponíveis = metadado compartilhado · Faixa selecionada = estado local.
  */
 
 export interface RoomState {
@@ -60,9 +63,6 @@ export interface RoomState {
   media: RoomMedia | null;
   /** Estado de playback global autoritativo (ditado pelo Host) */
   playback: RoomPlaybackState;
-  /** Faixas padrão informadas na criação/alteração de mídia (opcional) */
-  audioTrack?: string;
-  subtitleTrack?: string;
   members: RoomMember[];
   bannedMembers?: BannedMember[];
 }
@@ -127,14 +127,6 @@ export type ClientMessage =
       rate?: number;
     }
   | {
-      type: 'track:audio';
-      trackId: string;
-    }
-  | {
-      type: 'track:subtitle';
-      trackId: string;
-    }
-  | {
       type: 'client:readiness';
       ready: boolean;
       state: MemberPlaybackState;
@@ -196,13 +188,6 @@ export type ServerMessage =
       type: 'media:sync';
       media: RoomMedia | null;
       generation: number;
-      triggeredBy: string;
-      username: string;
-    }
-  | {
-      type: 'track:sync';
-      audioTrack?: string;
-      subtitleTrack?: string;
       triggeredBy: string;
       username: string;
     }

@@ -190,6 +190,9 @@ export interface SubtitleProvider {
  * - Ranking determinístico com prioridade para PT-BR ASS em animes.
  * - Preparação sob demanda pontual com cancelamento atômico de processos redundantes.
  */
+/** Falhas que não mudam ao tentar de novo (as transitórias, como 503, podem ser repetidas). */
+const PERMANENT_SUBTITLE_ERRORS = new Set(['BITMAP_NOT_SUPPORTED', 'EXTRACTION_FAILED']);
+
 export class SubtitleResolver {
   private providers: SubtitleProvider[] = [];
   private activeExtractionAbort: AbortController | null = null;
@@ -216,11 +219,14 @@ export class SubtitleResolver {
               : 'ass');
 
           return {
-            id: `embedded_${media.mediaUrl}_${st.index}`,
+            id: `embedded_${media.mediaFingerprint || media.mediaUrl}_${st.index}`,
             language: lang,
             format,
             source: 'embedded',
-            url: `/api/subtitle?url=${encodeURIComponent(media.mediaUrl)}&track=${st.index}`,
+            // fingerprint estável: token novo do TorBox não invalida o cache de legendas
+            url: `/api/subtitle?url=${encodeURIComponent(media.mediaUrl)}&track=${st.index}${
+              media.mediaFingerprint ? `&fingerprint=${encodeURIComponent(media.mediaFingerprint)}` : ''
+            }`,
             trackId: st.index,
             confidence: 0,
             forced: !!st.isForced,
@@ -430,6 +436,13 @@ export class SubtitleResolver {
       return candidate;
     }
 
+    // Faixa já conhecida como incompatível (imagem/extração impossível): não repete a requisição
+    if (candidate.availability === 'failed' && candidate.errorCode && PERMANENT_SUBTITLE_ERRORS.has(candidate.errorCode)) {
+      const known: any = new Error(candidate.errorMessage || 'Legenda indisponível.');
+      known.code = candidate.errorCode;
+      throw known;
+    }
+
     if (this.candidateCache.has(candidate.id)) {
       const cached = this.candidateCache.get(candidate.id)!;
       if (cached.content) {
@@ -461,7 +474,7 @@ export class SubtitleResolver {
 
       if (!res.ok) {
         let errMessage = `HTTP ${res.status} ao carregar legenda.`;
-        let errCode = 'EXTRACTION_FAILED';
+        let errCode = `HTTP_${res.status}`;
         try {
           const json = await res.json();
           if (json.error) errMessage = json.error;
@@ -476,12 +489,19 @@ export class SubtitleResolver {
       const content = await res.text();
       candidate.content = content;
       candidate.availability = 'ready';
+      candidate.errorCode = undefined;
+      candidate.errorMessage = undefined;
       this.candidateCache.set(candidate.id, candidate);
       return candidate;
     } catch (err: any) {
-      candidate.availability = 'known';
       if (err.name === 'AbortError') {
+        // Cancelada porque outra candidata foi escolhida: não é defeito da faixa
+        candidate.availability = 'known';
         logger.info(`[Legenda] Preparação de "${candidate.title}" cancelada`);
+      } else {
+        candidate.availability = 'failed';
+        candidate.errorCode = err.code || 'EXTRACTION_FAILED';
+        candidate.errorMessage = err.message;
       }
       throw err;
     } finally {
@@ -696,7 +716,7 @@ export class SubtitleManager {
 
           if (!res.ok) {
             let errMessage = `HTTP ${res.status}`;
-            let errCode = 'EXTRACTION_FAILED';
+            let errCode = `HTTP_${res.status}`;
             try {
               const json = await res.json();
               if (json.error) errMessage = json.error;
@@ -806,7 +826,7 @@ export class SubtitleManager {
           const res = await apiFetch(track.src, { signal });
           if (!res.ok) {
             let errMessage = `HTTP ${res.status}`;
-            let errCode = 'EXTRACTION_FAILED';
+            let errCode = `HTTP_${res.status}`;
             try {
               const json = await res.json();
               if (json.error) errMessage = json.error;

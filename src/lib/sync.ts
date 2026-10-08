@@ -32,12 +32,6 @@ export type MediaSyncListener = (
   triggeredBy: string,
   username: string
 ) => void;
-export type TrackSyncListener = (
-  audioTrack: string | undefined,
-  subtitleTrack: string | undefined,
-  triggeredBy: string,
-  username: string
-) => void;
 export type ChatListener = (message: ChatMessage) => void;
 export type ErrorListener = (message: string, code?: string) => void;
 
@@ -62,7 +56,6 @@ class SyncManager {
   private stateListeners = new Set<SyncStateListener>();
   private playbackListeners = new Set<PlaybackSyncListener>();
   private mediaListeners = new Set<MediaSyncListener>();
-  private trackListeners = new Set<TrackSyncListener>();
   private chatListeners = new Set<ChatListener>();
   private errorListeners = new Set<ErrorListener>();
   private chatHistory: ChatMessage[] = [];
@@ -545,20 +538,6 @@ class SyncManager {
         break;
       }
 
-      case 'track:sync': {
-        if (!this.roomState) return;
-        if (msg.audioTrack !== undefined) this.roomState.audioTrack = msg.audioTrack;
-        if (msg.subtitleTrack !== undefined) this.roomState.subtitleTrack = msg.subtitleTrack;
-
-        if (msg.triggeredBy !== this.user.id) {
-          for (const listener of this.trackListeners) {
-            listener(msg.audioTrack, msg.subtitleTrack, msg.triggeredBy, msg.username);
-          }
-        }
-        this.notifyState();
-        break;
-      }
-
       case 'members:update': {
         if (!this.roomState) return;
         this.roomState.members = msg.members;
@@ -687,22 +666,6 @@ class SyncManager {
       type: 'media:set',
       media,
       initialPosition,
-    });
-  }
-
-  public emitAudioTrack(trackId: string) {
-    if (this.isApplyingRemoteUpdate) return;
-    this.send({
-      type: 'track:audio',
-      trackId,
-    });
-  }
-
-  public emitSubtitleTrack(trackId: string) {
-    if (this.isApplyingRemoteUpdate) return;
-    this.send({
-      type: 'track:subtitle',
-      trackId,
     });
   }
 
@@ -862,13 +825,6 @@ class SyncManager {
     this.mediaListeners.add(listener);
     return () => {
       this.mediaListeners.delete(listener);
-    };
-  }
-
-  public subscribeTracks(listener: TrackSyncListener): () => void {
-    this.trackListeners.add(listener);
-    return () => {
-      this.trackListeners.delete(listener);
     };
   }
 
