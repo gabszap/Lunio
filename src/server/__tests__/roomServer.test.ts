@@ -275,6 +275,36 @@ describe('moderação', () => {
     expect(back.closeCode).toBeNull();
   });
 
+  it('o ban vale para a pessoa, não para a aba: abas extras (_tab) caem juntas e não voltam', () => {
+    const host = connect('SALA1', 'u1');
+    const first = connect('SALA1', 'u2', 'Bia');
+    const second = connect('SALA1', 'u2', 'Bia'); // outra aba da mesma pessoa
+    const tabId = second.last('room:state').assignedUserId as string;
+    expect(tabId).toMatch(/^u2_tab\d{4}$/);
+
+    // o Host bane pelo ID que vê na lista (o da segunda aba)
+    send(host, { type: 'room:ban', targetUserId: tabId });
+    expect(first.closeCode).toBe(4002);
+    expect(second.closeCode).toBe(4002);
+    expect(host.last('room:bans_update').bannedMembers.map((b: any) => b.userId)).toEqual(['u2']);
+
+    // nem pelo ID-base nem por uma terceira aba
+    expect(connect('SALA1', 'u2').last('error')).toMatchObject({ code: 'banned' });
+    expect(rm.isMember('SALA1', tabId)).toBe(false);
+
+    send(host, { type: 'room:unban', targetUserId: 'u2' });
+    expect(connect('SALA1', 'u2').last('room:state')).toBeTruthy();
+  });
+
+  it('o Host não consegue banir a si mesmo por outra aba', () => {
+    const host = connect('SALA1', 'u1');
+    const hostTab = connect('SALA1', 'u1');
+    const tabId = hostTab.last('room:state').assignedUserId as string;
+    send(host, { type: 'room:ban', targetUserId: tabId });
+    expect(host.closeCode).toBeNull();
+    expect(hostTab.closeCode).toBeNull();
+  });
+
   it('só o Host bane e desbane', () => {
     connect('SALA1', 'u1');
     const g1 = connect('SALA1', 'u2');
