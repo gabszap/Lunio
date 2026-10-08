@@ -66,6 +66,32 @@ test.describe('Watch Party', () => {
     await host.context.close();
   });
 
+  test('fila: botão "próximo" fica desativado sem itens e pula para o próximo sem perguntar se quer continuar', async ({ browser }) => {
+    const host = await newUser(browser);
+    await createRoom(host.page, 'Ana');
+    await waitReady(host.page);
+    // o próximo vídeo já tem progresso salvo (antes isso mostrava "Continuar de onde parou?")
+    await host.page.evaluate((u) => localStorage.setItem(`streamplayer_progress_${encodeURIComponent(u.slice(0, 100))}`, '60'), SUBTITLES_URL);
+
+    // sem itens: cinza e sem ação
+    const next = host.page.locator('#btn-next-in-queue');
+    await expect(next).toBeVisible();
+    await expect(next).toBeDisabled();
+
+    // com um item: ativo; clicar toca o item
+    await host.page.getByLabel('Link para adicionar à fila').fill(SUBTITLES_URL);
+    await host.page.getByRole('button', { name: 'Adicionar à fila' }).click();
+    await expect(next).toBeEnabled();
+    await next.click();
+    await expect.poll(async () => (await state(host.page)).src, { timeout: 30_000 }).toContain('legendas');
+    await expect(host.page.getByText('A fila está vazia.')).toBeVisible();
+    await expect(next).toBeDisabled();
+    // vídeo vindo da fila não pergunta se quer continuar de onde parou
+    await expect(host.page.getByText('Continuar de onde parou?')).toHaveCount(0);
+
+    await host.context.close();
+  });
+
   test('fila: o espectador adiciona, o Host toca agora e o vídeo troca para todos', async ({ browser }) => {
     const host = await newUser(browser);
     const guest = await newUser(browser);

@@ -176,6 +176,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     source,
     hasSource,
     title,
+    autoPlay,
     initialChapters,
     initialSubtitles,
     initialAudioTracks,
@@ -225,6 +226,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [currentTime, normalizedChapters]);
 
   const controls = useControlsVisibility(paused);
+
+  // Fila da sala: o botão "próximo" só fica ativo com itens na fila
+  const [queueSize, setQueueSize] = useState(() => syncManager.getPlaylist().length);
+  useEffect(() => syncManager.subscribeState(() => setQueueSize(syncManager.getPlaylist().length)), []);
+  const playNextInQueue = () => {
+    const next = syncManager.getPlaylist()[0];
+    if (next && syncManager.isRoomHost()) onPlayPlaylistItem?.(next);
+  };
 
   // Web Audio Boost attachment to native video element
   useEffect(() => {
@@ -454,8 +463,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onWaiting={playerEvents.onWaiting}
         onEnded={() => {
           // Fim do vídeo: o Host passa para o próximo da fila (os outros seguem o Host)
-          const next = syncManager.getPlaylist()[0];
-          if (next && syncManager.isRoomHost()) onPlayPlaylistItem?.(next);
+          playNextInQueue();
         }}
         onError={playerEvents.onError}
         className={`w-full h-full aspect-${aspectMode} ${
@@ -611,6 +619,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           unreadChatCount={room.unreadChatCount}
           onBack={isFullscreen ? undefined : onBack}
           onAddSubtitle={onAddSubtitle}
+          onNext={syncStatus.isConnected && syncStatus.isHost ? playNextInQueue : undefined}
+          hasNext={queueSize > 0}
           onMenuOpenChange={handleMenuOpenChange}
         />
       </div>

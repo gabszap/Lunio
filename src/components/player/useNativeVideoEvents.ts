@@ -131,10 +131,12 @@ export function useNativeVideoEvents(args: {
         }
       }
 
-      // Salvar progresso a cada 5 segundos
+      // Salvar progresso a cada 5 segundos; perto do fim o episódio conta como assistido e não sugere retomar
       if (Math.floor(actualTotalTime) % 5 === 0 && actualTotalTime > 5) {
         try {
-          localStorage.setItem(getProgressStorageKey(source.src), actualTotalTime.toString());
+          const total = totalDurationRef.current;
+          if (total > 0 && actualTotalTime > total * 0.95) localStorage.removeItem(getProgressStorageKey(source.src));
+          else localStorage.setItem(getProgressStorageKey(source.src), actualTotalTime.toString());
         } catch {}
       }
 
