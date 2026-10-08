@@ -1,6 +1,11 @@
 import { test, expect } from '@playwright/test';
 import { SUBTITLES_URL, createRoom, joinRoom, newUser, openParticipants, state, togglePlay, trackHls, video, waitReady } from './helpers';
 
+const pickPortugueseAudio = async (page: import('@playwright/test').Page) => {
+  await page.getByRole('button', { name: 'Faixas de áudio' }).click();
+  await page.getByRole('menuitemradio', { name: /Português/ }).click();
+};
+
 test.describe('Watch Party', () => {
   test('fila: quando o vídeo acaba, o próximo começa sozinho para todos', async ({ browser }) => {
     const host = await newUser(browser);
@@ -28,6 +33,37 @@ test.describe('Watch Party', () => {
 
     await host.context.close();
     await guest.context.close();
+  });
+
+  test('fila: com áudio alternativo escolhido, o próximo vídeo começa do zero e deixa pausar', async ({ browser }) => {
+    const host = await newUser(browser);
+    await createRoom(host.page, 'Ana');
+    await waitReady(host.page);
+    await pickPortugueseAudio(host.page);
+    await togglePlay(host.page);
+    await expect.poll(async () => (await state(host.page)).t, { timeout: 30_000 }).toBeGreaterThan(2);
+
+    await host.page.getByLabel('Link para adicionar à fila').fill(SUBTITLES_URL);
+    await host.page.getByRole('button', { name: 'Adicionar à fila' }).click();
+    await expect(host.page.getByText('por Ana')).toBeVisible();
+
+    // Chega ao fim do vídeo: o próximo da fila entra
+    await video(host.page).evaluate((v: HTMLVideoElement) => {
+      v.currentTime = Math.max(0, v.duration - 1);
+    });
+    await expect.poll(async () => (await state(host.page)).src, { timeout: 40_000 }).toContain('legendas');
+
+    // O novo vídeo começa do início (não do ponto em que o anterior acabou) e toca
+    await expect.poll(async () => (await state(host.page)).paused, { timeout: 30_000 }).toBe(false);
+    expect((await state(host.page)).t).toBeLessThan(12);
+
+    // e pausar funciona (antes ele voltava a dar play sozinho em loop)
+    await togglePlay(host.page);
+    await expect.poll(async () => (await state(host.page)).paused).toBe(true);
+    await host.page.waitForTimeout(2500);
+    expect((await state(host.page)).paused).toBe(true);
+
+    await host.context.close();
   });
 
   test('fila: o espectador adiciona, o Host toca agora e o vídeo troca para todos', async ({ browser }) => {
@@ -174,11 +210,6 @@ test('a mesma pessoa em duas abas aparece nas duas e o ban derruba as duas', asy
 });
 
 test.describe('Player', () => {
-  const pickPortugueseAudio = async (page: import('@playwright/test').Page) => {
-    await page.getByRole('button', { name: 'Faixas de áudio' }).click();
-    await page.getByRole('menuitemradio', { name: /Português/ }).click();
-  };
-
   test('com áudio alternativo, pausar e dar play não volta ao começo do trecho', async ({ browser }) => {
     const host = await newUser(browser);
     const hls = trackHls(host.page);

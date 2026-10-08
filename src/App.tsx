@@ -514,7 +514,9 @@ export default function App() {
           console={<PlayerConsole />}
         >
           <Suspense fallback={<PanelFallback />}>
+            {/* key = URL: um vídeo novo (fila, Host trocando) nasce com estado limpo: áudio escolhido, posição, retomada */}
             <VideoPlayer
+              key={currentPayload.url}
               source={{ src: currentPayload.url, type: currentPayload.mimeType }}
               title={currentPayload.title}
               chapters={currentPayload.chapters}
