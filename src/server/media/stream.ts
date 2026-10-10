@@ -2,7 +2,7 @@ import http from 'node:http';
 import https from 'node:https';
 import { sendApiError } from '../http';
 import { checkUrlSyntax, isBlockedError, safeHttpAgent, safeHttpsAgent } from '../security';
-import { resolvedUrlCache } from './resolver';
+import { cacheResolved, invalidateResolvedUrl } from './resolver';
 
 /**
  * Streaming direto com HTTP 206 Partial Content, suporte a Range e redirecionamento de links Debrid/Torrentio.
@@ -25,6 +25,8 @@ export function pipeMediaStreamDirect(
     const reqHeaders: Record<string, string | string[]> = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept': '*/*',
+      // Sem `identity`, um upstream com gzip/pe br responses traria o corpo recomprimido: com
+      // Content-Range isso quebra o byte offset do player. O vídeo tem de chegar como veio.
       'Accept-Encoding': 'identity',
       'Connection': 'keep-alive',
     };
@@ -53,7 +55,7 @@ export function pipeMediaStreamDirect(
             return;
           }
           const nextUrl = new URL(upstreamRes.headers.location, actualUrl).href;
-          resolvedUrlCache.set(targetUrl, nextUrl);
+          cacheResolved(targetUrl, nextUrl);
           upstreamRes.resume();
           pipeMediaStreamDirect(nextUrl, targetUrl, req, res, redirectsLeft - 1);
           return;
@@ -67,7 +69,7 @@ export function pipeMediaStreamDirect(
           actualUrl !== targetUrl
         ) {
           console.warn(`[MediaProxy] Upstream CDN retornou status ${upstreamRes.statusCode}. Invalidando cache da CDN e renovando com URL original...`);
-          resolvedUrlCache.delete(targetUrl);
+          invalidateResolvedUrl(targetUrl);
           upstreamRes.resume();
           pipeMediaStreamDirect(targetUrl, targetUrl, req, res, redirectsLeft - 1);
           return;
@@ -82,7 +84,7 @@ export function pipeMediaStreamDirect(
         }
 
         if (actualUrl !== targetUrl && upstreamRes.statusCode && upstreamRes.statusCode < 400) {
-          resolvedUrlCache.set(targetUrl, actualUrl);
+          cacheResolved(targetUrl, actualUrl);
         }
 
         const outHeaders: Record<string, any> = {
@@ -126,6 +128,17 @@ export function pipeMediaStreamDirect(
           return;
         }
 
+        // Métricas do trecho: sem URL (pode ter token), só o que ajuda a achar buffer/stall.
+        const startedAt = Date.now();
+        let bytes = 0;
+        let firstByteAt = 0;
+        const requestedRange = typeof req.headers['range'] === 'string' ? req.headers['range'] : '';
+        const totalBytes = Number(upstreamRes.headers['content-length'] || 0);
+        upstreamRes.on('data', (chunk: any) => {
+          bytes += chunk.length;
+          if (!firstByteAt) firstByteAt = Date.now();
+        });
+
         upstreamRes.pipe(res);
 
         const cleanUp = () => {
@@ -137,6 +150,21 @@ export function pipeMediaStreamDirect(
 
         res.on('close', cleanUp);
         res.on('error', cleanUp);
+
+        const report = (how: string) => {
+          const elapsed = Math.max(1, Date.now() - startedAt);
+          const mbps = +((bytes * 8) / elapsed / 1000).toFixed(1);
+          console.log(
+            `[MediaStream] ${how} status=${upstreamRes.statusCode} range="${requestedRange || 'none'}" ` +
+              `contentRange="${upstreamRes.headers['content-range'] || ''}" ` +
+              `ttfb=${firstByteAt ? firstByteAt - startedAt : -1}ms bytes=${bytes} ` +
+              `total=${totalBytes || 'chunked'} elapsed=${elapsed}ms ${mbps}Mbps${res.writableFinished ? '' : ' [abortado]'}`
+          );
+        };
+        upstreamRes.on('end', () => report('completo'));
+        res.on('close', () => {
+          if (!res.writableFinished) report('cancelado');
+        });
       }
     );
 
