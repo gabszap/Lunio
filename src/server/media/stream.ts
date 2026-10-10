@@ -1,19 +1,26 @@
 import http from 'node:http';
 import https from 'node:https';
+import { performance } from 'node:perf_hooks';
 import { sendApiError } from '../http';
 import { checkUrlSyntax, isBlockedError, safeHttpAgent, safeHttpsAgent } from '../security';
 import { cacheResolved, invalidateResolvedUrl } from './resolver';
 
 /**
  * Streaming direto com HTTP 206 Partial Content, suporte a Range e redirecionamento de links Debrid/Torrentio.
+ *
+ * `hop` numera os saltos de redirect só para o log ficar legível; a lógica de redirecionamento
+ * continua igual (mesmo limite de saltos, mesma revalidação de segurança a cada um).
  */
 export function pipeMediaStreamDirect(
   actualUrl: string,
   targetUrl: string,
   req: any,
   res: any,
-  redirectsLeft = 5
+  redirectsLeft = 5,
+  hop = 0
 ) {
+  // Cronômetro do salto ANTES de abrir a conexão: é daqui que sai o tempo de DNS+TCP+TLS+resposta
+  const hopStartedAt = performance.now();
   try {
     // Cada salto (inclusive redirecionamentos) passa por aqui: esquema e IP literal checados agora,
     // DNS checado na conexão pelo agente seguro
@@ -57,22 +64,43 @@ export function pipeMediaStreamDirect(
           const nextUrl = new URL(upstreamRes.headers.location, actualUrl).href;
           cacheResolved(targetUrl, nextUrl);
           upstreamRes.resume();
-          pipeMediaStreamDirect(nextUrl, targetUrl, req, res, redirectsLeft - 1);
+          pipeMediaStreamDirect(nextUrl, targetUrl, req, res, redirectsLeft - 1, hop + 1);
           return;
         }
 
-        // Se o token ou CDN expirou/falhou (400, 401, 403, 404, 410) e tínhamos URL em cache, revalida com a original
+        // Se o token ou CDN expirou/falhou (400, 401, 403, 404, 410) e tínhamos URL em cache,
+        // volta para a URL de ORIGEM para obter uma URL assinada nova.
         if (
           upstreamRes.statusCode &&
           upstreamRes.statusCode >= 400 &&
           upstreamRes.statusCode < 500 &&
           actualUrl !== targetUrl
         ) {
-          console.warn(`[MediaProxy] Upstream CDN retornou status ${upstreamRes.statusCode}. Invalidando cache da CDN e renovando com URL original...`);
+          console.warn(
+            `[MediaProxy] Upstream respondeu ${upstreamRes.statusCode} para a URL já resolvida (hop ${hop}). ` +
+              'Invalidando o cache e renovando pela URL de origem...'
+          );
           invalidateResolvedUrl(targetUrl);
           upstreamRes.resume();
-          pipeMediaStreamDirect(targetUrl, targetUrl, req, res, redirectsLeft - 1);
+          pipeMediaStreamDirect(targetUrl, targetUrl, req, res, redirectsLeft - 1, hop + 1);
           return;
+        }
+
+        // A própria URL de origem JÁ é a URL assinada (não houve redirect para um CDN): se ela
+        // expirou, não existe para onde renovar dentro desta requisição. O certo é devolver o
+        // 4xx ao cliente e ainda derrubar a entrada do cache — senão a URL morta continuaria
+        // servindo até o TTL expirar e todo playback receberia 403 sem chance de se recuperar.
+        if (
+          upstreamRes.statusCode &&
+          upstreamRes.statusCode >= 400 &&
+          upstreamRes.statusCode < 500 &&
+          actualUrl === targetUrl
+        ) {
+          console.warn(
+            `[MediaProxy] Upstream respondeu ${upstreamRes.statusCode} e a URL de origem é a própria ` +
+              'URL assinada (sem redirect para renovar). Invalidando o cache e repassando o erro ao cliente.'
+          );
+          invalidateResolvedUrl(targetUrl);
         }
 
         if (upstreamRes.statusCode && upstreamRes.statusCode >= 400) {
@@ -128,15 +156,22 @@ export function pipeMediaStreamDirect(
           return;
         }
 
-        // Métricas do trecho: sem URL (pode ter token), só o que ajuda a achar buffer/stall.
-        const startedAt = Date.now();
+        // Métricas do trecho, sem URL/token: só o que ajuda a achar buffer/stall.
+        //
+        // Três tempos medidos de propósito, porque diagnosticar buffering exige separá-los:
+        //   connectToHeaders: DNS + TCP + TLS + ida até o upstream devolver os cabeçalhos
+        //                     (o TTFB no sentido HTTP: o primeiro byte da resposta SÃO os headers)
+        //   headersToFirstByte: quanto o upstream demorou para começar a entregar o corpo depois
+        //                     de já ter respondido — latência do CDN/contenção, não rede
+        //   total: relógio do salto inteiro
+        const headersAt = performance.now();
+        let firstBodyByteAt = 0;
         let bytes = 0;
-        let firstByteAt = 0;
         const requestedRange = typeof req.headers['range'] === 'string' ? req.headers['range'] : '';
         const totalBytes = Number(upstreamRes.headers['content-length'] || 0);
         upstreamRes.on('data', (chunk: any) => {
           bytes += chunk.length;
-          if (!firstByteAt) firstByteAt = Date.now();
+          if (!firstBodyByteAt) firstBodyByteAt = performance.now();
         });
 
         upstreamRes.pipe(res);
@@ -151,14 +186,21 @@ export function pipeMediaStreamDirect(
         res.on('close', cleanUp);
         res.on('error', cleanUp);
 
+        const ms = (from: number, to: number) => `${Math.max(0, to - from).toFixed(1)}ms`;
+        let reported = false;
         const report = (how: string) => {
-          const elapsed = Math.max(1, Date.now() - startedAt);
-          const mbps = +((bytes * 8) / elapsed / 1000).toFixed(1);
+          if (reported) return;
+          reported = true;
+          const endedAt = performance.now();
+          const elapsedMs = Math.max(0.1, endedAt - hopStartedAt);
+          const mbps = +((bytes * 8) / elapsedMs / 1000).toFixed(1);
           console.log(
-            `[MediaStream] ${how} status=${upstreamRes.statusCode} range="${requestedRange || 'none'}" ` +
+            `[MediaStream] hop=${hop} ${how} status=${upstreamRes.statusCode} range="${requestedRange || 'none'}" ` +
               `contentRange="${upstreamRes.headers['content-range'] || ''}" ` +
-              `ttfb=${firstByteAt ? firstByteAt - startedAt : -1}ms bytes=${bytes} ` +
-              `total=${totalBytes || 'chunked'} elapsed=${elapsed}ms ${mbps}Mbps${res.writableFinished ? '' : ' [abortado]'}`
+              `connectToHeaders=${ms(hopStartedAt, headersAt)} ` +
+              `headersToFirstByte=${firstBodyByteAt ? ms(headersAt, firstBodyByteAt) : 'n/a'} ` +
+              `total=${elapsedMs.toFixed(1)}ms bytes=${bytes} totalBytes=${totalBytes || 'chunked'} ` +
+              `${mbps}Mbps${res.writableFinished ? '' : ' [abortado pelo cliente]'}`
           );
         };
         upstreamRes.on('end', () => report('completo'));

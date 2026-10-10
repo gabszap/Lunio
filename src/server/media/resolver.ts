@@ -1,5 +1,20 @@
-import { redactUrl } from '../http';
+import { performance } from 'node:perf_hooks';
 import { assertPublicUrl, isBlockedError, safeRequest } from '../security';
+
+/**
+ * Rótulo seguro para log: SÓ o host.
+ *
+ * `redactUrl` ainda expõe o caminho, e em CDN assinado o token costuma vir no path
+ * (`/d/<token>/video.mkv`). Como aqui só precisamos saber "resolveu do host A para o host B",
+ * o host basta e não há como vazar credencial no journal.
+ */
+function hostLabel(raw: string): string {
+  try {
+    return new URL(raw).host;
+  } catch {
+    return '(url inválida)';
+  }
+}
 
 /**
  * URL original (Torrentio/debrid) → URL final da CDN, já validada contra SSRF.
@@ -37,9 +52,13 @@ function invalidate(target: string) {
   resolvedAt.delete(target);
 }
 
-function isFresh(target: string): boolean {
-  const at = resolvedAt.get(target);
-  return at !== undefined && Date.now() - at < RESOLVED_TTL_MS;
+type CacheState = 'hit' | 'expirada' | 'miss';
+
+/** 'hit' = utilizável agora; 'expirada' = existe mas passou do TTL (renovação); 'miss' = nunca sondada. */
+function cacheState(target: string): CacheState {
+  if (!resolvedUrlCache.has(target)) return 'miss';
+  const at = resolvedAt.get(target)!;
+  return Date.now() - at < RESOLVED_TTL_MS ? 'hit' : 'expirada';
 }
 
 /**
@@ -52,19 +71,27 @@ const inflight = new Map<string, Promise<string>>();
 export async function resolveFinalCdnUrl(url: string): Promise<string> {
   // Lança UrlBlockedError se a URL (ou algum redirecionamento) apontar para rede interna
   await assertPublicUrl(url);
-  if (isFresh(url)) {
-    return resolvedUrlCache.get(url)!;
+  const state = cacheState(url);
+  if (state === 'hit') {
+    const cached = resolvedUrlCache.get(url)!;
+    console.log(`[Resolver] cache=${state} origem=${hostLabel(url)} -> cdn=${hostLabel(cached)} (sem ida ao CDN)`);
+    return cached;
   }
   const pending = inflight.get(url);
-  if (pending) return pending;
+  if (pending) {
+    // Outra janela de Range do MESMO vídeo já está sondando: aproveita a mesma resposta.
+    console.log(`[Resolver] cache=coalescido origem=${hostLabel(url)} (sondagem em andamento)`);
+    return pending;
+  }
 
-  const task = probeFinalCdnUrl(url).finally(() => inflight.delete(url));
+  const task = probeFinalCdnUrl(url, state).finally(() => inflight.delete(url));
   inflight.set(url, task);
   return task;
 }
 
-async function probeFinalCdnUrl(url: string): Promise<string> {
+async function probeFinalCdnUrl(url: string, state: CacheState): Promise<string> {
   invalidate(url);
+  const startedAt = performance.now();
   try {
     const res = await safeRequest(url, {
       headers: {
@@ -74,18 +101,26 @@ async function probeFinalCdnUrl(url: string): Promise<string> {
     });
     res.body.destroy();
     const finalUrl = res.url || url;
+    const durationMs = performance.now() - startedAt;
+    const outcome = res.status < 400 ? 'ok' : 'erro';
+    const redirect = finalUrl !== url ? `redirect=${hostLabel(finalUrl)}` : 'redirect=nenhum';
+
     if (res.status < 400) {
       // Guarda também quando não houve redirect: `url → url` é a informação que impede
       // a sondagem `bytes=0-0` de se repetir em cada requisição de Range do mesmo vídeo.
       cacheResolved(url, finalUrl);
-      if (finalUrl !== url) {
-        console.log('[Resolver] URL da CDN resolvida:', redactUrl(finalUrl));
-      }
     }
+    console.log(
+      `[Resolver] cache=${state} origem=${hostLabel(url)} status=${res.status} ${outcome} ${redirect} ` +
+        `sondagem=${durationMs.toFixed(1)}ms${res.status < 400 ? '' : ' (NADA foi cacheado)'}`
+    );
     return finalUrl;
   } catch (err: any) {
     if (isBlockedError(err)) throw err;
-    console.warn('[Resolver] Falha ao resolver URL final, usando original:', err?.message);
+    console.warn(
+      `[Resolver] cache=${state} origem=${hostLabel(url)} falha=${err?.message} ` +
+        `sondagem=${(performance.now() - startedAt).toFixed(1)}ms (usando a original)`
+    );
     return url;
   }
 }
