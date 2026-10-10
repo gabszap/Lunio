@@ -158,12 +158,12 @@ export function pipeMediaStreamDirect(
 
         // Métricas do trecho, sem URL/token: só o que ajuda a achar buffer/stall.
         //
-        // Três tempos medidos de propósito, porque diagnosticar buffering exige separá-los:
+        // Tempos medidos de propósito, porque diagnosticar buffering exige separá-los:
         //   connectToHeaders: DNS + TCP + TLS + ida até o upstream devolver os cabeçalhos
         //                     (o TTFB no sentido HTTP: o primeiro byte da resposta SÃO os headers)
-        //   headersToFirstByte: quanto o upstream demorou para começar a entregar o corpo depois
-        //                     de já ter respondido — latência do CDN/contenção, não rede
-        //   total: relógio do salto inteiro
+        //   headersToFirstByte: quanto o upstream demorou para começar a entregar o corpo
+        //   upstreamTotal: do request ao `end` do upstream
+        //   flushedToClient: do request ao `finish` da resposta (tudo entregue ao cliente)
         const headersAt = performance.now();
         let firstBodyByteAt = 0;
         let bytes = 0;
@@ -187,25 +187,64 @@ export function pipeMediaStreamDirect(
         res.on('error', cleanUp);
 
         const ms = (from: number, to: number) => `${Math.max(0, to - from).toFixed(1)}ms`;
+
+        // Desfechos distintos, porque "o upstream acabou" NÃO é "o cliente recebeu tudo":
+        //
+        //   upstreamEnd    o upstream fechou o corpo (pode ainda estar no buffer do socket)
+        //   flushed        `finish`: a resposta foi integralmente entregue ao cliente  <- o normal
+        //   cancelado      o cliente sumiu antes disso (seek, fechar a aba, trocar de fonte)
+        //   erro           upstream ou socket quebraram
+        //
+        // O `close` sem `finish` é a única prova real de cancelamento. Checar
+        // `writableFinished` dentro do `end` do upstream marcava transferências normais como
+        // abortadas, porque no `end` o Node ainda pode estar drenando o que já leu.
+        let outcome: 'completo' | 'cancelado' | 'erro' | null = null;
         let reported = false;
-        const report = (how: string) => {
+        let pendingOutboundAt = 0;
+        const report = () => {
           if (reported) return;
+          // Só um `close` que chegou depois do `finish` conta como cancelamento.
+          if (!outcome) outcome = res.writableFinished ? 'completo' : 'cancelado';
           reported = true;
           const endedAt = performance.now();
           const elapsedMs = Math.max(0.1, endedAt - hopStartedAt);
           const mbps = +((bytes * 8) / elapsedMs / 1000).toFixed(1);
+          // `upstreamTotal` só é conhecido se o upstream chegou a terminar.
+          const upstreamTotal = upstreamEndedAt ? ms(hopStartedAt, upstreamEndedAt) : 'n/a';
           console.log(
-            `[MediaStream] hop=${hop} ${how} status=${upstreamRes.statusCode} range="${requestedRange || 'none'}" ` +
+            `[MediaStream] hop=${hop} desfecho=${outcome} status=${upstreamRes.statusCode} ` +
+              `range="${requestedRange || 'none'}" ` +
               `contentRange="${upstreamRes.headers['content-range'] || ''}" ` +
               `connectToHeaders=${ms(hopStartedAt, headersAt)} ` +
               `headersToFirstByte=${firstBodyByteAt ? ms(headersAt, firstBodyByteAt) : 'n/a'} ` +
+              `upstreamTotal=${upstreamTotal} ` +
               `total=${elapsedMs.toFixed(1)}ms bytes=${bytes} totalBytes=${totalBytes || 'chunked'} ` +
-              `${mbps}Mbps${res.writableFinished ? '' : ' [abortado pelo cliente]'}`
+              `${mbps}Mbps${pendingOutboundAt ? ` [no socket: ${Math.round(pendingOutboundAt / 1024)}KiB]` : ''}`
           );
         };
-        upstreamRes.on('end', () => report('completo'));
+
+        let upstreamEndedAt = 0;
+        upstreamRes.on('end', () => {
+          upstreamEndedAt = performance.now();
+          // Não reporta aqui: pode ainda haver bytes no caminho até o cliente.
+          // Quem fecha o relatório é o `finish` (entregue) ou o `close` sem `finish` (cancelado).
+        });
+        upstreamRes.on('error', (err: any) => {
+          console.warn(`[MediaProxy] Corpo do upstream quebrou: ${err?.message}`);
+          outcome = 'erro';
+          report();
+        });
+        res.on('finish', () => {
+          if (!outcome) outcome = 'completo';
+          report();
+        });
         res.on('close', () => {
-          if (!res.writableFinished) report('cancelado');
+          // `finish` já tendo disparado = resposta entregue por inteiro: `close` é só limpeza.
+          if (res.writableFinished) return;
+          if (!outcome) outcome = 'cancelado';
+          // Quanto ficou preso no socket do Node, sem conseguir sair para o cliente.
+          pendingOutboundAt = res.writableLength ? performance.now() - hopStartedAt : 0;
+          report();
         });
       }
     );
