@@ -6,6 +6,7 @@ import { createApiRouter } from './app';
 import { startBackend } from './boot';
 import { config } from './config';
 import { sendApiError } from './http';
+import { mountStatic } from './static';
 
 /**
  * Entrada de produção: Express servindo `dist/` + API + WebSocket, sem depender do Vite.
@@ -27,20 +28,7 @@ app.use(createApiRouter());
 // Rota /api/* que nenhum handler atendeu: JSON, não o index.html do SPA
 app.use('/api', (_req, res) => sendApiError(res, 404, 'not_found'));
 
-app.use(
-  express.static(dist, {
-    index: false,
-    setHeaders(res, file) {
-      // Arquivos com hash no nome (assets/) nunca mudam; o resto revalida
-      res.setHeader('Cache-Control', file.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache');
-    },
-  })
-);
-// SPA: qualquer outra rota GET abre o app
-app.get('*', (_req, res) => {
-  res.setHeader('Cache-Control', 'no-cache');
-  res.sendFile(indexHtml);
-});
+mountStatic(app, dist);
 
 const server = http.createServer(app);
 startBackend(server);
