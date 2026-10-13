@@ -1,5 +1,6 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import { execFileSync } from 'node:child_process';
 import path from 'path';
 import { defineConfig, createLogger, type Plugin, type PreviewServer, type ViteDevServer } from 'vite';
 import { createApiRouter } from './src/server/app';
@@ -26,6 +27,17 @@ function backendPlugin(): Plugin {
   };
 }
 
+/** Hash curto (7) do commit que está sendo buildado, para o site mostrar a versão. `LUNIO_COMMIT` vence (builds sem .git). */
+function appCommit(): string {
+  const fromEnv = (process.env.LUNIO_COMMIT || '').trim();
+  if (fromEnv) return fromEnv.slice(0, 7);
+  try {
+    return execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || 'dev';
+  } catch {
+    return 'dev';
+  }
+}
+
 const customViteLogger = createLogger();
 const originalLoggerWarn = customViteLogger.warn;
 customViteLogger.warn = (msg, options) => {
@@ -42,6 +54,7 @@ customViteLogger.warn = (msg, options) => {
 export default defineConfig(() => {
   return {
     customLogger: customViteLogger,
+    define: { __APP_COMMIT__: JSON.stringify(appCommit()) },
     plugins: [react(), tailwindcss(), backendPlugin()],
     resolve: {
       alias: {
