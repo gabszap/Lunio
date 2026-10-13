@@ -62,15 +62,6 @@ export const HomeLayout: React.FC<HomeLayoutProps> = ({ tab, onTabChange, onLogo
       <div className="flex items-center justify-end gap-1 col-start-2 row-start-1 sm:col-start-3">
         <LanguageSwitch />
         <a
-          href={COMMIT === 'dev' ? REPO_URL : `${REPO_URL}/commit/${COMMIT}`}
-          target="_blank"
-          rel="noreferrer"
-          title={t('Versão do site: {hash}', { hash: COMMIT })}
-          className="inline-flex items-center h-11 px-2 rounded-[10px] text-[12px] font-mono tabular text-lu-muted hover:text-lu-text hover:bg-white/8"
-        >
-          {COMMIT}
-        </a>
-        <a
           href={REPO_URL}
           target="_blank"
           rel="noreferrer"
@@ -79,6 +70,14 @@ export const HomeLayout: React.FC<HomeLayoutProps> = ({ tab, onTabChange, onLogo
           className="inline-flex items-center justify-center w-11 h-11 rounded-[10px] text-lu-text hover:bg-white/8"
         >
           <Github size={20} />
+        </a>
+        <a
+          href={COMMIT === 'dev' ? REPO_URL : `${REPO_URL}/commit/${COMMIT}`}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center h-11 px-2 rounded-[10px] text-[12px] font-mono tabular text-lu-muted hover:text-lu-text hover:bg-white/8"
+        >
+          {COMMIT}
         </a>
       </div>
     </header>

@@ -373,7 +373,6 @@ export const EN: Record<string, string> = {
   "URL do stream": "Stream URL",
   "Velocidade de reprodução": "Playback speed",
   "Ver o código no GitHub": "View the code on GitHub",
-  "Versão do site: {hash}": "Site version: {hash}",
   "Verificando…": "Checking…",
   "Verificar de novo": "Check again",
   "Versão {version} é antiga (precisa de 3.10+). Legendas usam o FFmpeg, mais lento.": "Version {version} is too old (needs 3.10+). Subtitles use FFmpeg, which is slower.",
