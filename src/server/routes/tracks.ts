@@ -90,8 +90,9 @@ export async function handleTracks(req: IncomingMessage, res: ServerResponse) {
             (s.isForced && (s.language === 'und' || !s.language))
         );
 
-        // No máximo duas, a mais provável primeiro (a que o player vai escolher): português completo do Brasil,
-        // depois as demais completas e as forçadas. Antes eram todas de uma vez e o CDN respondia 429.
+        // Só a mais provável (a que o player vai escolher): português completo do Brasil, depois as demais completas e
+        // as forçadas. Antes eram todas de uma vez e o CDN (3 downloads simultâneos no TorBox) respondia 429; as outras
+        // saem sob demanda, quando alguém as escolhe.
         const rank = (s: any) => {
           const t = `${s.title || ''}`.toLowerCase();
           const forced = Boolean(s.isForced) || t.includes('forced');
@@ -100,7 +101,7 @@ export async function handleTracks(req: IncomingMessage, res: ServerResponse) {
           return (forced ? 100 : 0) + (sdh ? 50 : 0) + (brasil ? 0 : 10);
         };
         const orderedPt = [...ptSubs].sort((a: any, b: any) => rank(a) - rank(b));
-        const subsToPreExtract = (orderedPt.length > 0 ? orderedPt : (subtitles[0] ? [subtitles[0]] : [])).slice(0, 2);
+        const subsToPreExtract = (orderedPt.length > 0 ? orderedPt : (subtitles[0] ? [subtitles[0]] : [])).slice(0, 1);
 
         for (const pSub of subsToPreExtract) {
           if (pSub && pSub.index !== undefined) {

@@ -4,6 +4,10 @@ import { performance } from 'node:perf_hooks';
 import { sendApiError } from '../http';
 import { checkUrlSyntax, isBlockedError, safeHttpAgent, safeHttpsAgent } from '../security';
 import { cacheResolved, invalidateResolvedUrl } from './resolver';
+import { hostOf, noteRateLimited, noteStreamStart } from './upstreamGate';
+
+/** Quantas vezes o proxy espera e repete um 429 do CDN antes de devolver 503 ao player. */
+const MAX_RATE_RETRIES = 3;
 
 /**
  * Streaming direto com HTTP 206 Partial Content, suporte a Range e redirecionamento de links Debrid/Torrentio.
@@ -17,7 +21,8 @@ export function pipeMediaStreamDirect(
   req: any,
   res: any,
   redirectsLeft = 5,
-  hop = 0
+  hop = 0,
+  rateRetries = 0
 ) {
   // Cronômetro do salto ANTES de abrir a conexão: é daqui que sai o tempo de DNS+TCP+TLS+resposta
   const hopStartedAt = performance.now();
@@ -62,9 +67,34 @@ export function pipeMediaStreamDirect(
             return;
           }
           const nextUrl = new URL(upstreamRes.headers.location, actualUrl).href;
-          cacheResolved(targetUrl, nextUrl);
+          // Só a resposta final (2xx) vai para o cache: um salto intermediário (api.torbox.app) não é a URL do CDN
           upstreamRes.resume();
           pipeMediaStreamDirect(nextUrl, targetUrl, req, res, redirectsLeft - 1, hop + 1);
+          return;
+        }
+
+        // 429 = o CDN limitou as conexões (o TorBox permite 3). Não é token expirado: renovar pela URL de origem só
+        // gera mais requisições ao Torrentio/TorBox. Espera (Retry-After) e repete a MESMA URL; as extrações de
+        // legenda do host também pausam.
+        if (upstreamRes.statusCode === 429) {
+          const retryAfter = Number(upstreamRes.headers['retry-after']);
+          noteRateLimited(hostOf(actualUrl), Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined);
+          upstreamRes.resume();
+          const clientGone = () => res.destroyed || res.writableEnded || req.destroyed;
+          if (rateRetries < MAX_RATE_RETRIES && !clientGone()) {
+            const waitMs = Math.min(5000, retryAfter > 0 ? retryAfter * 1000 : 800 * 2 ** rateRetries);
+            console.warn(`[MediaProxy] CDN limitou as conexões (429, hop ${hop}); repetindo em ${waitMs}ms (${rateRetries + 1}/${MAX_RATE_RETRIES})`);
+            setTimeout(() => {
+              if (!clientGone()) pipeMediaStreamDirect(actualUrl, targetUrl, req, res, redirectsLeft, hop + 1, rateRetries + 1);
+            }, waitMs);
+            return;
+          }
+          console.warn(`[MediaProxy] CDN continuou em 429 depois de ${rateRetries} repetições; devolvendo 503 ao player`);
+          if (!res.headersSent) {
+            res.statusCode = 503;
+            res.setHeader('Retry-After', '5');
+          }
+          res.end();
           return;
         }
 
@@ -173,6 +203,11 @@ export function pipeMediaStreamDirect(
           bytes += chunk.length;
           if (!firstBodyByteAt) firstBodyByteAt = performance.now();
         });
+
+        // Enquanto este stream estiver aberto, ele conta como uma das conexões do host (as legendas esperam folga)
+        const releaseStream = noteStreamStart(hostOf(actualUrl));
+        upstreamRes.on('close', releaseStream);
+        res.on('close', releaseStream);
 
         upstreamRes.pipe(res);
 

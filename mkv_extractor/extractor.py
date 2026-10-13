@@ -12,9 +12,10 @@ from .errors import (
     CuesNotFoundError,
     MatroskaStructureError,
     NoRelativePositionError,
+    PreferFfmpegError,
     RemoteMkvError,
 )
-from .http import read_range, resolve_url
+from .http import measure_rtt, read_range, resolve_url, supports_multirange
 from .matroska import (
     discover_cues,
     fetch_and_parse_blocks,
@@ -36,6 +37,36 @@ from .subtitles import (
 
 HEAD_SCAN_SIZE = 1024 * 1024
 DEFAULT_BATCH_SIZE = 50
+
+# Quanto o FFmpeg lê do CDN por segundo (medido: ~935 MB em ~19 s na VPS) e quanto a conta do extrator pode passar disso
+# antes de valer mais a pena ler o arquivo inteiro.
+FFMPEG_THROUGHPUT_BYTES_PER_S = 40_000_000
+PREFER_FFMPEG_RATIO = 1.3
+
+
+def estimate_costs(total_size: int, track_cues: list[dict[str, Any]], rtt_s: float) -> tuple[int, float, float]:
+    """(requisições, segundos do extrator, segundos do FFmpeg). Sem multi-range: cluster + cabeçalho do bloco + bloco."""
+    clusters = len({c["cluster_position"] for c in track_cues if c.get("cluster_position") is not None})
+    requests = clusters + 2 * len(track_cues)
+    return requests, requests * rtt_s, total_size / FFMPEG_THROUGHPUT_BYTES_PER_S
+
+
+def check_extractor_is_worth_it(final_url: str, total_size: int, track_cues: list[dict[str, Any]], timeout: int, verbose: bool) -> None:
+    """
+    Sem multi-range, cada bloco de legenda custa idas e voltas sequenciais. Num arquivo com centenas de blocos
+    (ex.: release da Netflix) isso passa dos 60 s, enquanto o FFmpeg lê o arquivo todo em ~20 s. Quando a conta
+    do extrator sai bem pior, avisa antes de gastar o tempo.
+    """
+    if supports_multirange(final_url, timeout=timeout):
+        return
+    rtt = measure_rtt(final_url, timeout=timeout)
+    requests, est_extractor, est_ffmpeg = estimate_costs(total_size, track_cues, rtt)
+    if verbose:
+        print(f"[Custo] {requests} requisições x {rtt * 1000:.0f} ms = ~{est_extractor:.0f} s no extrator; FFmpeg ~{est_ffmpeg:.0f} s")
+    if est_extractor > est_ffmpeg * PREFER_FFMPEG_RATIO:
+        raise PreferFfmpegError(
+            f"sem multi-range no CDN: ~{requests} requisições (~{est_extractor:.0f} s) contra ~{est_ffmpeg:.0f} s do FFmpeg"
+        )
 
 
 def _extract_single_track_data(
@@ -68,6 +99,8 @@ def _extract_single_track_data(
         raise NoRelativePositionError(
             f"A faixa #{selected['track_number']} possui {missing_relative} Cues sem CueRelativePosition."
         )
+
+    check_extractor_is_worth_it(final_url, total_size, track_cues, timeout, verbose)
 
     cluster_headers = fetch_cluster_headers(
         final_url,
@@ -352,6 +385,9 @@ def main():
                         f"extraída com sucesso! ({r['events']} eventos -> {dest})"
                     )
 
+    except PreferFfmpegError as prefer:
+        sys.stderr.write(f"[PreferFfmpeg] {prefer}\n")
+        sys.exit(4)
     except RemoteMkvError as r_err:
         sys.stderr.write(f"[RemoteMkvError] {type(r_err).__name__}: {r_err}\n")
         status = getattr(r_err, "status", None)

@@ -17,6 +17,11 @@ class HttpRangeError(RemoteMkvError):
         self.retry_after = retry_after
 
 
+class PreferFfmpegError(RemoteMkvError):
+    """O CDN não aceita vários ranges numa requisição e a conta de requisições sai mais cara que ler o arquivo todo."""
+    pass
+
+
 class EbmlParseError(RemoteMkvError):
     """Erro durante leitura ou decodificação de elementos EBML."""
     pass
