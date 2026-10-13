@@ -354,6 +354,11 @@ def main():
 
     except RemoteMkvError as r_err:
         sys.stderr.write(f"[RemoteMkvError] {type(r_err).__name__}: {r_err}\n")
+        status = getattr(r_err, "status", None)
+        if status:
+            # Linha estável para o servidor decidir: 429 = esperar, não insistir
+            retry = getattr(r_err, "retry_after", None)
+            sys.stderr.write(f"[HttpStatus] {status}" + (f" retry-after={retry}" if retry else "") + "\n")
         sys.exit(2)
     except Exception as exc:
         sys.stderr.write(f"[FatalError] {type(exc).__name__}: {exc}\n")

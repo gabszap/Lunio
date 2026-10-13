@@ -266,6 +266,7 @@ export const EN: Record<string, string> = {
   "O navegador não deixou ler a área de transferência. Cole com Ctrl+V.": "The browser wouldn't let us read the clipboard. Paste with Ctrl+V.",
   "O que está de pé agora.": "What's up right now.",
   "O servidor está ocupado. Tente de novo em instantes.": "The server is busy. Try again in a moment.",
+  "O servidor de vídeo pediu para esperar um pouco. Tente a legenda de novo em instantes.": "The video server asked us to wait a moment. Try the subtitle again shortly.",
   "O servidor não tem mais espaço para envios.": "The server has no more space for uploads.",
   "O servidor respondeu de um jeito inesperado.": "The server responded in an unexpected way.",
   "O stream está sendo roteado pelo backend local para streaming acelerado.": "The stream is being routed through the local backend for accelerated streaming.",

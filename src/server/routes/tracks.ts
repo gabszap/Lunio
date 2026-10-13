@@ -90,7 +90,17 @@ export async function handleTracks(req: IncomingMessage, res: ServerResponse) {
             (s.isForced && (s.language === 'und' || !s.language))
         );
 
-        const subsToPreExtract = ptSubs.length > 0 ? ptSubs : (subtitles[0] ? [subtitles[0]] : []);
+        // No máximo duas, a mais provável primeiro (a que o player vai escolher): português completo do Brasil,
+        // depois as demais completas e as forçadas. Antes eram todas de uma vez e o CDN respondia 429.
+        const rank = (s: any) => {
+          const t = `${s.title || ''}`.toLowerCase();
+          const forced = Boolean(s.isForced) || t.includes('forced');
+          const sdh = t.includes('sdh');
+          const brasil = t.includes('brasil') || t.includes('brazil') || t.includes('pt-br');
+          return (forced ? 100 : 0) + (sdh ? 50 : 0) + (brasil ? 0 : 10);
+        };
+        const orderedPt = [...ptSubs].sort((a: any, b: any) => rank(a) - rank(b));
+        const subsToPreExtract = (orderedPt.length > 0 ? orderedPt : (subtitles[0] ? [subtitles[0]] : [])).slice(0, 2);
 
         for (const pSub of subsToPreExtract) {
           if (pSub && pSub.index !== undefined) {
@@ -99,7 +109,7 @@ export async function handleTracks(req: IncomingMessage, res: ServerResponse) {
             const subCacheFile = path.join(SUB_CACHE_DIR, `${subHash}_s${subTrackIdx}.ass`);
             if (!fs.existsSync(subCacheFile)) {
               console.log(`[Tracks] 🚀 Pré-extraindo legenda prioritária #${subTrackIdx} (${pSub.title}) em background para o cache...`);
-              getOrExtractSubtitle(targetUrl, subTrackIdx, trackFingerprint).catch((e) => {
+              getOrExtractSubtitle(targetUrl, subTrackIdx, trackFingerprint, { prefetch: true }).catch((e) => {
                 console.warn(`[Tracks] Pré-extração de legenda deferida:`, e.message);
               });
             }

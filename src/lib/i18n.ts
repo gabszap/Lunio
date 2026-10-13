@@ -82,6 +82,7 @@ const API_ERRORS: Record<string, string> = {
   forbidden: msg('Você não tem permissão para isso.'),
   rate_limited: msg('Muitos pedidos. Tente de novo em instantes.'),
   busy: msg('O servidor está ocupado. Tente de novo em instantes.'),
+  upstream_rate_limited: msg('O servidor de vídeo pediu para esperar um pouco. Tente a legenda de novo em instantes.'),
   url_blocked: msg('Esse endereço não pode ser acessado pelo servidor.'),
   upstream_failed: msg('Não foi possível acessar o vídeo de origem.'),
   too_large: msg('Arquivo grande demais.'),

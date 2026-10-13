@@ -30,6 +30,10 @@ export async function handleSubtitle(req: IncomingMessage, res: ServerResponse) 
     } else if (e?.code === 'busy') {
       res.setHeader('Retry-After', '5');
       sendApiError(res, 503, 'busy');
+    } else if (e?.code === 'UPSTREAM_RATE_LIMITED') {
+      // O CDN limitou as conexões: transitório, o cliente pode tentar de novo depois da espera
+      res.setHeader('Retry-After', String(Math.max(1, Math.min(60, Number(e.retryAfter) || 15))));
+      sendApiError(res, 503, 'upstream_rate_limited');
     } else if (e?.code === 'BITMAP_NOT_SUPPORTED') {
       sendApiError(res, 415, 'BITMAP_NOT_SUPPORTED');
     } else {

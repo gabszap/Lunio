@@ -26,6 +26,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   method_not_allowed: 'Método não permitido.',
   rate_limited: 'Muitos pedidos. Tente de novo em instantes.',
   busy: 'O servidor está ocupado. Tente de novo em instantes.',
+  upstream_rate_limited: 'O servidor de vídeo pediu para esperar um pouco. Tente a legenda de novo em instantes.',
   url_blocked: 'Esse endereço não pode ser acessado pelo servidor.',
   upstream_failed: 'Não foi possível acessar o vídeo de origem.',
   too_large: 'Arquivo grande demais.',

@@ -9,12 +9,29 @@ import { getMediaFingerprint } from './fingerprint';
 import { SUB_CACHE_DIR } from './paths';
 import { resolveFinalCdnUrl } from './resolver';
 import { tracksCache } from './tracks';
+import { cooldownRemainingMs, hostOf, noteRateLimited, runOnHost } from './upstreamGate';
 
 const pendingSubtitleExtractions = new Map<string, Promise<string>>();
 const activeSubtitleProcesses = new Map<string, () => void>();
+/** Quem já está na fila do portão e pode ser promovido quando o usuário pede a mesma faixa que estava só em pré-extração. */
+const gateBumps = new Map<string, () => void>();
+const interactiveWanted = new Set<string>();
+
+/** `[HttpStatus] 429 retry-after=15` (linha que o mkv_extractor escreve quando o servidor respondeu com erro). */
+function parseHttpStatus(stderr: string): { status: number; retryAfter?: number } | null {
+  const m = /\[HttpStatus\] (\d{3})(?: retry-after=(\d+))?/.exec(stderr);
+  return m ? { status: Number(m[1]), retryAfter: m[2] ? Number(m[2]) : undefined } : null;
+}
+
+function rateLimitedError(retryAfterSec: number): Error {
+  const err: any = new Error('O CDN limitou as requisições (429).');
+  err.code = 'UPSTREAM_RATE_LIMITED';
+  err.retryAfter = retryAfterSec;
+  return err;
+}
 
 /** A extração remota (HTTP Range) falha por motivos passageiros (CDN lenta, conexão cortada): tenta algumas vezes antes do FFmpeg. */
-const REMOTE_ATTEMPT_TIMEOUT_MS = 40_000;
+const REMOTE_ATTEMPT_TIMEOUT_MS = 60_000;
 const REMOTE_ATTEMPTS = 3;
 const REMOTE_RETRY_DELAY_MS = 1500;
 
@@ -85,7 +102,13 @@ async function extractRemoteMkvSubtitle(
         }
       } else {
         const errMsg = (stderr || stdout || '').trim();
-        reject(new Error(`mkv_extractor finalizou com código ${code}: ${errMsg.slice(-300)}`));
+        const err: any = new Error(`mkv_extractor finalizou com código ${code}: ${errMsg.slice(-300)}`);
+        const http = parseHttpStatus(errMsg);
+        if (http) {
+          err.httpStatus = http.status;
+          err.retryAfter = http.retryAfter;
+        }
+        reject(err);
       }
     });
   });
@@ -94,7 +117,7 @@ async function extractRemoteMkvSubtitle(
 /**
  * Extração individual resiliente: mkv_extractor primeiro, FFmpeg como fallback
  */
-async function extractSubtitleTrack(targetUrl: string, track: string, customFingerprint?: string): Promise<string> {
+async function extractSubtitleTrack(targetUrl: string, track: string, customFingerprint?: string, prefetch = false): Promise<string> {
   const hash = getMediaFingerprint(targetUrl, customFingerprint);
   // Prefixo "s" = índice de stream do FFmpeg. O cache antigo ("_track") podia conter a faixa vizinha (bug de índice).
   const cacheFile = path.join(SUB_CACHE_DIR, `${hash}_s${track}.ass`);
@@ -111,6 +134,11 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
 
   const extractionKey = `${hash}_${track}`;
   if (pendingSubtitleExtractions.has(extractionKey)) {
+    // O usuário pediu uma faixa que só estava sendo pré-carregada: ela passa na frente da fila
+    if (!prefetch) {
+      interactiveWanted.add(extractionKey);
+      gateBumps.get(extractionKey)?.();
+    }
     return await pendingSubtitleExtractions.get(extractionKey)!;
   }
 
@@ -131,6 +159,9 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
         throw err;
       }
 
+      // Uma extração por vez por host do CDN (limite de conexões do TorBox); as pedidas pelo usuário passam as pré-extrações
+      const host = hostOf(streamUrl);
+      const gated = runOnHost(host, prefetch && !interactiveWanted.has(extractionKey) ? 'prefetch' : 'interactive', async () => {
       const tmpFile = path.join(SUB_CACHE_DIR, `${hash}_track${track}_${Date.now()}.tmp`);
 
       // 1. Tenta primeiro extração remota ultrarrápida via HTTP Range (módulo mkv_extractor)
@@ -149,11 +180,21 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
               content = await extractRemoteMkvSubtitle(streamUrl, track, tmpFile, extractionKey);
               break;
             } catch (attemptErr: any) {
-              // Sem Python ou servidor ocupado não melhora tentando de novo
-              if (attempt >= REMOTE_ATTEMPTS || attemptErr?.code === 'busy' || /Python 3\.10\+ não encontrado/.test(attemptErr?.message || '')) throw attemptErr;
-              console.warn(`[Subtitle] ↻ Tentativa ${attempt}/${REMOTE_ATTEMPTS} falhou na faixa ${trackLabel} (${attemptErr.message?.slice(0, 100)}). Tentando de novo…`);
+              // Sem Python, servidor ocupado ou estouro de tempo não melhora tentando de novo: o retry é para falha de
+              // conexão. Num arquivo grande o extrator estoura os 60 s mesmo sozinho, e repetir só triplicava a espera
+              // antes do FFmpeg (medido: 3 x 60 s perdidos, o FFmpeg terminou em ~65 s).
+              if (
+                attempt >= REMOTE_ATTEMPTS ||
+                attemptErr?.code === 'busy' ||
+                /Python 3\.10\+ não encontrado/.test(attemptErr?.message || '') ||
+                /^Tempo limite/.test(attemptErr?.message || '')
+              ) throw attemptErr;
+              const limited = attemptErr?.httpStatus === 429;
+              if (limited) noteRateLimited(host, attemptErr.retryAfter);
+              console.warn(`[Subtitle] ↻ Tentativa ${attempt}/${REMOTE_ATTEMPTS} falhou na faixa ${trackLabel} (${attemptErr.message?.slice(0, 100)}). ${limited ? 'CDN pediu para esperar' : 'Tentando de novo'}…`);
               try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
-              await new Promise((r) => setTimeout(r, REMOTE_RETRY_DELAY_MS * attempt));
+              // Depois de um 429 o portão espera o cooldown; nos outros erros, o recuo curto de antes
+              await new Promise((r) => setTimeout(r, limited ? Math.max(cooldownRemainingMs(host), REMOTE_RETRY_DELAY_MS) : REMOTE_RETRY_DELAY_MS * attempt));
             }
           }
 
@@ -165,8 +206,13 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
           console.log(`[Subtitle] ⚡ Sucesso! Faixa ${trackLabel} extraída via mkv_extractor em ${elapsedSec}s (${content.length} bytes).`);
           return content;
         } catch (mkvErr: any) {
-          console.warn(`[Subtitle] ⚠️ mkv_extractor não conseguiu processar faixa ${trackLabel} (${mkvErr.message?.slice(0, 150)}). Acionando fallback FFmpeg...`);
           try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
+          if (mkvErr?.httpStatus === 429) {
+            noteRateLimited(host, mkvErr.retryAfter);
+            console.warn(`[Subtitle] ⏳ CDN limitou as requisições na faixa ${trackLabel}; sem fallback FFmpeg (abriria outra conexão). Host em espera por ${Math.ceil(cooldownRemainingMs(host) / 1000)}s.`);
+            throw rateLimitedError(Math.ceil(cooldownRemainingMs(host) / 1000));
+          }
+          console.warn(`[Subtitle] ⚠️ mkv_extractor não conseguiu processar faixa ${trackLabel} (${mkvErr.message?.slice(0, 150)}). Acionando fallback FFmpeg...`);
         }
       }
 
@@ -242,15 +288,25 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
           } else {
             try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
             console.warn(`[Subtitle] Falha ao extrair ${trackLabel} (code ${code}): ${stderr}`);
+            if (/429 Too Many Requests/i.test(stderr)) {
+              noteRateLimited(host);
+              reject(rateLimitedError(Math.ceil(cooldownRemainingMs(host) / 1000)));
+              return;
+            }
             const err: any = new Error(`Falha ao extrair legenda #${track}: ${stderr.slice(-300) || 'Erro no processo FFmpeg'}`);
             err.code = 'EXTRACTION_FAILED';
             reject(err);
           }
         });
       });
+      });
+      gateBumps.set(extractionKey, gated.bump);
+      return await gated.promise;
     } finally {
       pendingSubtitleExtractions.delete(extractionKey);
       activeSubtitleProcesses.delete(extractionKey);
+      gateBumps.delete(extractionKey);
+      interactiveWanted.delete(extractionKey);
     }
   })();
 
@@ -261,7 +317,7 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
 /**
  * Obtém a legenda instantaneamente do cache em disco (0ms) ou extrai individualmente sob demanda
  */
-export async function getOrExtractSubtitle(targetUrl: string, track: string, customFingerprint?: string): Promise<string> {
+export async function getOrExtractSubtitle(targetUrl: string, track: string, customFingerprint?: string, opts: { prefetch?: boolean } = {}): Promise<string> {
   const hash = getMediaFingerprint(targetUrl, customFingerprint);
   const cacheFile = path.join(SUB_CACHE_DIR, `${hash}_s${track}.ass`);
 
@@ -272,5 +328,5 @@ export async function getOrExtractSubtitle(targetUrl: string, track: string, cus
   }
 
   // Extração pontual exclusiva da faixa selecionada
-  return await extractSubtitleTrack(targetUrl, track, customFingerprint);
+  return await extractSubtitleTrack(targetUrl, track, customFingerprint, Boolean(opts.prefetch));
 }
