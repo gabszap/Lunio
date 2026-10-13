@@ -20,6 +20,8 @@ from mkv_extractor.subtitles import (
 )
 from mkv_extractor.errors import TrackNotFoundError, CodecNotSupportedError
 from mkv_extractor.extractor import cue_times_seconds
+from mkv_extractor.errors import HttpRangeError
+from mkv_extractor.http import read_range, safe_url
 
 
 class TestEbml(unittest.TestCase):
@@ -211,6 +213,55 @@ class TestKeyframeCues(unittest.TestCase):
 
     def test_no_cues_for_track(self):
         self.assertEqual(cue_times_seconds([self._cue(1000, 2)], 1, 1_000_000), [])
+
+
+class TestHttpErrors(unittest.TestCase):
+    """O CDN do TorBox responde 429 quando há conexões demais: o erro precisa carregar o status e não a URL (token)."""
+
+    def _serve(self, status, retry_after=None):
+        import http.server
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(status)
+                if retry_after:
+                    self.send_header("Retry-After", str(retry_after))
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_address[1]}/dld/abc?token=SEGREDO123"
+
+    def test_429_carries_status_and_retry_after_without_the_token(self):
+        url = self._serve(429, retry_after=7)
+        with self.assertRaises(HttpRangeError) as ctx:
+            read_range(url, 0, 10, timeout=5)
+        err = ctx.exception
+        self.assertEqual(err.status, 429)
+        self.assertEqual(err.retry_after, 7)
+        self.assertNotIn("SEGREDO123", str(err))
+        self.assertNotIn("/dld/abc", str(err))
+
+    def test_429_without_retry_after(self):
+        url = self._serve(429)
+        with self.assertRaises(HttpRangeError) as ctx:
+            read_range(url, 0, 10, timeout=5)
+        self.assertEqual(ctx.exception.status, 429)
+        self.assertIsNone(ctx.exception.retry_after)
+
+    def test_connection_failure_has_no_status_and_no_token(self):
+        with self.assertRaises(HttpRangeError) as ctx:
+            read_range("http://127.0.0.1:9/dld/abc?token=SEGREDO123", 0, 10, timeout=2)
+        self.assertIsNone(ctx.exception.status)
+        self.assertNotIn("SEGREDO123", str(ctx.exception))
+
+    def test_safe_url_keeps_only_the_host(self):
+        self.assertEqual(safe_url("https://cdn.test/dld/abc?token=x"), "https://cdn.test/…")
 
 
 if __name__ == "__main__":

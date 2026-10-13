@@ -4,6 +4,7 @@ Cliente HTTP especializado em Range Requests e multipart/byteranges.
 
 import re
 import ssl
+import urllib.error
 import urllib.parse
 import urllib.request
 from email import policy
@@ -17,6 +18,20 @@ def get_ssl_context() -> ssl.SSLContext:
     return ssl._create_unverified_context()
 
 
+def safe_url(url: str) -> str:
+    """Só o host: a URL do CDN/Torrentio carrega o token no caminho ou na query e não pode ir para mensagens de erro."""
+    try:
+        parts = urllib.parse.urlparse(url)
+        return f"{parts.scheme}://{parts.netloc}/…" if parts.netloc else "(url)"
+    except Exception:
+        return "(url)"
+
+
+def _retry_after_seconds(headers) -> int | None:
+    value = headers.get("Retry-After") if headers else None
+    return int(value) if value and value.strip().isdigit() else None
+
+
 def open_http(url: str, headers: dict, timeout: int = 60):
     """Executa requisição HTTP utilizando urllib."""
     request = urllib.request.Request(url, headers=headers)
@@ -26,8 +41,15 @@ def open_http(url: str, headers: dict, timeout: int = 60):
             timeout=timeout,
             context=get_ssl_context(),
         )
+    except urllib.error.HTTPError as exc:
+        # O servidor respondeu com erro: o status importa (429 = esperar, não insistir)
+        raise HttpRangeError(
+            f"HTTP {exc.code} de {safe_url(url)}",
+            status=exc.code,
+            retry_after=_retry_after_seconds(exc.headers),
+        ) from exc
     except Exception as exc:
-        raise HttpRangeError(f"Falha de conexão HTTP com {url}: {exc}") from exc
+        raise HttpRangeError(f"Falha de conexão HTTP com {safe_url(url)}: {type(exc).__name__}") from exc
 
 
 def resolve_url(url: str, timeout: int = 60, verbose: bool = False) -> tuple[str, int]:
@@ -51,11 +73,13 @@ def resolve_url(url: str, timeout: int = 60, verbose: bool = False) -> tuple[str
                 netloc = urllib.parse.urlparse(final_url).netloc
                 print(f"[HTTP] Status: {response.status} | Final host: {netloc} | Content-Range: {content_range}")
 
+    except HttpRangeError:
+        raise
     except Exception as exc:
-        raise HttpRangeError(f"Erro ao resolver URL '{url}': {exc}") from exc
+        raise HttpRangeError(f"Erro ao resolver URL '{safe_url(url)}': {type(exc).__name__}") from exc
 
     if not content_range:
-        raise HttpRangeError(f"Servidor não retornou o header Content-Range ao acessar {url}")
+        raise HttpRangeError(f"Servidor não retornou o header Content-Range ao acessar {safe_url(url)}")
 
     match = re.search(r"/(\d+)$", content_range.strip())
     if not match:

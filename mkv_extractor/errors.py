@@ -9,7 +9,12 @@ class RemoteMkvError(Exception):
 
 class HttpRangeError(RemoteMkvError):
     """Erro em requisições HTTP Range ou status inesperado do servidor."""
-    pass
+
+    def __init__(self, message: str, status: int | None = None, retry_after: int | None = None):
+        super().__init__(message)
+        # Status HTTP quando o servidor respondeu (429 = limite de requisições do CDN) e o Retry-After em segundos
+        self.status = status
+        self.retry_after = retry_after
 
 
 class EbmlParseError(RemoteMkvError):

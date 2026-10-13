@@ -164,6 +164,29 @@ export function parseTracks(stderr: string, targetUrl: string, streamUrl: string
     a.title = formatAudioTitle(a);
   });
 
+  // Português do Brasil x de Portugal: o arquivo marca as duas como "por" (ex.: Netflix usa só o título,
+  // "NF_Portuguese(Brazil)" e "NF_Portuguese"). A que diz Brasil/Portugal explicitamente manda; a sem marca
+  // é a outra variante quando a irmã é explícita, e Brasil quando não há nenhuma pista (como sempre foi).
+  const isPortuguese = (s: any) => {
+    const lang = (s.language || '').toLowerCase();
+    const t = (s.title || '').toLowerCase();
+    return lang.includes('por') || lang.includes('pt') || t.includes('pt-br') || t.includes('portug');
+  };
+  const explicitVariant = (s: any): 'br' | 'pt' | null => {
+    const t = (s.title || '').toLowerCase();
+    const lang = (s.language || '').toLowerCase();
+    if (t.includes('pt-pt') || t.includes('portugal') || t.includes('european') || lang.includes('pt-pt')) return 'pt';
+    if (t.includes('pt-br') || t.includes('brazil') || t.includes('brasil') || lang.includes('pt-br')) return 'br';
+    return null;
+  };
+  const ptTracks = subtitles.filter(isPortuguese);
+  const hasExplicitBr = ptTracks.some((s) => explicitVariant(s) === 'br');
+  const hasExplicitPt = ptTracks.some((s) => explicitVariant(s) === 'pt');
+  const ptVariantOf = (s: any): 'br' | 'pt' =>
+    explicitVariant(s) ?? (hasExplicitBr && !hasExplicitPt ? 'pt' : 'br');
+  const variantsPresent = new Set(ptTracks.map(ptVariantOf));
+  const bothPtVariants = variantsPresent.size > 1;
+
   // Normaliza legendas com suporte completo a línguas mundiais
   subtitles.forEach((s) => {
     const lang = (s.language || '').toLowerCase();
@@ -176,8 +199,10 @@ export function parseTracks(stderr: string, targetUrl: string, streamUrl: string
     let flag = '';
 
     if (lang.includes('por') || lang.includes('pt') || t.includes('pt-br') || t.includes('portug')) {
-      baseName = t.includes('pt-pt') || t.includes('portugal') ? 'Português (Portugal)' : 'Português';
-      flag = t.includes('pt-pt') || t.includes('portugal') ? '🇵🇹 ' : '🇧🇷 ';
+      const variant = ptVariantOf(s);
+      // "(Brasil)" só aparece quando o arquivo tem as duas variantes; com uma só, "Português" como antes
+      baseName = variant === 'pt' ? 'Português (Portugal)' : bothPtVariants ? 'Português (Brasil)' : 'Português';
+      flag = variant === 'pt' ? '🇵🇹 ' : '🇧🇷 ';
     } else if (lang.includes('eng') || lang.includes('en') || t.includes('en-us')) {
       baseName = 'Inglês';
       flag = '🇺🇸 ';

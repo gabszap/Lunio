@@ -1,6 +1,7 @@
 import type { Server as HttpServer } from 'node:http';
 import { startCleanup } from './cleanup';
 import { config } from './config';
+import { installLogRedaction } from './logRedaction';
 import { setupWebSocketServer } from './roomServer';
 import { logToolStatus } from './tools';
 
@@ -14,6 +15,8 @@ export function startBackend(httpServer: HttpServer | null) {
   if (httpServer) setupWebSocketServer(httpServer);
   if (started) return;
   started = true;
+  // Token do TorBox na URL do stderr do FFmpeg ia parar no journal
+  installLogRedaction();
 
   if (config.allowPrivateUrls) {
     console.warn('[Segurança] ALLOW_PRIVATE_URLS ligado: o proxy aceita endereços de rede interna. Use só em desenvolvimento.');
