@@ -36,14 +36,15 @@ const resolvedAt = new Map<string, number>();
 
 function cacheResolved(target: string, final: string) {
   resolvedUrlCache.set(target, final);
+  // delete+set mantém `resolvedAt` em ordem de escrita: a primeira chave é sempre a mais antiga
+  resolvedAt.delete(target);
   resolvedAt.set(target, Date.now());
   // Map simples não expira sozinho: sem este teto, cada URL já vista ficaria na memória do processo para sempre.
-  if (resolvedUrlCache.size > RESOLVED_MAX_ENTRIES) {
-    const oldest = [...resolvedAt.entries()].sort((a, b) => a[1] - b[1])[0];
-    if (oldest) {
-      resolvedUrlCache.delete(oldest[0]);
-      resolvedAt.delete(oldest[0]);
-    }
+  while (resolvedUrlCache.size > RESOLVED_MAX_ENTRIES) {
+    const oldest = resolvedAt.keys().next().value;
+    if (oldest === undefined) break;
+    resolvedUrlCache.delete(oldest);
+    resolvedAt.delete(oldest);
   }
 }
 

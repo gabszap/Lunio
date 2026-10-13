@@ -13,7 +13,7 @@ vi.hoisted(() => {
   process.env.ALLOW_PRIVATE_URLS = '1';
 });
 
-const { invalidateResolvedUrl, resolveFinalCdnUrl, resolvedUrlCache } = await import('../media/resolver');
+const { cacheResolved, invalidateResolvedUrl, resolveFinalCdnUrl, resolvedUrlCache } = await import('../media/resolver');
 const { pipeMediaStreamDirect } = await import('../media/stream');
 
 const TTL_MS = 5 * 60_000;
@@ -121,6 +121,17 @@ describe('TTL do cache de URLs resolvidas', () => {
 
     await resolveFinalCdnUrl(url);
     expect(state.probes).toHaveLength(2);
+  });
+});
+
+describe('teto do cache', () => {
+  it('passa de 500 entradas e a mais antiga sai primeiro', () => {
+    resolvedUrlCache.clear();
+    for (let i = 0; i < 501; i++) cacheResolved(`http://exemplo.test/v${i}`, `http://cdn.test/v${i}`);
+    expect(resolvedUrlCache.size).toBe(500);
+    expect(resolvedUrlCache.has('http://exemplo.test/v0')).toBe(false);
+    expect(resolvedUrlCache.has('http://exemplo.test/v500')).toBe(true);
+    resolvedUrlCache.clear();
   });
 });
 
