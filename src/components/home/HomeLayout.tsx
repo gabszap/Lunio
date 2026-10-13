@@ -7,6 +7,9 @@ export type HomeTab = 'catalog' | 'room' | 'status';
 
 export const REPO_URL = 'https://github.com/gabszap/Lunio';
 
+/** Versão do site: hash do commit do build ("dev" fora de um repositório git). */
+const COMMIT = typeof __APP_COMMIT__ === 'string' ? __APP_COMMIT__ : 'dev';
+
 interface HomeLayoutProps {
   tab: HomeTab;
   onTabChange: (tab: HomeTab) => void;
@@ -58,6 +61,15 @@ export const HomeLayout: React.FC<HomeLayoutProps> = ({ tab, onTabChange, onLogo
 
       <div className="flex items-center justify-end gap-1 col-start-2 row-start-1 sm:col-start-3">
         <LanguageSwitch />
+        <a
+          href={COMMIT === 'dev' ? REPO_URL : `${REPO_URL}/commit/${COMMIT}`}
+          target="_blank"
+          rel="noreferrer"
+          title={t('Versão do site: {hash}', { hash: COMMIT })}
+          className="inline-flex items-center h-11 px-2 rounded-[10px] text-[12px] font-mono tabular text-lu-muted hover:text-lu-text hover:bg-white/8"
+        >
+          {COMMIT}
+        </a>
         <a
           href={REPO_URL}
           target="_blank"
