@@ -7,7 +7,7 @@ import { handleProxy } from './routes/proxy';
 import { handleResolve } from './routes/resolve';
 import { handleRoomInfo } from './routes/room';
 import { handleSession } from './routes/session';
-import { handleStatus } from './routes/status';
+import { handleSpeed, handleStatus } from './routes/status';
 import { handleSubtitle } from './routes/subtitle';
 import { handleToken } from './routes/token';
 import { handleTracks } from './routes/tracks';
@@ -32,6 +32,7 @@ export function createApiRouter(): Router {
 
   router.use('/api/session', handleSession);
   router.use('/api/status', handleStatus);
+  router.use('/api/speed', handleSpeed);
   router.use('/api/room', handleRoomInfo);
   router.use('/api/upload', (req, res, next) => (req.method === 'POST' ? handleUpload(req, res) : next()));
   router.use('/api/uploads', handleUploadServe);

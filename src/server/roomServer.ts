@@ -68,6 +68,18 @@ export class RoomManager {
     return { exists: false, closed: this.closedRooms.has(roomId), members: 0, hasMedia: false };
   }
 
+  /** Salas com gente conectada e quantas pessoas (cada pessoa conta uma vez, mesmo com várias abas). */
+  public getStats(): { rooms: number; people: number } {
+    let rooms = 0;
+    const people = new Set<string>();
+    for (const room of this.rooms.values()) {
+      if (room.clients.size === 0) continue;
+      rooms++;
+      for (const c of room.clients.values()) people.add(baseUserId(c.userId));
+    }
+    return { rooms, people: people.size };
+  }
+
   /** A pessoa está (ou acabou de cair e pode voltar) na sala, e não foi banida? */
   public isMember(roomId: string, userId: string): boolean {
     const room = this.rooms.get(roomId);
