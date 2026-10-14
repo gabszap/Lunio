@@ -51,6 +51,17 @@ export const config = {
   uploadTtlMs: num('UPLOAD_TTL_HOURS', 6) * 3600 * 1000,
   /** Limite de `.cache/` (legendas, fontes); acima disso apaga o menos usado. */
   maxCacheBytes: num('MAX_CACHE_GB', 10) * GB,
+  /**
+   * Idade máxima (sem uso) de cada tipo de cache em disco, independente do limite de tamanho. As fontes ficam mais
+   * porque todas as legendas de um vídeo usam as mesmas; legendas custam 20 a 45 s para refazer (ficam mais);
+   * o HLS guarda o vídeo inteiro copiado (centenas de MB por episódio), então sai logo.
+   */
+  cacheMaxAgeMs: {
+    subtitles: num('CACHE_SUBTITLES_MAX_DAYS', 14) * 24 * 3600 * 1000,
+    fonts: num('CACHE_FONTS_MAX_DAYS', 3) * 24 * 3600 * 1000,
+    hls: num('CACHE_HLS_MAX_HOURS', 6) * 3600 * 1000,
+    audio: num('CACHE_AUDIO_MAX_HOURS', 24) * 3600 * 1000,
+  },
   /** FFmpeg/Python simultâneos no servidor inteiro. */
   maxFfmpegProcs: Math.max(1, Math.floor(num('MAX_FFMPEG_PROCS', 8))),
 };

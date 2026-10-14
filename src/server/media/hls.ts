@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { touchCacheFile } from '../cleanup';
+import { BoundedCache } from '../cache';
+import { onCacheUnitRemoved, touchCacheFile } from '../cleanup';
 import { config } from '../config';
 import { spawnLimited } from '../limits';
 import { ffmpegBin, getTools, killTree } from '../tools';
@@ -59,7 +60,12 @@ interface HlsMedia {
   batches: Map<number, Batch[]>; // por faixa de áudio
 }
 
-const medias = new Map<string, HlsMedia>();
+/** Planos de HLS por mídia: até 100 e 2 h sem uso (o plano é regravado em `plan.json` e relido depois). */
+const medias = new BoundedCache<HlsMedia>(100, 2 * 3600 * 1000);
+// A limpeza do disco apagou a pasta da mídia: esquece o plano em memória também
+onCacheUnitRemoved((removed) => {
+  medias.deleteWhere((_id, m) => path.resolve(m.dir) === path.resolve(removed));
+});
 export const hlsStats = { batchesStarted: 0 };
 
 const mediaId = (key: string) => crypto.createHash('sha1').update(key).digest('hex').slice(0, 16);

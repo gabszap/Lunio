@@ -264,6 +264,8 @@ describe('status e velocidade (públicos, sem token)', () => {
     expect(body.people).toBeGreaterThanOrEqual(2);
     expect(body.uptimeSeconds).toBeGreaterThanOrEqual(0);
     expect(body.ffmpeg).toBeDefined();
+    expect(body.cache.limitBytes).toBeGreaterThan(0);
+    expect(Object.keys(body.cache.groups).sort()).toEqual(['audio', 'fonts', 'hls', 'subtitles']);
   });
 
   it('a mesma pessoa em duas abas conta uma vez', () => {

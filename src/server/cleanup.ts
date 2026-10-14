@@ -7,7 +7,8 @@ import { UPLOAD_DIR, UPLOAD_META } from './media/uploads';
 /**
  * Limpeza automática de disco:
  *  - `.uploads/`: apaga o envio de sala encerrada há mais de `UPLOAD_TTL_HOURS`;
- *  - `.cache/`: se passar de `MAX_CACHE_GB`, apaga o que foi usado há mais tempo (LRU).
+ *  - `.cache/`: apaga o que ficou sem uso além do prazo de cada tipo (legendas 14 dias, fontes 3 dias, HLS 6 h) e,
+ *    se ainda passar de `MAX_CACHE_GB`, o que foi usado há mais tempo (LRU).
  */
 
 const CACHE_ROOT = path.resolve(process.cwd(), '.cache');
@@ -90,29 +91,34 @@ export function sweepUploads(now = Date.now()): number {
   return removed;
 }
 
+type CacheGroup = 'subtitles' | 'fonts' | 'hls' | 'audio';
+const CACHE_GROUPS: CacheGroup[] = ['subtitles', 'fonts', 'hls', 'audio'];
+
 interface CacheUnit {
   path: string;
+  group: string;
   size: number;
   mtime: number;
 }
 
-/** Unidades de despejo: cada arquivo de legenda/áudio e cada pasta de fontes (que tem um marcador `.extracted`). */
-function cacheUnits(): CacheUnit[] {
+/** Unidades de despejo: cada arquivo de legenda/áudio e cada pasta de fontes ou de HLS de uma mídia. */
+function cacheUnits(root: string): CacheUnit[] {
   const units: CacheUnit[] = [];
   let groups: fs.Dirent[];
   try {
-    groups = fs.readdirSync(CACHE_ROOT, { withFileTypes: true });
+    groups = fs.readdirSync(root, { withFileTypes: true });
   } catch {
     return units;
   }
   for (const g of groups) {
     if (!g.isDirectory()) continue;
-    const groupDir = path.join(CACHE_ROOT, g.name);
+    const groupDir = path.join(root, g.name);
     for (const e of fs.readdirSync(groupDir, { withFileTypes: true })) {
       const full = path.join(groupDir, e.name);
       try {
         units.push({
           path: full,
+          group: g.name,
           size: e.isDirectory() ? dirSize(full) : fs.statSync(full).size,
           mtime: newestMtime(full),
         });
@@ -124,20 +130,111 @@ function cacheUnits(): CacheUnit[] {
   return units;
 }
 
-export function sweepCache(now = Date.now()): number {
-  const units = cacheUnits();
-  let total = units.reduce((sum, u) => sum + u.size, 0);
-  if (total <= config.maxCacheBytes) return 0;
-  let removed = 0;
-  for (const unit of units.sort((a, b) => a.mtime - b.mtime)) {
-    if (total <= config.maxCacheBytes) break;
-    if (now - unit.mtime < BUSY_WINDOW_MS) continue;
-    fs.rmSync(unit.path, { recursive: true, force: true });
-    total -= unit.size;
-    removed++;
+/** Quem precisa saber que uma unidade do cache saiu do disco (ex.: o HLS esquece o plano em memória). */
+const removalListeners = new Set<(unitPath: string) => void>();
+export function onCacheUnitRemoved(listener: (unitPath: string) => void) {
+  removalListeners.add(listener);
+}
+
+function removeUnit(unit: CacheUnit) {
+  fs.rmSync(unit.path, { recursive: true, force: true });
+  for (const listener of removalListeners) {
+    try {
+      listener(unit.path);
+    } catch {
+      // um ouvinte com defeito não impede a limpeza
+    }
   }
-  if (removed) console.log(`[Limpeza] Cache acima do limite: ${removed} item(ns) menos usados removidos.`);
-  return removed;
+}
+
+export interface SweepReport {
+  at: number;
+  /** Itens removidos por idade, por estouro do limite de tamanho, e quanto isso liberou. */
+  byAge: number;
+  byLimit: number;
+  freedBytes: number;
+}
+let lastSweep: SweepReport | null = null;
+
+/**
+ * Duas regras, nesta ordem:
+ *  1. idade: o que ficou sem uso além do prazo do seu tipo (`config.cacheMaxAgeMs`) sai, mesmo com disco sobrando;
+ *  2. tamanho: se ainda passar de `MAX_CACHE_GB`, sai o menos usado (LRU) até caber.
+ * Nada mexido há menos de 2 min é apagado (pode estar sendo gravado).
+ */
+export function sweepCache(
+  now = Date.now(),
+  root = CACHE_ROOT,
+  maxAge: Partial<Record<string, number>> = config.cacheMaxAgeMs,
+  limitBytes = config.maxCacheBytes
+): number {
+  const units = cacheUnits(root);
+  let total = units.reduce((sum, u) => sum + u.size, 0);
+  let byAge = 0;
+  let byLimit = 0;
+  let freed = 0;
+
+  const kept: CacheUnit[] = [];
+  for (const unit of units) {
+    const limit = maxAge[unit.group];
+    const idle = now - unit.mtime;
+    if (limit && idle > limit && idle >= BUSY_WINDOW_MS) {
+      removeUnit(unit);
+      total -= unit.size;
+      freed += unit.size;
+      byAge++;
+    } else {
+      kept.push(unit);
+    }
+  }
+
+  if (total > limitBytes) {
+    for (const unit of kept.sort((a, b) => a.mtime - b.mtime)) {
+      if (total <= limitBytes) break;
+      if (now - unit.mtime < BUSY_WINDOW_MS) continue;
+      removeUnit(unit);
+      total -= unit.size;
+      freed += unit.size;
+      byLimit++;
+    }
+  }
+
+  lastSweep = { at: now, byAge, byLimit, freedBytes: freed };
+  statsMemo = null;
+  if (byAge) console.log(`[Limpeza] ${byAge} item(ns) do cache sem uso além do prazo removidos.`);
+  if (byLimit) console.log(`[Limpeza] Cache acima do limite: ${byLimit} item(ns) menos usados removidos.`);
+  return byAge + byLimit;
+}
+
+export interface CacheStats {
+  bytes: number;
+  limitBytes: number;
+  groups: Record<CacheGroup, number>;
+  disk: { freeBytes: number; totalBytes: number } | null;
+  lastSweep: SweepReport | null;
+}
+
+let statsMemo: { at: number; value: CacheStats } | null = null;
+
+/** Tamanho do cache por tipo, disco livre e a última limpeza. Recalcula no máximo 1 vez por minuto. */
+export function getCacheStats(now = Date.now()): CacheStats {
+  if (statsMemo && now - statsMemo.at < 60_000) return { ...statsMemo.value, lastSweep };
+  const groups: Record<CacheGroup, number> = { subtitles: 0, fonts: 0, hls: 0, audio: 0 };
+  let bytes = 0;
+  for (const unit of cacheUnits(CACHE_ROOT)) {
+    bytes += unit.size;
+    if ((CACHE_GROUPS as string[]).includes(unit.group)) groups[unit.group as CacheGroup] += unit.size;
+  }
+  let disk: CacheStats['disk'] = null;
+  try {
+    const st = fs.statfsSync(CACHE_ROOT);
+    disk = { freeBytes: Number(st.bavail) * Number(st.bsize), totalBytes: Number(st.blocks) * Number(st.bsize) };
+  } catch {
+    // sem statfs nesta plataforma/volume
+  }
+  const value: CacheStats = { bytes, limitBytes: config.maxCacheBytes, groups, disk, lastSweep };
+  statsMemo = { at: now, value };
+  return value;
 }
 
 let timer: NodeJS.Timeout | null = null;

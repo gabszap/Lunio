@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import { Dot, GhostButton, Spinner, cx } from '../ui';
 import { COMMIT, REPO_URL } from './HomeLayout';
 import { t } from '../../lib/i18n';
+import { formatBytes } from '../../lib/recent';
 
 interface StatusTabProps {
   environment: 'discord' | 'web';
@@ -13,6 +14,12 @@ interface StatusReport {
   rooms: number;
   people: number;
   uptimeSeconds: number;
+  cache?: {
+    bytes: number;
+    limitBytes: number;
+    disk: { freeBytes: number; totalBytes: number } | null;
+    lastSweep: { at: number; byAge: number; byLimit: number; freedBytes: number } | null;
+  };
   ffmpeg: { found: boolean; version?: string };
   python: { found: boolean; version?: string; tooOld: boolean };
 }
@@ -70,6 +77,16 @@ async function measureSpeed(): Promise<number | null> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** "há 12 min" / "há 3 h" / "há 2 d" a partir de um instante em ms. */
+function timeAgo(at: number): string {
+  const min = Math.max(0, Math.floor((Date.now() - at) / 60_000));
+  if (min < 1) return t('agora há pouco');
+  if (min < 60) return t('há {n} min', { n: min });
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return t('há {n} h', { n: hours });
+  return t('há {n} d', { n: Math.floor(hours / 24) });
 }
 
 function formatUptime(seconds: number): string {
@@ -210,6 +227,28 @@ export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
             )}
           </Metric>
           <Metric label={t('No ar')}>{report ? formatUptime(report.uptimeSeconds) : dash}</Metric>
+          {report?.cache && (
+            <>
+              <Metric label={t('Cache')}>
+                {t('{size} de {limit}', { size: formatBytes(report.cache.bytes), limit: formatBytes(report.cache.limitBytes) })}
+              </Metric>
+              <Metric label={t('Disco livre')}>{report.cache.disk ? formatBytes(report.cache.disk.freeBytes) : dash}</Metric>
+              <Metric label={t('Última limpeza')}>
+                {report.cache.lastSweep ? (
+                  <span
+                    title={t('{n} item(ns) removido(s), {size} liberados', {
+                      n: report.cache.lastSweep.byAge + report.cache.lastSweep.byLimit,
+                      size: formatBytes(report.cache.lastSweep.freedBytes),
+                    })}
+                  >
+                    {timeAgo(report.cache.lastSweep.at)}
+                  </span>
+                ) : (
+                  <span className="text-lu-muted">{t('Ainda não rodou')}</span>
+                )}
+              </Metric>
+            </>
+          )}
           <Metric label={t('Versão')}>
             {COMMIT === 'dev' ? (
               <span className="font-mono">dev</span>
