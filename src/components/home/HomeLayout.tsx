@@ -8,7 +8,7 @@ export type HomeTab = 'catalog' | 'room' | 'status';
 export const REPO_URL = 'https://github.com/gabszap/Lunio';
 
 /** Versão do site: hash do commit do build ("dev" fora de um repositório git). */
-const COMMIT = typeof __APP_COMMIT__ === 'string' ? __APP_COMMIT__ : 'dev';
+export const COMMIT = typeof __APP_COMMIT__ === 'string' ? __APP_COMMIT__ : 'dev';
 
 interface HomeLayoutProps {
   tab: HomeTab;
