@@ -75,12 +75,18 @@ export function formatRecentTitle(rawTitle: string): { epTag: string; cleanName:
 
   // Padrões como S01E02, S2E5, 2x01, E02, EP02
   const epMatch = normalized.match(/\b(S\d{1,2}E\d{1,2}|\d{1,2}x\d{1,2}|EP?\s*\d{1,3})\b/i);
-  const epTag = epMatch ? epMatch[1].toUpperCase().replace(/\s+/, '') : '';
+  let epTag = epMatch ? epMatch[1].toUpperCase().replace(/\s+/, '') : '';
+
+  // Anime de fansub: "Título - 04 [1080p]…" (só o número depois do hífen; 4 dígitos seriam um ano)
+  const withoutBrackets = normalized.replace(/\[[^\]]*\]|\([^)]*\)/g, ' ');
+  const animeMatch = epTag ? null : withoutBrackets.match(/\s-\s(\d{1,3})(?:v\d+)?(?=\s|$)/);
+  if (animeMatch) epTag = `E${animeMatch[1].padStart(2, '0')}`;
 
   // Remove tags e ruídos comuns de releases
   let clean = rawTitle
     .replace(/\[[^\]]*\]/g, '')
     .replace(/\([^)]*\)/g, '')
+    .replace(animeMatch ? /[\s.]-[\s.]\d{1,3}(?:v\d+)?(?=[\s.]|$)/ : /$^/, ' ')
     .replace(/\b(1080p|720p|4k|2160p|hevc|x265|x264|av1|web-dl|bdrip|custom|multi|bluray|remux)\b/gi, '')
     .replace(/\b(S\d{1,2}E\d{1,2}|\d{1,2}x\d{1,2})\b/gi, '')
     .replace(/[-_.]+/g, ' ')
