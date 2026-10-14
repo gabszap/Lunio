@@ -63,6 +63,8 @@ async function extractRemoteMkvSubtitle(
     }
     const proc = spawnLimited(py.command, [...py.args, ...args], {
       cwd: config.rootDir,
+      // UTF-8 no stderr do Python também no Windows (acentos nas mensagens)
+      env: { ...process.env, PYTHONUTF8: '1' },
     });
     if (!proc) {
       const busy: any = new Error('Servidor ocupado (limite de processos).');
@@ -103,6 +105,8 @@ async function extractRemoteMkvSubtitle(
       } else {
         const errMsg = (stderr || stdout || '').trim();
         const err: any = new Error(`mkv_extractor finalizou com código ${code}: ${errMsg.slice(-300)}`);
+        // O extrator avisa (código 4) quando a conta de requisições sai mais cara que ler o arquivo com o FFmpeg
+        if (code === 4 || /\[PreferFfmpeg\]/.test(errMsg)) err.preferFfmpeg = true;
         const http = parseHttpStatus(errMsg);
         if (http) {
           err.httpStatus = http.status;
@@ -187,7 +191,8 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
                 attempt >= REMOTE_ATTEMPTS ||
                 attemptErr?.code === 'busy' ||
                 /Python 3\.10\+ não encontrado/.test(attemptErr?.message || '') ||
-                /^Tempo limite/.test(attemptErr?.message || '')
+                /^Tempo limite/.test(attemptErr?.message || '') ||
+                attemptErr?.preferFfmpeg
               ) throw attemptErr;
               const limited = attemptErr?.httpStatus === 429;
               if (limited) noteRateLimited(host, attemptErr.retryAfter);
@@ -212,7 +217,11 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
             console.warn(`[Subtitle] ⏳ CDN limitou as requisições na faixa ${trackLabel}; sem fallback FFmpeg (abriria outra conexão). Host em espera por ${Math.ceil(cooldownRemainingMs(host) / 1000)}s.`);
             throw rateLimitedError(Math.ceil(cooldownRemainingMs(host) / 1000));
           }
-          console.warn(`[Subtitle] ⚠️ mkv_extractor não conseguiu processar faixa ${trackLabel} (${mkvErr.message?.slice(0, 150)}). Acionando fallback FFmpeg...`);
+          if (mkvErr?.preferFfmpeg) {
+            console.log(`[Subtitle] ↪ CDN sem multi-range: ler o arquivo com o FFmpeg sai mais barato para a faixa ${trackLabel}.`);
+          } else {
+            console.warn(`[Subtitle] ⚠️ mkv_extractor não conseguiu processar faixa ${trackLabel} (${mkvErr.message?.slice(0, 150)}). Acionando fallback FFmpeg...`);
+          }
         }
       }
 

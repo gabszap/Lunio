@@ -2,6 +2,7 @@
 Cliente HTTP especializado em Range Requests e multipart/byteranges.
 """
 
+import http.client
 import re
 import ssl
 import urllib.error
@@ -89,23 +90,139 @@ def resolve_url(url: str, timeout: int = 60, verbose: bool = False) -> tuple[str
     return final_url, total_size
 
 
-def read_range(url: str, start: int, end: int, timeout: int = 60, verbose: bool = False) -> bytes:
-    """Lê um range específico de bytes (start a end inclusive) via HTTP 206."""
+# Uma conexão persistente por host. Cada range abrindo conexão nova pagava DNS+TCP+TLS (~3 idas e voltas) e, num
+# arquivo com centenas de blocos de legenda, estourava o tempo; reaproveitando a conexão cada range custa 1 ida e volta.
+_connections: dict[tuple[str, str], http.client.HTTPConnection] = {}
+# Servidores que respondem a um pedido de vários ranges só com o primeiro (o TorBox faz isso): não vale tentar de novo
+_multirange_unsupported: set[str] = set()
+
+
+def _connection_for(parts: urllib.parse.ParseResult, timeout: int) -> http.client.HTTPConnection:
+    key = (parts.scheme, parts.netloc)
+    conn = _connections.get(key)
+    if conn is None:
+        if parts.scheme == "https":
+            conn = http.client.HTTPSConnection(parts.netloc, timeout=timeout, context=get_ssl_context())
+        else:
+            conn = http.client.HTTPConnection(parts.netloc, timeout=timeout)
+        _connections[key] = conn
+    return conn
+
+
+def _drop_connection(parts: urllib.parse.ParseResult) -> None:
+    conn = _connections.pop((parts.scheme, parts.netloc), None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def close_connections() -> None:
+    """Fecha as conexões persistentes (fim da extração e testes)."""
+    for key in list(_connections):
+        conn = _connections.pop(key)
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _fetch_range(url: str, start: int, end: int, timeout: int) -> bytes | None:
+    """
+    Pede um range numa conexão persistente. Devolve None quando a resposta não dá para tratar aqui (redirecionamento):
+    quem chamou cai no caminho antigo, uma requisição por range via urllib.
+    """
+    parts = urllib.parse.urlparse(url)
+    path = parts.path or "/"
+    if parts.query:
+        path += "?" + parts.query
     headers = {
         "Range": f"bytes={start}-{end}",
         "User-Agent": "Lunio-Remote-MKV/1.0",
         "Accept": "*/*",
+        "Connection": "keep-alive",
     }
 
-    with open_http(url, headers, timeout=timeout) as response:
+    last_exc: Exception | None = None
+    for _attempt in (1, 2):  # a 2a é para quando o servidor fechou a conexão ociosa
+        conn = _connection_for(parts, timeout)
+        try:
+            conn.request("GET", path, headers=headers)
+            response = conn.getresponse()
+            data = response.read()
+        except (http.client.HTTPException, OSError) as exc:
+            last_exc = exc
+            _drop_connection(parts)
+            continue
+
+        if response.status in (301, 302, 303, 307, 308):
+            _drop_connection(parts)
+            return None
         if response.status not in (200, 206):
-            raise HttpRangeError(f"Servidor retornou HTTP {response.status} ao solicitar range {start}-{end}")
-        data = response.read()
-
-        if verbose:
-            print(f"[HTTP Range] {start:,}-{end:,} ({len(data):,} bytes)")
-
+            retry = _retry_after_seconds(response.headers)
+            if response.getheader("Connection", "").lower() == "close":
+                _drop_connection(parts)
+            raise HttpRangeError(
+                f"HTTP {response.status} de {safe_url(url)} ao solicitar range {start}-{end}",
+                status=response.status,
+                retry_after=retry,
+            )
+        if response.getheader("Connection", "").lower() == "close":
+            _drop_connection(parts)
         return data
+
+    raise HttpRangeError(
+        f"Falha de conexão HTTP com {safe_url(url)}: {type(last_exc).__name__ if last_exc else 'desconhecida'}"
+    )
+
+
+def supports_multirange(url: str, timeout: int = 30) -> bool:
+    """O servidor devolve multipart/byteranges quando pedimos dois ranges? (O TorBox responde só o primeiro.)"""
+    host = urllib.parse.urlparse(url).netloc
+    if host in _multirange_unsupported:
+        return False
+    headers = {"Range": "bytes=0-0,2-2", "User-Agent": "Lunio-Remote-MKV/1.0", "Accept": "*/*"}
+    try:
+        with open_http(url, headers, timeout=timeout) as response:
+            response.read()
+            if response.status == 206 and "multipart/byteranges" in (response.headers.get("Content-Type") or "").lower():
+                return True
+    except HttpRangeError as exc:
+        if exc.status == 429:
+            raise
+    _multirange_unsupported.add(host)
+    return False
+
+
+def measure_rtt(url: str, timeout: int = 30) -> float:
+    """Tempo de um range de 1 byte numa conexão já aberta (a segunda requisição não paga DNS+TCP+TLS)."""
+    import time
+
+    read_range(url, 0, 0, timeout=timeout)
+    started = time.monotonic()
+    read_range(url, 1, 1, timeout=timeout)
+    return time.monotonic() - started
+
+
+def read_range(url: str, start: int, end: int, timeout: int = 60, verbose: bool = False) -> bytes:
+    """Lê um range específico de bytes (start a end inclusive) via HTTP 206."""
+    data = _fetch_range(url, start, end, timeout)
+    if data is None:
+        headers = {
+            "Range": f"bytes={start}-{end}",
+            "User-Agent": "Lunio-Remote-MKV/1.0",
+            "Accept": "*/*",
+        }
+        with open_http(url, headers, timeout=timeout) as response:
+            if response.status not in (200, 206):
+                raise HttpRangeError(f"Servidor retornou HTTP {response.status} ao solicitar range {start}-{end}")
+            data = response.read()
+
+    if verbose:
+        print(f"[HTTP Range] {start:,}-{end:,} ({len(data):,} bytes)")
+
+    return data
 
 
 def _parse_content_range(value: str) -> tuple[int, int, int | None]:
@@ -169,28 +286,38 @@ def read_ranges(
         start, end = unique_ranges[0]
         return {(start, end): read_range(url, start, end, timeout=timeout, verbose=verbose)}
 
-    range_header = "bytes=" + ",".join(f"{start}-{end}" for start, end in unique_ranges)
-    headers = {
-        "Range": range_header,
-        "User-Agent": "Lunio-Remote-MKV/1.0",
-        "Accept": "*/*",
-    }
+    host = urllib.parse.urlparse(url).netloc
+    if host not in _multirange_unsupported:
+        range_header = "bytes=" + ",".join(f"{start}-{end}" for start, end in unique_ranges)
+        headers = {
+            "Range": range_header,
+            "User-Agent": "Lunio-Remote-MKV/1.0",
+            "Accept": "*/*",
+        }
 
-    try:
-        with open_http(url, headers, timeout=timeout) as response:
-            body = response.read()
-            content_type = response.headers.get("Content-Type") or ""
+        try:
+            with open_http(url, headers, timeout=timeout) as response:
+                body = response.read()
+                content_type = response.headers.get("Content-Type") or ""
 
-            if response.status == 206 and "multipart/byteranges" in content_type.lower():
-                parts = _parse_multipart_ranges(content_type, body)
-                missing = [r for r in unique_ranges if r not in parts]
-                if not missing:
-                    if verbose:
-                        print(f"[HTTP Multi-Range] {len(unique_ranges)} ranges recebidos via multipart ({len(body):,} bytes)")
-                    return parts
-    except Exception as exc:
-        if verbose:
-            print(f"[HTTP Multi-Range] Falha no multipart ({exc}), alternando para requisições individuais...")
+                if response.status == 206 and "multipart/byteranges" in content_type.lower():
+                    parts = _parse_multipart_ranges(content_type, body)
+                    missing = [r for r in unique_ranges if r not in parts]
+                    if not missing:
+                        if verbose:
+                            print(f"[HTTP Multi-Range] {len(unique_ranges)} ranges recebidos via multipart ({len(body):,} bytes)")
+                        return parts
+                else:
+                    # Respondeu só o primeiro range, sem multipart: não pergunta de novo nos próximos lotes
+                    _multirange_unsupported.add(host)
+        except HttpRangeError as exc:
+            if exc.status == 429:
+                raise
+            if verbose:
+                print(f"[HTTP Multi-Range] Falha no multipart ({exc}), alternando para requisições individuais...")
+        except Exception as exc:
+            if verbose:
+                print(f"[HTTP Multi-Range] Falha no multipart ({exc}), alternando para requisições individuais...")
 
     # Fallback transparente para servidores sem suporte a multipart
     result = {}

@@ -20,8 +20,11 @@ from mkv_extractor.subtitles import (
 )
 from mkv_extractor.errors import TrackNotFoundError, CodecNotSupportedError
 from mkv_extractor.extractor import cue_times_seconds
-from mkv_extractor.errors import HttpRangeError
-from mkv_extractor.http import read_range, safe_url
+from unittest import mock
+
+from mkv_extractor import extractor as extractor_module
+from mkv_extractor.errors import HttpRangeError, PreferFfmpegError
+from mkv_extractor.http import close_connections, read_range, safe_url, supports_multirange
 
 
 class TestEbml(unittest.TestCase):
@@ -262,6 +265,91 @@ class TestHttpErrors(unittest.TestCase):
 
     def test_safe_url_keeps_only_the_host(self):
         self.assertEqual(safe_url("https://cdn.test/dld/abc?token=x"), "https://cdn.test/…")
+
+
+class _SingleRangeServer:
+    """Servidor que, como o CDN do TorBox, devolve só o primeiro range quando vêm vários, e conta as conexões abertas."""
+
+    def __init__(self, testcase):
+        import http.server
+        import socketserver
+        import threading
+
+        outer = self
+        self.connections = 0
+        self.requests = 0
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_GET(self):
+                outer.requests += 1
+                first = self.headers.get("Range", "bytes=0-0").replace("bytes=", "").split(",")[0]
+                start, end = (int(x) for x in first.split("-"))
+                body = bytes(range(256)) * ((end - start) // 256 + 1)
+                body = body[: end - start + 1]
+                self.send_response(206)
+                self.send_header("Content-Type", "video/x-matroska")
+                self.send_header("Content-Range", f"bytes {start}-{end}/100000")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+
+            def get_request(self):
+                request = super().get_request()
+                outer.connections += 1
+                return request
+
+        self.server = Server(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        testcase.addCleanup(self.server.shutdown)
+        testcase.addCleanup(close_connections)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/dld/abc?token=SEGREDO123"
+
+
+class TestKeepAliveAndCost(unittest.TestCase):
+    def test_many_ranges_reuse_one_connection(self):
+        srv = _SingleRangeServer(self)
+        for i in range(8):
+            data = read_range(srv.url, i * 10, i * 10 + 9, timeout=5)
+            self.assertEqual(len(data), 10)
+        self.assertEqual(srv.requests, 8)
+        self.assertEqual(srv.connections, 1)
+
+    def test_detects_server_without_multirange(self):
+        srv = _SingleRangeServer(self)
+        self.assertFalse(supports_multirange(srv.url, timeout=5))
+
+    def _cues(self, n):
+        return [{"cluster_position": i * 1000, "relative_position": 5, "time": i} for i in range(n)]
+
+    def test_estimate_costs_counts_cluster_header_plus_two_requests_per_cue(self):
+        requests, est_extractor, est_ffmpeg = extractor_module.estimate_costs(935_568_536, self._cues(362), 0.2)
+        self.assertEqual(requests, 362 + 2 * 362)
+        self.assertAlmostEqual(est_extractor, requests * 0.2)
+        self.assertAlmostEqual(est_ffmpeg, 935_568_536 / extractor_module.FFMPEG_THROUGHPUT_BYTES_PER_S)
+
+    def test_prefers_ffmpeg_when_many_cues_and_no_multirange(self):
+        with mock.patch.object(extractor_module, "supports_multirange", return_value=False),              mock.patch.object(extractor_module, "measure_rtt", return_value=0.2):
+            with self.assertRaises(PreferFfmpegError):
+                extractor_module.check_extractor_is_worth_it("http://x/", 935_568_536, self._cues(362), 5, False)
+
+    def test_keeps_extractor_for_huge_files_or_few_cues(self):
+        with mock.patch.object(extractor_module, "supports_multirange", return_value=False),              mock.patch.object(extractor_module, "measure_rtt", return_value=0.2):
+            # remux de 40 GB: ler tudo leva ~1000 s, as ~870 requisições ~175 s
+            extractor_module.check_extractor_is_worth_it("http://x/", 40_000_000_000, self._cues(362), 5, False)
+            # poucos blocos
+            extractor_module.check_extractor_is_worth_it("http://x/", 935_568_536, self._cues(10), 5, False)
+
+    def test_never_prefers_ffmpeg_when_server_supports_multirange(self):
+        with mock.patch.object(extractor_module, "supports_multirange", return_value=True),              mock.patch.object(extractor_module, "measure_rtt", side_effect=AssertionError("nao deveria medir")):
+            extractor_module.check_extractor_is_worth_it("http://x/", 935_568_536, self._cues(5000), 5, False)
 
 
 if __name__ == "__main__":

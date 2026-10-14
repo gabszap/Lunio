@@ -11,6 +11,7 @@ import { getMediaFingerprint } from '../media/fingerprint';
 import { FONT_CACHE_DIR } from '../media/paths';
 import { resolveFinalCdnUrl } from '../media/resolver';
 import { tracksCache } from '../media/tracks';
+import { hostOf, runOnHost } from '../media/upstreamGate';
 
 const pendingFontExtractions = new Map<string, Promise<void>>();
 
@@ -106,7 +107,7 @@ export async function handleFont(req: IncomingMessage, res: ServerResponse) {
         '-i', streamUrl,
       ];
 
-      await new Promise<void>((resolve, reject) => {
+      await runOnHost(hostOf(streamUrl), 'interactive', () => new Promise<void>((resolve, reject) => {
         const proc = spawnLimited(ffmpegBin(), args, { cwd: targetDir });
         if (!proc) {
           const busy: any = new Error('Servidor ocupado (limite de processos).');
@@ -133,7 +134,7 @@ export async function handleFont(req: IncomingMessage, res: ServerResponse) {
           clearTimeout(timer);
           reject(err);
         });
-      });
+      })).promise;
     })();
 
     pendingFontExtractions.set(hash, extractionPromise);

@@ -26,7 +26,16 @@ interface HostState {
 export const DEFAULT_COOLDOWN_MS = 15_000;
 export const MAX_COOLDOWN_MS = 60_000;
 
+/**
+ * O TorBox deixa 3 downloads simultâneos por assinatura. A reprodução (o stream aberto + um seek) vem sempre antes:
+ * extração de legenda só começa quando sobra folga, ou seja, com no máximo `limite - 2` streams de vídeo abertos.
+ */
+export const MAX_UPSTREAM_CONNECTIONS = Math.max(2, Number(process.env.UPSTREAM_MAX_CONNECTIONS) || 3);
+/** Quanto uma extração espera por folga antes de rodar mesmo assim (melhor lenta do que nunca). */
+export const MAX_WAIT_FOR_ROOM_MS = 30_000;
+
 const hosts = new Map<string, HostState>();
+const activeStreams = new Map<string, number>();
 
 function stateOf(host: string): HostState {
   let s = hosts.get(host);
@@ -56,6 +65,23 @@ export function cooldownRemainingMs(host: string): number {
   return Math.max(0, stateOf(host).cooldownUntil - Date.now());
 }
 
+/** Um stream de vídeo abriu uma conexão com o host; devolve a função que a libera (idempotente). */
+export function noteStreamStart(host: string): () => void {
+  activeStreams.set(host, (activeStreams.get(host) || 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const n = (activeStreams.get(host) || 1) - 1;
+    if (n <= 0) activeStreams.delete(host);
+    else activeStreams.set(host, n);
+  };
+}
+
+export function activeStreamCount(host: string): number {
+  return activeStreams.get(host) || 0;
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function pump(host: string) {
@@ -68,6 +94,11 @@ async function pump(host: string) {
       const job = s.queue.splice(idx >= 0 ? idx : 0, 1)[0];
       const wait = cooldownRemainingMs(host);
       if (wait > 0) await sleep(wait);
+      // Deixa a reprodução (stream aberto + seek) com folga antes de abrir mais uma conexão
+      const waitStart = Date.now();
+      while (activeStreamCount(host) > MAX_UPSTREAM_CONNECTIONS - 2 && Date.now() - waitStart < MAX_WAIT_FOR_ROOM_MS) {
+        await sleep(500);
+      }
       try {
         job.resolve(await job.run());
       } catch (e) {
@@ -100,4 +131,5 @@ export function runOnHost<T>(host: string, priority: GatePriority, run: () => Pr
 /** Só para testes. */
 export function resetGateForTests() {
   hosts.clear();
+  activeStreams.clear();
 }
