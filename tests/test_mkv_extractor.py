@@ -352,5 +352,59 @@ class TestKeepAliveAndCost(unittest.TestCase):
             extractor_module.check_extractor_is_worth_it("http://x/", 935_568_536, self._cues(5000), 5, False)
 
 
+class TestAttachments(unittest.TestCase):
+    """Fontes anexadas: o bloco Attachments é lido por Range a partir da posição do SeekHead."""
+
+    @staticmethod
+    def _el(element_id: int, payload: bytes) -> bytes:
+        id_bytes = element_id.to_bytes((element_id.bit_length() + 7) // 8, "big")
+        return id_bytes + b"\x01" + len(payload).to_bytes(7, "big") + payload
+
+    def _mkv(self, files, with_seek=True):
+        el = self._el
+        attached = b"".join(el(0x61A7, el(0x466E, name.encode()) + el(0x465C, data)) for name, data in files)
+        attachments = el(0x1941A469, attached)
+
+        def seekhead(position):
+            entry = el(0x4DBB, el(0x53AB, (0x1941A469).to_bytes(4, "big")) + el(0x53AC, position.to_bytes(4, "big")))
+            return el(0x114D9B74, entry)
+
+        seek_len = len(seekhead(0))
+        info = el(0x1549A966, b"\x00" * 8)
+        position = seek_len + len(info)
+        body = (seekhead(position) if with_seek else el(0x114D9B74, b"")) + info + attachments
+        segment = el(0x18538067, body)
+        return el(0x1A45DFA3, b"\x00" * 4) + segment
+
+    def _extract(self, blob, out_dir):
+        def fake_read_range(url, start, end, timeout=60, verbose=False):
+            return blob[start:end + 1]
+
+        with mock.patch.object(extractor_module, "resolve_url", return_value=("http://cdn/x.mkv", len(blob))), \
+             mock.patch.object(extractor_module, "read_range", side_effect=fake_read_range):
+            return extractor_module.extract_attachments("http://x/", out_dir, timeout=5)
+
+    def test_reads_files_in_order_and_writes_only_ordinal_names(self):
+        import tempfile
+
+        files = [("..\\evil/arial.ttf", b"AAAA" * 10), ("fonte.otf", b"OTTO" + b"\x01" * 50)]
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._extract(self._mkv(files), tmp)
+            self.assertEqual([r["filename"] for r in result], [f[0] for f in files])
+            self.assertEqual([r["size"] for r in result], [40, 54])
+            self.assertEqual(sorted(os.listdir(tmp)), ["a0.bin", "a1.bin"])
+            with open(os.path.join(tmp, "a1.bin"), "rb") as fh:
+                self.assertEqual(fh.read(), files[1][1])
+
+    def test_without_seekhead_entry_raises_so_server_falls_back_to_ffmpeg(self):
+        import tempfile
+        from mkv_extractor.errors import MatroskaStructureError
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(MatroskaStructureError):
+                self._extract(self._mkv([("a.ttf", b"x" * 10)], with_seek=False), tmp)
+            self.assertEqual(os.listdir(tmp), [])
+
+
 if __name__ == "__main__":
     unittest.main()

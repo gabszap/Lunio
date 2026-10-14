@@ -6,6 +6,7 @@ import { sendApiError } from '../http';
 import { spawnLimited } from '../limits';
 import { isBlockedError } from '../security';
 import { ffmpegBin, killTree } from '../tools';
+import { mapAttachmentOrdinals, placeAttachments, readAttachments } from '../media/attachments';
 import { FFMPEG_NET_ONLY } from '../media/ffmpeg';
 import { getMediaFingerprint } from '../media/fingerprint';
 import { FONT_CACHE_DIR } from '../media/paths';
@@ -89,6 +90,37 @@ export async function handleFont(req: IncomingMessage, res: ServerResponse) {
       }
       console.log(`[FontExtractor] Extraindo ${wanted.size} fonte(s) anexada(s) do MKV (Media: ${hash})...`);
 
+      // 1) Caminho rápido: só o bloco Attachments do MKV (1 requisição), sem o FFmpeg percorrer o arquivo
+      const markAttempted = () => {
+        for (const idx of wanted.keys()) {
+          try {
+            fs.writeFileSync(path.join(targetDir, `f${idx}.done`), new Date().toISOString());
+          } catch {
+            // ignore
+          }
+        }
+      };
+      const host = hostOf(streamUrl);
+      const fastStarted = Date.now();
+      try {
+        const entries = await runOnHost(host, 'interactive', () => readAttachments(streamUrl, targetDir)).promise;
+        const knownIdx = (tracksCache.get(targetUrl)?.fonts || []).map((f: any) => f.index).filter(Number.isInteger);
+        const ordinals = mapAttachmentOrdinals(wanted, knownIdx, entries);
+        const finalNames = new Map<number, string>();
+        for (const [idx, ordinal] of ordinals) finalNames.set(ordinal, `f${idx}.${extOf(wanted.get(idx) || '')}`);
+        placeAttachments(targetDir, entries, finalNames);
+        for (const idx of ordinals.keys()) wanted.delete(idx);
+        console.log(`[FontExtractor] ${ordinals.size} fonte(s) lida(s) do bloco Attachments em ${Date.now() - fastStarted}ms`);
+      } catch (err: any) {
+        if (err?.code === 'busy') throw err;
+        console.warn(`[FontExtractor] Leitura direta dos anexos falhou, usando o FFmpeg: ${String(err?.message || err).slice(0, 160)}`);
+      }
+      if (wanted.size === 0) {
+        markAttempted();
+        return;
+      }
+
+      // 2) Fallback: o FFmpeg extrai o que o caminho rápido não cobriu
       const dumpArgs: string[] = [];
       for (const [idx, name] of wanted) {
         dumpArgs.push(`-dump_attachment:${idx}`, path.join(targetDir, `f${idx}.${extOf(name)}`));
@@ -121,13 +153,7 @@ export async function handleFont(req: IncomingMessage, res: ServerResponse) {
         proc.on('close', () => {
           clearTimeout(timer);
           // Marca cada índice como já tentado para nunca mais reexecutar o FFmpeg por ele
-          for (const idx of wanted.keys()) {
-            try {
-              fs.writeFileSync(path.join(targetDir, `f${idx}.done`), new Date().toISOString());
-            } catch {
-              // ignore
-            }
-          }
+          markAttempted();
           resolve();
         });
         proc.on('error', (err) => {

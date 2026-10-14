@@ -4,6 +4,7 @@ API principal e CLI do Remote Subtitle Extractor para Matroska (MKV).
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -15,15 +16,19 @@ from .errors import (
     PreferFfmpegError,
     RemoteMkvError,
 )
+from .ebml import read_element_header
 from .http import measure_rtt, read_range, resolve_url, supports_multirange
 from .matroska import (
+    ATTACHMENTS_ID,
     discover_cues,
+    discover_seekhead,
     fetch_and_parse_blocks,
     fetch_cluster_headers,
     find_segment,
     find_tracks,
     get_timecode_scale,
     get_track_cues,
+    parse_attachments,
     parse_cues,
 )
 from .subtitles import (
@@ -289,6 +294,55 @@ def cue_times_seconds(cues: list[dict[str, Any]], track_number: int, scale: int)
     return sorted(times)
 
 
+# Teto do bloco Attachments lido de uma vez (as fontes de um release com fonte CJK passam de 40 MB)
+MAX_ATTACHMENTS_BYTES = 256 * 1024 * 1024
+
+
+def extract_attachments(url: str, out_dir: str, timeout: int = 60, verbose: bool = False) -> list[dict[str, Any]]:
+    """
+    Lê só o bloco Attachments do MKV remoto (o SeekHead aponta onde ele está, em geral nos primeiros KB) e grava cada
+    anexo em <out_dir>/a<ordem>.bin. Uma requisição, em vez de o FFmpeg percorrer o arquivo inteiro atrás das fontes.
+    Devolve [{ordinal, filename, size}]; o servidor decide o nome final e a extensão.
+    """
+    final_url, total_size = resolve_url(url, timeout=timeout, verbose=verbose)
+    head = read_range(final_url, 0, min(HEAD_SCAN_SIZE, total_size) - 1, timeout=timeout, verbose=verbose)
+
+    segment_data_start, _ = find_segment(head)
+    _, seeks = discover_seekhead(head)
+    if ATTACHMENTS_ID not in seeks:
+        raise MatroskaStructureError("O SeekHead não aponta para Attachments.")
+
+    start = segment_data_start + seeks[ATTACHMENTS_ID]
+    if start >= total_size:
+        raise MatroskaStructureError("Posição de Attachments fora do arquivo.")
+    if start + 16 <= len(head):
+        header = read_element_header(head, start)
+    else:
+        header = read_element_header(read_range(final_url, start, min(start + 15, total_size - 1), timeout=timeout), 0)
+    if header["id"] != ATTACHMENTS_ID or header["unknown_size"]:
+        raise MatroskaStructureError("Elemento Attachments inválido na posição indicada pelo SeekHead.")
+
+    size = header["header_size"] + header["size"]
+    if size > MAX_ATTACHMENTS_BYTES or start + size > total_size:
+        raise MatroskaStructureError(f"Attachments com tamanho inesperado ({size:,} bytes).")
+
+    data = head[start:start + size] if start + size <= len(head) else read_range(
+        final_url, start, start + size - 1, timeout=timeout, verbose=verbose
+    )
+    files = parse_attachments(data)
+
+    os.makedirs(out_dir, exist_ok=True)
+    result = []
+    for ordinal, item in enumerate(files):
+        # O nome vem do arquivo (dado de terceiros): nunca vira caminho; o disco recebe só a ordem
+        with open(os.path.join(out_dir, f"a{ordinal}.bin"), "wb") as fh:
+            fh.write(item["data"])
+        result.append({"ordinal": ordinal, "filename": item["filename"], "size": len(item["data"])})
+    if verbose:
+        print(f"[Attachments] {len(result)} anexo(s), {size:,} bytes")
+    return result
+
+
 def extract_video_keyframes(url: str, timeout: int = 60, verbose: bool = False) -> dict[str, Any]:
     """
     Lê só o cabeçalho e os Cues do MKV remoto e devolve onde estão os keyframes da primeira faixa de vídeo.
@@ -334,6 +388,7 @@ def main():
     parser.add_argument("--stream-index", type=int, default=None, help="Índice global do stream como o FFmpeg numera (0:N)")
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="Tamanho do lote multi-range")
     parser.add_argument("--timeout", type=int, default=60, help="Timeout HTTP em segundos")
+    parser.add_argument("--attachments", metavar="DIR", help="Em vez de legenda, gravar os anexos (fontes) do MKV em DIR e imprimir (JSON) a lista")
     parser.add_argument("--keyframes", action="store_true", help="Em vez de legenda, imprimir (JSON) os keyframes do vídeo lidos dos Cues")
     parser.add_argument("--json", action="store_true", help="Imprimir metadados como JSON")
     parser.add_argument("-v", "--verbose", action="store_true", help="Logs detalhados")
@@ -341,6 +396,10 @@ def main():
     args = parser.parse_args()
 
     try:
+        if args.attachments:
+            print(json.dumps(extract_attachments(args.url, args.attachments, timeout=args.timeout, verbose=args.verbose), ensure_ascii=False))
+            return
+
         if args.keyframes:
             print(json.dumps(extract_video_keyframes(args.url, timeout=args.timeout, verbose=args.verbose)))
             return
