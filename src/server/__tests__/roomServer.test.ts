@@ -90,6 +90,22 @@ describe('fila (playlist)', () => {
     expect(stateOf('FILA3').playlist!.map((i) => i.id)).toEqual([a.id]);
   });
 
+  it('arrastar: o Host leva o item direto para a posição (e posição inválida é ignorada)', () => {
+    const host = connect('FILA5', 'h');
+    const guest = connect('FILA5', 'g');
+    for (let i = 1; i <= 4; i++) send(host, item(i));
+    const [a, b, c, d] = stateOf('FILA5').playlist!;
+    send(host, { type: 'playlist:move', itemId: a.id, toIndex: 2 });
+    expect(stateOf('FILA5').playlist!.map((i) => i.id)).toEqual([b.id, c.id, a.id, d.id]);
+    send(host, { type: 'playlist:move', itemId: d.id, toIndex: 0 });
+    expect(stateOf('FILA5').playlist!.map((i) => i.id)).toEqual([d.id, b.id, c.id, a.id]);
+    send(host, { type: 'playlist:move', itemId: d.id, toIndex: 9 });
+    send(host, { type: 'playlist:move', itemId: d.id, toIndex: -1 });
+    send(host, { type: 'playlist:move', itemId: d.id, toIndex: 1.5 as number });
+    send(guest, { type: 'playlist:move', itemId: a.id, toIndex: 0 });
+    expect(stateOf('FILA5').playlist!.map((i) => i.id)).toEqual([d.id, b.id, c.id, a.id]);
+  });
+
   it('o Host toca um item: ele sai da fila', () => {
     const host = connect('FILA4', 'h');
     send(host, item(1));

@@ -190,7 +190,10 @@ export type ClientMessage =
   | {
       type: 'playlist:move';
       itemId: string;
-      direction: 'up' | 'down';
+      /** Um passo para cima/baixo (teclado) ... */
+      direction?: 'up' | 'down';
+      /** ... ou a posição final (arrastar e soltar). */
+      toIndex?: number;
     }
   | {
       /** O Host tirou o item da fila para tocá-lo (o cliente do Host carrega a mídia em seguida). */

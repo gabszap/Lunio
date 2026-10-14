@@ -573,8 +573,8 @@ export class RoomManager {
       case 'playlist:move': {
         if (!isHost) return;
         const from = currentRoom.playlist.findIndex((i) => i.id === msg.itemId);
-        const to = msg.direction === 'up' ? from - 1 : from + 1;
-        if (from < 0 || to < 0 || to >= currentRoom.playlist.length) return;
+        const to = Number.isInteger(msg.toIndex) ? (msg.toIndex as number) : msg.direction === 'up' ? from - 1 : msg.direction === 'down' ? from + 1 : -1;
+        if (from < 0 || to < 0 || to >= currentRoom.playlist.length || to === from) return;
         const [moved] = currentRoom.playlist.splice(from, 1);
         currentRoom.playlist.splice(to, 0, moved);
         this.broadcast(currentRoom, { type: 'playlist:update', playlist: currentRoom.playlist });
