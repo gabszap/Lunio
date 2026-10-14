@@ -248,3 +248,36 @@ describe('envio de arquivos', () => {
     if (res instanceof Response) expect(res.status).toBe(413);
   });
 });
+
+describe('status e velocidade (públicos, sem token)', () => {
+  it('/api/status conta salas com gente e pessoas, e informa o tempo no ar', async () => {
+    // Direto no handler: o teste de limite acima já esgotou as 30 chamadas/min de /api/status pelo gate
+    const { handleStatus } = await import('../routes/status');
+    const srv = (await import('node:http')).createServer(handleStatus);
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+    const res = await fetch(`http://127.0.0.1:${(srv.address() as import('node:net').AddressInfo).port}/`);
+    await new Promise((r) => srv.close(r));
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    // A sala SEGSALA do beforeAll tem 2 pessoas (outras salas dos testes só somam)
+    expect(body.rooms).toBeGreaterThanOrEqual(1);
+    expect(body.people).toBeGreaterThanOrEqual(2);
+    expect(body.uptimeSeconds).toBeGreaterThanOrEqual(0);
+    expect(body.ffmpeg).toBeDefined();
+  });
+
+  it('a mesma pessoa em duas abas conta uma vez', () => {
+    const before = manager.getStats();
+    helpers.joinRoom(manager, 'SEGSALA', 'guest1_tab0001');
+    expect(manager.getStats()).toEqual(before);
+  });
+
+  it('/api/speed devolve 4 MiB incompressíveis e sem cache', async () => {
+    const res = await fetch(`${api.base}/api/speed`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const buf = new Uint8Array(await res.arrayBuffer());
+    expect(buf.length).toBe(4 * 1024 * 1024);
+    expect(new Set(buf.subarray(0, 4096)).size).toBeGreaterThan(200); // aleatório, não zeros
+  });
+});

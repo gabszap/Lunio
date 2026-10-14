@@ -31,6 +31,7 @@ const ROUTES: Record<string, { auth: AuthMode; rate: RateRule }> = {
   room: { auth: 'none', rate: { max: 120, windowMs: MIN } },
   token: { auth: 'none', rate: { max: 20, windowMs: MIN } },
   status: { auth: 'none', rate: { max: 30, windowMs: MIN } },
+  speed: { auth: 'none', rate: { max: 6, windowMs: MIN } },
   proxy: { auth: 'any', rate: { max: 900, windowMs: MIN } },
   resolve: { auth: 'any', rate: { max: 60, windowMs: MIN } },
   tracks: { auth: 'any', rate: { max: 30, windowMs: MIN } },
