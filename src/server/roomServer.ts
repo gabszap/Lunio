@@ -3,7 +3,8 @@ import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Server as HttpsServer } from 'node:https';
 import { issueRoomToken } from './access';
 import { isOriginAllowed } from './cors';
-import { PLAYLIST_MAX_ITEMS } from '../types/sync';
+import { PLAYLIST_MAX_ITEMS, playlistUrlKey } from '../types/sync';
+import { warmUpMedia } from './media/resolver';
 import type {
   ClientMessage,
   ServerMessage,
@@ -547,6 +548,8 @@ export class RoomManager {
         const url = typeof msg.url === 'string' ? msg.url.trim() : '';
         if (!/^https?:\/\//i.test(url) || url.length > 4096) return;
         if (currentRoom.playlist.length >= PLAYLIST_MAX_ITEMS) return;
+        // O mesmo vídeo duas vezes na fila é quase sempre clique repetido; a Home já avisa quem tentou
+        if (currentRoom.playlist.some((i) => playlistUrlKey(i.url) === playlistUrlKey(url))) return;
         const title = (typeof msg.title === 'string' ? msg.title.trim() : '').slice(0, 200) || 'Vídeo';
         currentRoom.playlist.push({
           id: `pl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
@@ -557,6 +560,9 @@ export class RoomManager {
           addedBy: clientSession.username,
         });
         this.sendSystemChat(currentRoom, `➕ ${clientSession.username} adicionou à fila: "${title}"`);
+        // Sonda o link já: o primeiro acesso a um vídeo novo é o que o TorBox/Torrentio limita (429), e é melhor
+        // isso acontecer agora, sem ninguém esperando, do que na hora de tocar
+        if (!/youtube/i.test(msg.mimeType || '')) warmUpMedia(url);
         this.broadcast(currentRoom, { type: 'playlist:update', playlist: currentRoom.playlist });
         break;
       }
@@ -566,6 +572,7 @@ export class RoomManager {
         // Quem adicionou pode tirar o próprio item; o Host tira qualquer um
         if (!item || (!isHost && item.addedById !== clientSession.userId)) return;
         currentRoom.playlist = currentRoom.playlist.filter((i) => i.id !== item.id);
+        this.sendSystemChat(currentRoom, `➖ ${clientSession.username} removeu da fila: "${item.title}"`);
         this.broadcast(currentRoom, { type: 'playlist:update', playlist: currentRoom.playlist });
         break;
       }

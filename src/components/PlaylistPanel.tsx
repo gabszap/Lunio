@@ -3,7 +3,7 @@ import { GripVertical, ListPlus, ListVideo, Play, X } from 'lucide-react';
 import { syncManager } from '../lib/sync';
 import { detectMimeType, getYouTubeId, validateAndFormatUrl } from '../lib/media';
 import { extractCleanTitleFromUrl } from '../lib/recent';
-import { PLAYLIST_MAX_ITEMS, type PlaylistItem } from '../types/sync';
+import { PLAYLIST_MAX_ITEMS, playlistUrlKey, type PlaylistItem } from '../types/sync';
 import { t } from '../lib/i18n';
 import { IconButton, PrimaryButton, TextInput, cx } from './ui';
 
@@ -51,6 +51,11 @@ export const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ onPlayItem }) => {
       return;
     }
     const ytId = getYouTubeId(url);
+    const finalUrl = ytId ? `https://www.youtube.com/watch?v=${ytId}` : url;
+    if (playlist.some((p) => playlistUrlKey(p.url) === playlistUrlKey(finalUrl))) {
+      setError(t('Esse vídeo já está na fila.'));
+      return;
+    }
     if (ytId) {
       let title = t('Vídeo do YouTube');
       try {

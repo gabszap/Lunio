@@ -6,6 +6,7 @@ export const EN: Record<string, string> = {
   ". Peça um link novo ou crie a sua.": ". Ask for a new link or create your own.",
   ".ass, .ssa, .srt ou .vtt · .srt é convertido automaticamente para WebVTT": ".ass, .ssa, .srt or .vtt · .srt is converted to WebVTT automatically",
   "Disponível": "Available",
+  "Esse vídeo já está na fila.": "That video is already in the queue.",
   "Fora do ar": "Offline",
   "Medindo…": "Measuring…",
   "No ar": "Uptime",
