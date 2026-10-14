@@ -56,6 +56,11 @@ CUE_CLUSTER_POSITION_ID = 0xF1
 CUE_RELATIVE_POSITION_ID = 0xF0
 CUE_DURATION_ID = 0xB2
 
+ATTACHMENTS_ID = 0x1941A469
+ATTACHED_FILE_ID = 0x61A7
+FILE_NAME_ID = 0x466E
+FILE_DATA_ID = 0x465C
+
 CLUSTER_ID = 0x1F43B675
 BLOCK_GROUP_ID = 0xA0
 BLOCK_ID = 0xA1
@@ -115,6 +120,27 @@ def discover_seekhead(head: bytes) -> tuple[dict[str, Any] | None, dict[int, int
         except Exception:
             continue
     return None, {}
+
+
+def parse_attachments(data: bytes) -> list[dict[str, Any]]:
+    """Lê um elemento Attachments completo (cabeçalho incluso) e devolve [{filename, data}] na ordem do arquivo."""
+    root = read_element(data, 0)
+    if root["id"] != ATTACHMENTS_ID:
+        raise MatroskaStructureError("O trecho lido não é o elemento Attachments.")
+
+    files: list[dict[str, Any]] = []
+    for attached in iter_elements(data, root["content_start"], root["content_end"]):
+        if attached["id"] != ATTACHED_FILE_ID:
+            continue
+        name = ""
+        blob = b""
+        for child in iter_elements(data, attached["content_start"], attached["content_end"]):
+            if child["id"] == FILE_NAME_ID:
+                name = read_string(data, child)
+            elif child["id"] == FILE_DATA_ID:
+                blob = data[child["content_start"]:child["content_end"]]
+        files.append({"filename": name, "data": blob})
+    return files
 
 
 def get_timecode_scale(head: bytes) -> int:
