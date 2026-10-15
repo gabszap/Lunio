@@ -1,3 +1,4 @@
+import { isInternalUploadUrl } from './media/uploads';
 import dns from 'node:dns';
 import http from 'node:http';
 import https from 'node:https';
@@ -98,7 +99,7 @@ export function checkUrlSyntax(raw: string): URL {
   }
   const host = hostOf(url);
   if (!host) throw new UrlBlockedError('URL sem host');
-  if (config.allowPrivateUrls) return url;
+  if (config.allowPrivateUrls || isInternalUploadUrl(url)) return url;
   if (net.isIP(host) && !isPublicAddress(host)) {
     throw new UrlBlockedError('Endereço de rede interna');
   }
@@ -112,7 +113,7 @@ export function checkUrlSyntax(raw: string): URL {
 export async function assertPublicUrl(raw: string): Promise<URL> {
   const url = checkUrlSyntax(raw);
   const host = hostOf(url);
-  if (net.isIP(host) || config.allowPrivateUrls) return url;
+  if (net.isIP(host) || config.allowPrivateUrls || isInternalUploadUrl(url)) return url;
   let addrs: dns.LookupAddress[];
   try {
     addrs = await dns.promises.lookup(host, { all: true, verbatim: true });

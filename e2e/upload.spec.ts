@@ -1,5 +1,7 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { expect, test, type Page, type Request } from '@playwright/test';
-import { newUser, submitName } from './helpers';
+import { newUser, submitName, waitReady } from './helpers';
 
 /**
  * Envio de arquivo em pedaços. O servidor de teste usa pedaços de 64 KiB (UPLOAD_CHUNK_MB, ver playwright.config.ts),
@@ -8,18 +10,16 @@ import { newUser, submitName } from './helpers';
 
 const FILE_SIZE = 600 * 1024; // ~10 pedaços de 64 KiB
 
-async function openUpload(page: Page, name: string) {
+async function openUpload(page: Page, name: string, file?: { name: string; mimeType: string; buffer: Buffer }) {
   // Esperas curtas entre as tentativas (o padrão de 1 a 15 s deixaria o teste lento)
   await page.addInitScript(() => {
     (window as unknown as { __lunioRetryDelays: number[] }).__lunioRetryDelays = [50, 50];
   });
   await page.goto('/');
   await page.getByRole('button', { name: /Enviar um arquivo/ }).click();
-  await page.locator('input[type="file"]').setInputFiles({
-    name: 'episodio.mp4',
-    mimeType: 'video/mp4',
-    buffer: Buffer.alloc(FILE_SIZE, 5),
-  });
+  await page.locator('input[type="file"]').setInputFiles(
+    file ?? { name: 'episodio.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(FILE_SIZE, 5) }
+  );
   await page.getByRole('button', { name: 'Enviar e criar sala' }).click();
   await submitName(page, name);
 }
@@ -90,4 +90,23 @@ test.describe('envio de arquivo em pedaços', () => {
     expect(Math.max(...offsets)).toBeGreaterThan(131072);
     await context.close();
   });
+
+  test('o arquivo enviado abre no player e toca (o proxy lê o próprio envio, com token)', async ({ browser }) => {
+    const { context, page } = await newUser(browser);
+    const video = fs.readFileSync(path.join(process.cwd(), 'e2e', '.fixtures', 'teste.mkv'));
+    const failures: string[] = [];
+    page.on('response', (r) => {
+      if (r.status() >= 400 && /\/api\/(proxy|uploads|tracks)/.test(r.url())) failures.push(`${r.status()} ${new URL(r.url()).pathname}`);
+    });
+
+    await openUpload(page, 'Ana', { name: 'teste-envio.mkv', mimeType: 'video/x-matroska', buffer: video });
+    await expect(page.getByText('Arquivo enviado')).toBeVisible({ timeout: 30_000 });
+    await page.getByRole('button', { name: 'Abrir player' }).click();
+
+    await waitReady(page);
+    await expect.poll(() => page.evaluate(() => (document.querySelector('video') as HTMLVideoElement | null)?.duration ?? 0)).toBeGreaterThan(60);
+    expect(failures).toEqual([]);
+    await context.close();
+  });
 });
+

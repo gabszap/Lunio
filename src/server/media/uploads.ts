@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config';
+import { issueInternalToken } from '../access';
 
 export const UPLOAD_DIR = path.resolve(config.rootDir, '.uploads');
 export const UPLOAD_META = '.meta.json';
@@ -17,6 +18,41 @@ export const MIME_BY_EXT: Record<string, string> = {
 
 /** Envios que ainda estão chegando: nunca são apagados pela regra de "um envio por sala". */
 export const uploadsInProgress = new Set<string>();
+
+/** Endereço pelo qual o servidor alcança a si mesmo (porta do `npm run serve`); os testes apontam para o servidor deles. */
+let internalApiOrigin = `http://127.0.0.1:${Number(process.env.PORT) || 3000}`;
+export function setInternalApiOrigin(origin: string) {
+  internalApiOrigin = origin;
+}
+
+const UPLOAD_PATH = /^\/api\/uploads\/[a-f0-9]{16}\/[^/]+$/;
+
+/** A URL aponta para um arquivo enviado a ESTE servidor? (caminho relativo ou absoluto com qualquer host) */
+export function ownUploadPath(raw: string): string | null {
+  try {
+    const u = new URL(raw, 'http://self.invalid');
+    const pathname = u.pathname.replace(/^\/\.proxy(?=\/api\/)/, ''); // Discord Activity serve a API sob /.proxy
+    return UPLOAD_PATH.test(pathname) ? pathname : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Link de um arquivo enviado → endereço interno do servidor com um token de curta duração. O proxy, o FFmpeg e o
+ * extrator buscam a mídia por HTTP, e um link público do próprio site seria recusado (sem token) ou daria a volta pela
+ * internet. Qualquer outra URL devolve `null`.
+ */
+export function internalUploadUrl(raw: string): string | null {
+  const pathname = ownUploadPath(raw);
+  if (!pathname) return null;
+  return `${internalApiOrigin}${pathname}?t=${encodeURIComponent(issueInternalToken())}`;
+}
+
+/** É o endereço interno acima? Só ele passa pela trava contra rede interna. */
+export function isInternalUploadUrl(url: URL): boolean {
+  return url.origin === internalApiOrigin && UPLOAD_PATH.test(url.pathname);
+}
 
 /** O id (16 hex) de um link de envio, ou `null` se a URL não é de um envio deste servidor. */
 export function uploadIdFromUrl(url: string): string | null {

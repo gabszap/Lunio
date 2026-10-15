@@ -27,6 +27,8 @@ export async function startApi(createApiRouter: () => express.Router) {
   const server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const { setInternalApiOrigin } = await import('../media/uploads');
+  setInternalApiOrigin(base);
   return { base, server, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }
 
