@@ -6,12 +6,15 @@ import { config } from '../config';
 import { getAccess } from '../gate';
 import { sendApiError, sendJson } from '../http';
 import { roomManager } from '../roomServer';
-import { MIME_BY_EXT, safeFileName, UPLOAD_DIR, UPLOAD_META } from '../media/uploads';
+import { touchCacheFile } from '../cleanup';
+import { MIME_BY_EXT, pruneRoomUploads, safeFileName, UPLOAD_DIR, UPLOAD_META, uploadsInProgress } from '../media/uploads';
 
 /** Salas com um envio em andamento (1 por vez por sala). */
 const roomsUploading = new Set<string>();
 /** Bytes que os envios em andamento ainda vão escrever (declarados − já recebidos). */
 const pendingBytes = new Map<string, number>();
+/** Última vez que cada envio foi marcado como lido (evita um utimes a cada pedido de Range). */
+const touchedAt = new Map<string, number>();
 
 /** Tamanho total de `.uploads/` no disco (inclui os envios em andamento, que já estão parcialmente gravados). */
 export function uploadsDiskUsage(): number {
@@ -80,6 +83,17 @@ export function handleUpload(req: IncomingMessage, res: ServerResponse) {
     return refuse(507, 'quota_exceeded');
   }
 
+  // Além da cota da pasta: o disco da máquina inteira não pode ficar sem folga (o cache e o sistema também precisam)
+  try {
+    const st = fs.statfsSync(config.rootDir);
+    if (Number(st.bavail) * Number(st.bsize) - declared < config.minFreeDiskBytes) {
+      console.warn('[Upload] Pouco espaço livre no disco; envio recusado.');
+      return refuse(507, 'quota_exceeded');
+    }
+  } catch {
+    // sem statfs nesta plataforma: vale só a cota da pasta
+  }
+
   const id = crypto.randomBytes(8).toString('hex');
   const dir = path.join(UPLOAD_DIR, id);
   const filePath = path.join(dir, name);
@@ -99,6 +113,7 @@ export function handleUpload(req: IncomingMessage, res: ServerResponse) {
   }
 
   roomsUploading.add(roomId);
+  uploadsInProgress.add(id);
   pendingBytes.set(id, declared);
   const out = fs.createWriteStream(filePath);
   let received = 0;
@@ -106,6 +121,7 @@ export function handleUpload(req: IncomingMessage, res: ServerResponse) {
 
   const release = () => {
     roomsUploading.delete(roomId);
+    uploadsInProgress.delete(id);
     pendingBytes.delete(id);
   };
   const fail = (status: number, code: string) => {
@@ -136,6 +152,8 @@ export function handleUpload(req: IncomingMessage, res: ServerResponse) {
     settled = true;
     release();
     console.log(`[Upload] ${name} (${(received / 1024 ** 2).toFixed(1)} MB) → ${id} (sala ${roomId})`);
+    // Uma sala, um envio: o que a sala não está usando (e não é este) sai agora
+    pruneRoomUploads(roomId, new Set([...roomManager.referencedUploadIds(roomId), id]));
     sendJson(res, 200, { id, name, size: received, url: `/api/uploads/${id}/${encodeURIComponent(name)}` });
   });
   req.pipe(out);
@@ -163,6 +181,13 @@ export function handleUploadServe(req: IncomingMessage, res: ServerResponse) {
   } catch {
     sendApiError(res, 404, 'not_found');
     return;
+  }
+
+  // Marca o envio como lido agora (a limpeza por inatividade olha isto), no máximo 1 vez por minuto por envio
+  const lastTouch = touchedAt.get(id) || 0;
+  if (Date.now() - lastTouch > 60_000) {
+    touchedAt.set(id, Date.now());
+    touchCacheFile(filePath);
   }
 
   const total = stat.size;

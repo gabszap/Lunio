@@ -4,6 +4,7 @@ import type { Server as HttpsServer } from 'node:https';
 import { issueRoomToken } from './access';
 import { isOriginAllowed } from './cors';
 import { PLAYLIST_MAX_ITEMS } from '../types/sync';
+import { pruneRoomUploads, uploadIdFromUrl } from './media/uploads';
 import type {
   ClientMessage,
   ServerMessage,
@@ -78,6 +79,18 @@ export class RoomManager {
       for (const c of room.clients.values()) people.add(baseUserId(c.userId));
     }
     return { rooms, people: people.size };
+  }
+
+  /** Ids dos envios que a sala usa agora: a mídia atual e os itens da fila. */
+  public referencedUploadIds(roomId: string): Set<string> {
+    const ids = new Set<string>();
+    const room = this.rooms.get(roomId);
+    if (!room) return ids;
+    for (const url of [room.media?.url, ...room.playlist.map((i) => i.url)]) {
+      const id = url ? uploadIdFromUrl(url) : null;
+      if (id) ids.add(id);
+    }
+    return ids;
   }
 
   /** A pessoa está (ou acabou de cair e pode voltar) na sala, e não foi banida? */
@@ -611,6 +624,8 @@ export class RoomManager {
         };
 
         console.log(`[WatchParty] 🎬 Nova mídia definida na sala "${currentRoom.roomId}": "${msg.media.title}"`);
+        // Trocou de vídeo: o envio que estava tocando (e mais nenhum item da sala) pode sair do disco
+        pruneRoomUploads(currentRoom.roomId, this.referencedUploadIds(currentRoom.roomId));
         this.sendSystemChat(currentRoom, `🎬 ${clientSession.username} carregou: "${msg.media.title || 'Novo Vídeo'}"`);
 
         this.broadcast(currentRoom, {

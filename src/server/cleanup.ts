@@ -6,7 +6,8 @@ import { UPLOAD_DIR, UPLOAD_META } from './media/uploads';
 
 /**
  * Limpeza automática de disco:
- *  - `.uploads/`: apaga o envio de sala encerrada há mais de `UPLOAD_TTL_HOURS`;
+ *  - `.uploads/`: apaga o envio de sala encerrada há mais de `UPLOAD_TTL_HOURS` e o de sala aberta que ninguém lê há
+ *    `UPLOAD_IDLE_HOURS`; ao chegar um envio novo, os anteriores da mesma sala saem (media/uploads.ts);
  *  - `.cache/`: apaga o que ficou sem uso além do prazo de cada tipo (legendas 14 dias, fontes 3 dias, HLS 6 h) e,
  *    se ainda passar de `MAX_CACHE_GB`, o que foi usado há mais tempo (LRU).
  */
@@ -58,17 +59,22 @@ function newestMtime(target: string): number {
   return newest;
 }
 
-export function sweepUploads(now = Date.now()): number {
+export function sweepUploads(
+  now = Date.now(),
+  dirPath = UPLOAD_DIR,
+  ttlMs = config.uploadTtlMs,
+  idleMs = config.uploadIdleMs
+): number {
   let entries: fs.Dirent[];
   try {
-    entries = fs.readdirSync(UPLOAD_DIR, { withFileTypes: true });
+    entries = fs.readdirSync(dirPath, { withFileTypes: true });
   } catch {
     return 0;
   }
   let removed = 0;
   for (const e of entries) {
     if (!e.isDirectory()) continue;
-    const dir = path.join(UPLOAD_DIR, e.name);
+    const dir = path.join(dirPath, e.name);
     let roomId: string | undefined;
     let createdAt = 0;
     try {
@@ -78,12 +84,20 @@ export function sweepUploads(now = Date.now()): number {
     } catch {
       // envio antigo, sem metadados
     }
-    if (roomId && roomManager.isRoomActive(roomId)) continue;
+    if (roomId && roomManager.isRoomActive(roomId)) {
+      // Sala aberta: o envio fica enquanto alguém lê (cada leitura atualiza a data); sem leitura há `idleMs`, sai
+      const idle = now - newestMtime(dir);
+      if (idle < idleMs) continue;
+      fs.rmSync(dir, { recursive: true, force: true });
+      removed++;
+      console.log(`[Limpeza] Envio ${e.name} removido (sala ${roomId} aberta, mas ninguém o lê há ${Math.round(idle / 3600_000)} h).`);
+      continue;
+    }
     // Sala encerrada: conta a partir de quando fechou. Se o servidor reiniciou e não sabe,
     // conta a partir do início do processo (nunca apaga antes de dar o prazo inteiro).
     const closedAt = (roomId && roomManager.getClosedAt(roomId)) || Math.max(startedAt, createdAt);
     const lastUse = Math.max(closedAt, newestMtime(dir) > now - BUSY_WINDOW_MS ? now : 0);
-    if (now - lastUse < config.uploadTtlMs) continue;
+    if (now - lastUse < ttlMs) continue;
     fs.rmSync(dir, { recursive: true, force: true });
     removed++;
     console.log(`[Limpeza] Envio ${e.name} removido (sala ${roomId || 'desconhecida'} encerrada).`);
@@ -210,6 +224,8 @@ export interface CacheStats {
   bytes: number;
   limitBytes: number;
   groups: Record<CacheGroup, number>;
+  /** Envios de vídeo (`.uploads/`): uso, cota da pasta e quantos há. */
+  uploads: { bytes: number; limitBytes: number; count: number };
   disk: { freeBytes: number; totalBytes: number } | null;
   lastSweep: SweepReport | null;
 }
@@ -232,7 +248,14 @@ export function getCacheStats(now = Date.now()): CacheStats {
   } catch {
     // sem statfs nesta plataforma/volume
   }
-  const value: CacheStats = { bytes, limitBytes: config.maxCacheBytes, groups, disk, lastSweep };
+  let uploadCount = 0;
+  try {
+    uploadCount = fs.readdirSync(UPLOAD_DIR, { withFileTypes: true }).filter((e) => e.isDirectory()).length;
+  } catch {
+    // ainda não existe
+  }
+  const uploads = { bytes: dirSize(UPLOAD_DIR), limitBytes: config.maxUploadDiskBytes, count: uploadCount };
+  const value: CacheStats = { bytes, limitBytes: config.maxCacheBytes, groups, uploads, disk, lastSweep };
   statsMemo = { at: now, value };
   return value;
 }

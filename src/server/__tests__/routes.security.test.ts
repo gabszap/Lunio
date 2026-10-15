@@ -170,6 +170,11 @@ describe('envio de arquivos', () => {
     expect(dots.name).not.toMatch(/^\./);
     const win = await track(await upload(host.token, 'CON.mp4', 300));
     expect(win.name).not.toMatch(/^con\./i);
+
+    // Uma sala, um envio: cada envio novo apaga o anterior da mesma sala (só o último continua)
+    expect((await fetch(`${api.base}${body.url}`, withToken(host.token))).status).toBe(404);
+    expect((await fetch(`${api.base}${dots.url}`, withToken(host.token))).status).toBe(404);
+    expect((await fetch(`${api.base}${win.url}`, withToken(host.token))).status).toBe(200);
   });
 
   it('serve com Range (206), 416 fora do intervalo, 200 completo e HEAD', async () => {

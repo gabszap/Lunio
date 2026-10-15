@@ -49,6 +49,10 @@ export const config = {
   maxUploadDiskBytes: num('MAX_UPLOAD_DISK_GB', 20) * GB,
   /** Quantas horas um envio de sala encerrada continua no disco. */
   uploadTtlMs: num('UPLOAD_TTL_HOURS', 6) * 3600 * 1000,
+  /** Envio de sala que continua aberta, mas que ninguém lê há tanto tempo, também sai. */
+  uploadIdleMs: num('UPLOAD_IDLE_HOURS', 24) * 3600 * 1000,
+  /** Um envio só começa se, depois dele, ainda sobrarem tantos GB livres no disco da máquina. */
+  minFreeDiskBytes: num('MIN_FREE_DISK_GB', 5) * GB,
   /** Limite de `.cache/` (legendas, fontes); acima disso apaga o menos usado. */
   maxCacheBytes: num('MAX_CACHE_GB', 10) * GB,
   /**

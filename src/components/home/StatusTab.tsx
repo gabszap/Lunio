@@ -17,6 +17,7 @@ interface StatusReport {
   cache?: {
     bytes: number;
     limitBytes: number;
+    uploads: { bytes: number; limitBytes: number; count: number };
     disk: { freeBytes: number; totalBytes: number } | null;
     lastSweep: { at: number; byAge: number; byLimit: number; freedBytes: number } | null;
   };
@@ -231,6 +232,11 @@ export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
             <>
               <Metric label={t('Cache')}>
                 {t('{size} de {limit}', { size: formatBytes(report.cache.bytes), limit: formatBytes(report.cache.limitBytes) })}
+              </Metric>
+              <Metric label={t('Envios')}>
+                <span title={t('{n} arquivo(s) enviado(s)', { n: report.cache.uploads.count })}>
+                  {t('{size} de {limit}', { size: formatBytes(report.cache.uploads.bytes), limit: formatBytes(report.cache.uploads.limitBytes) })}
+                </span>
               </Metric>
               <Metric label={t('Disco livre')}>{report.cache.disk ? formatBytes(report.cache.disk.freeBytes) : dash}</Metric>
               <Metric label={t('Última limpeza')}>
