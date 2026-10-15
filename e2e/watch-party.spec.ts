@@ -119,6 +119,53 @@ test.describe('Watch Party', () => {
     await guest.context.close();
   });
 
+  test('fila: o Host arrasta um item para outra posição e o espectador vê a nova ordem', async ({ browser }) => {
+    const host = await newUser(browser);
+    const guest = await newUser(browser);
+    const code = await createRoom(host.page, 'Ana');
+    await joinRoom(guest.page, code, 'Bia');
+    await waitReady(host.page);
+    await waitReady(guest.page);
+
+    for (const n of [1, 2, 3]) {
+      await host.page.getByLabel('Link para adicionar à fila').fill(`http://127.0.0.1:3101/ep${n}.mkv`);
+      await host.page.getByRole('button', { name: 'Adicionar à fila' }).click();
+      await expect(host.page.getByText(`ep${n}`, { exact: true })).toBeVisible();
+    }
+    const titles = (page: typeof host.page) => page.locator('section[aria-label="Fila de vídeos"] ol li .truncate.font-semibold').allInnerTexts();
+    await expect.poll(() => titles(host.page)).toEqual(['ep1', 'ep2', 'ep3']);
+
+    // Só o Host tem a alça de arrastar
+    await expect(guest.page.getByRole('button', { name: 'Arrastar para reordenar' })).toHaveCount(0);
+
+    // Arrasta o 1º item até abaixo do 3º
+    const handles = host.page.getByRole('button', { name: 'Arrastar para reordenar' });
+    await handles.nth(0).scrollIntoViewIfNeeded();
+    await handles.nth(2).scrollIntoViewIfNeeded();
+    const first = (await handles.nth(0).boundingBox())!;
+    const last = (await handles.nth(2).boundingBox())!;
+    await host.page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+    await host.page.mouse.down();
+    await host.page.mouse.move(first.x + first.width / 2, (first.y + last.y) / 2, { steps: 6 });
+    await host.page.mouse.move(last.x + last.width / 2, last.y + last.height / 2 + 20, { steps: 6 });
+    await host.page.mouse.up();
+
+    await expect.poll(() => titles(host.page)).toEqual(['ep2', 'ep3', 'ep1']);
+    await expect.poll(() => titles(guest.page)).toEqual(['ep2', 'ep3', 'ep1']);
+
+    // Esc no meio do arraste cancela: a ordem não muda
+    const h2 = (await handles.nth(0).boundingBox())!;
+    await host.page.mouse.move(h2.x + h2.width / 2, h2.y + h2.height / 2);
+    await host.page.mouse.down();
+    await host.page.mouse.move(h2.x + h2.width / 2, h2.y + 140, { steps: 6 });
+    await host.page.keyboard.press('Escape');
+    await host.page.mouse.up();
+    await expect.poll(() => titles(host.page)).toEqual(['ep2', 'ep3', 'ep1']);
+
+    await host.context.close();
+    await guest.context.close();
+  });
+
   test('play, pause e seek do Host chegam ao espectador', async ({ browser }) => {
     const host = await newUser(browser);
     const guest = await newUser(browser);
