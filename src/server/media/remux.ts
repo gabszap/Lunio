@@ -5,6 +5,7 @@ import { ffmpegBin, killTree } from '../tools';
 import { FFMPEG_NET_ONLY } from './ffmpeg';
 import { getMediaFingerprint } from './fingerprint';
 import { resolveFinalCdnUrl } from './resolver';
+import { tracksCache } from './tracks';
 
 // Gerenciamento de processos de remux para Regions e Cold Seek controlado
 interface ActiveRemuxProcess {
@@ -91,6 +92,8 @@ export async function handleRemux(req: http.IncomingMessage, res: http.ServerRes
   ffmpegArgs.push(
     '-fflags', '+genpts+discardcorrupt',
     '-c:v', 'copy',
+    // HEVC em MP4 fragmentado: o Safari (e o MSE do Chrome) só reconhecem a etiqueta hvc1, não a hev1 que o FFmpeg grava
+    ...(tracksCache.get(targetUrl)?.video?.codec === 'hevc' ? ['-tag:v', 'hvc1'] : []),
     '-c:a', 'aac',
     '-ac', '2',
     '-b:a', '256k',

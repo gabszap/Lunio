@@ -259,6 +259,7 @@ export async function resolveMediaRef(
     externalSubtitleSources,
     chapters,
     parsedTorrent: data?.parsedTorrent,
+    video: data?.video ?? null,
     fonts,
   };
 }

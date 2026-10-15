@@ -2,6 +2,18 @@ import { BoundedCache } from '../cache';
 import { parseTorrentTitle } from '@viren070/parse-torrent-title';
 import { extractFilenameFromUrl } from './fingerprint';
 
+/** O vídeo principal do arquivo (só para o navegador avisar se não decodifica; o servidor nunca recodifica vídeo). */
+export interface VideoInfo {
+  /** Nome do codec no FFmpeg: h264, hevc, av1, vp9, vp8, mpeg4… */
+  codec: string;
+  /** Perfil, quando o FFmpeg informa (ex.: "Main 10"). */
+  profile: string;
+  /** Formato de pixel (ex.: yuv420p10le): dá a profundidade de cor. */
+  pixFmt: string;
+  width: number;
+  height: number;
+}
+
 export interface TracksResult {
   title: string;
   rawTitle: string;
@@ -11,11 +23,30 @@ export interface TracksResult {
   subtitles: any[];
   chapters: any[];
   fonts: any[];
+  /** `null` quando o arquivo não tem vídeo ou a linha não pôde ser lida. */
+  video?: VideoInfo | null;
   streamUrl: string;
 }
 
 /** Resultado da inspeção por URL (evita rodar o FFmpeg de novo para o mesmo vídeo). */
 export const tracksCache = new BoundedCache<TracksResult>(300, 6 * 3600 * 1000);
+
+/** `Stream #0:0: Video: hevc (Main 10), yuv420p10le(tv, progressive), 3840x2160 [SAR 1:1 DAR 16:9], 24 fps…` */
+export function parseVideoLine(line: string): VideoInfo | null {
+  const m = line.match(/Video:\s*([A-Za-z0-9_]+)\s*(?:\(([^)]*)\))?/);
+  if (!m) return null;
+  const size = line.match(/,\s*(\d{2,5})x(\d{2,5})\b/);
+  const pix = line.match(/,\s*((?:yuvj?|gbrap?|gray|nv|p0|rgb|bgr|argb|bgra|pal)[a-z0-9]*)/i);
+  // O parêntese depois do codec pode ser o perfil ("Main 10") ou a etiqueta ("avc1 / 0x31637661"): só o primeiro serve
+  const profile = m[2] && !/0x[0-9a-f]+/i.test(m[2]) ? m[2].trim() : '';
+  return {
+    codec: m[1].toLowerCase(),
+    profile,
+    pixFmt: pix ? pix[1].toLowerCase() : '',
+    width: size ? Number(size[1]) : 0,
+    height: size ? Number(size[2]) : 0,
+  };
+}
 
 /** Interpreta a saída de `ffmpeg -i` (stderr): faixas de áudio/legenda/anexos, capítulos, duração e título. */
 export function parseTracks(stderr: string, targetUrl: string, streamUrl: string): TracksResult {
@@ -23,6 +54,7 @@ export function parseTracks(stderr: string, targetUrl: string, streamUrl: string
   const subtitles: any[] = [];
   const chapters: any[] = [];
   const fonts: any[] = [];
+  let video: VideoInfo | null = null;
 
   // Sanitiza todas as linhas removendo retornos de carro (\r do Windows) e espaços
   const rawLines = stderr.split('\n');
@@ -59,6 +91,8 @@ export function parseTracks(stderr: string, targetUrl: string, streamUrl: string
       const type = streamMatch[3].toLowerCase();
       const codec = streamMatch[4].trim();
       const lineLower = line.toLowerCase();
+      // Primeiro vídeo de verdade (capa de álbum/anexo "attached pic" não conta)
+      if (type === 'video' && !video && !lineLower.includes('attached pic')) video = parseVideoLine(line);
       const isForced = lineLower.includes('forced');
       const isDefault = lineLower.includes('default');
 
@@ -370,6 +404,7 @@ export function parseTracks(stderr: string, targetUrl: string, streamUrl: string
     subtitles,
     chapters,
     fonts,
+    video,
     streamUrl,
   };
 

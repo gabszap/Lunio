@@ -99,6 +99,15 @@ export interface EmbeddedFontRef {
 }
 
 // Objeto de mídia resolvido completo (v8)
+/** O vídeo principal do arquivo, como o servidor o leu (ver `parseVideoLine` no servidor). */
+export interface VideoInfo {
+  codec: string;
+  profile: string;
+  pixFmt: string;
+  width: number;
+  height: number;
+}
+
 export interface ResolvedMediaRef {
   mediaUrl: string;
   title: string;
@@ -118,6 +127,7 @@ export interface ResolvedMediaRef {
   parsedTorrent?: any;
   transport?: 'direct' | 'remux' | 'proxy';
   fonts?: EmbeddedFontRef[];
+  video?: VideoInfo | null;
 }
 
 export type SubtitleTrack = {

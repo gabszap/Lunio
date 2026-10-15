@@ -11,7 +11,7 @@ import {
 import '@vidstack/react/player/styles/base.css';
 
 import { getVideoElement } from './player/dom';
-import { MediaSource, Chapter, SubtitleTrack, AudioTrackOption } from '../types/media';
+import { MediaSource, Chapter, SubtitleTrack, AudioTrackOption, VideoInfo } from '../types/media';
 import { PlayerControls } from './PlayerControls';
 import { WatchPartyPanel } from './WatchPartyPanel';
 import type { PlaylistItem } from '../types/sync';
@@ -27,6 +27,7 @@ import {
   PlaybackErrorOverlay,
   PlayerToasts,
   ResumePrompt,
+  CodecNotice,
   RoundedCornersFrame,
   SkipChapterButton,
   StandbyScreen,
@@ -37,6 +38,7 @@ import { useAlternateAudio } from './player/useAlternateAudio';
 import { useControlsVisibility } from './player/useControlsVisibility';
 import { useFullscreen } from './player/useFullscreen';
 import { useMediaInspection } from './player/useMediaInspection';
+import { useVideoCodecNotice } from './player/useVideoCodecNotice';
 import { useDiscordPresence } from './player/useDiscordPresence';
 import { useNativeVideoEvents } from './player/useNativeVideoEvents';
 import { usePlaybackControls } from './player/usePlaybackControls';
@@ -172,6 +174,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const { detectedAudioTracks, activeAudioTrack, resolvedStreamUrl, setResolvedStreamUrl } = audio;
 
   // Leitura das faixas ao mudar a fonte
+  const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const { detectedChapters, isInspecting } = useMediaInspection({
     source,
     hasSource,
@@ -190,7 +193,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setMediaTitle,
     setParsedMetadata,
     setDuration,
+    setVideoInfo,
   });
+  const codecNotice = useVideoCodecNotice({ playerRef, videoInfo, resolvedStreamUrl });
 
   // Sala (Watch Party)
   const room = useRoomSync({
@@ -545,6 +550,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onClick={playback.handlePlayToggle}
         onDoubleClick={fullscreen.handleFullscreenToggle}
       />
+
+      {/* Este navegador não decodifica o vídeo (HEVC, 10 bits…): o som toca e a imagem não aparece */}
+      {codecNotice.notice && <CodecNotice notice={codecNotice.notice} onDismiss={codecNotice.dismiss} />}
 
       {/* Retomar de onde parou */}
       {resumePrompt && (!syncStatus.isConnected || syncStatus.isHost) && (
