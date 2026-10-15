@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { sendJson } from '../http';
 import crypto from 'node:crypto';
+import { getCacheStats } from '../cleanup';
 import { roomManager } from '../roomServer';
 import { getTools } from '../tools';
 
@@ -11,6 +12,7 @@ export function handleStatus(_req: IncomingMessage, res: ServerResponse) {
   sendJson(res, 200, {
     ...roomManager.getStats(),
     uptimeSeconds: Math.floor(process.uptime()),
+    cache: getCacheStats(),
     ffmpeg: { found: ffmpeg.found, version: ffmpeg.version },
     python: { found: python.found, version: python.version, tooOld: python.tooOld === true },
   });

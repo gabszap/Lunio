@@ -44,7 +44,7 @@ export function handleCors(req: IncomingMessage, res: ServerResponse): boolean {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range, X-Lunio-Token');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, HEAD, OPTIONS');
     res.setHeader(
       'Access-Control-Expose-Headers',
       'Content-Range, Content-Length, Accept-Ranges, X-MediaRun-Session, X-MediaRun-Generation, X-MediaRegion-Start'

@@ -6,8 +6,10 @@ import { UPLOAD_DIR, UPLOAD_META } from './media/uploads';
 
 /**
  * Limpeza automática de disco:
- *  - `.uploads/`: apaga o envio de sala encerrada há mais de `UPLOAD_TTL_HOURS`;
- *  - `.cache/`: se passar de `MAX_CACHE_GB`, apaga o que foi usado há mais tempo (LRU).
+ *  - `.uploads/`: apaga o envio de sala encerrada há mais de `UPLOAD_TTL_HOURS` e o de sala aberta que ninguém lê há
+ *    `UPLOAD_IDLE_HOURS`; ao chegar um envio novo, os anteriores da mesma sala saem (media/uploads.ts);
+ *  - `.cache/`: apaga o que ficou sem uso além do prazo de cada tipo (legendas 14 dias, fontes 3 dias, HLS 6 h) e,
+ *    se ainda passar de `MAX_CACHE_GB`, o que foi usado há mais tempo (LRU).
  */
 
 const CACHE_ROOT = path.resolve(process.cwd(), '.cache');
@@ -15,6 +17,8 @@ const SWEEP_EVERY_MS = 15 * 60 * 1000;
 /** Arquivos mexidos há menos que isso podem estar sendo gravados agora: não apaga. */
 const BUSY_WINDOW_MS = 2 * 60 * 1000;
 const startedAt = Date.now();
+/** Um envio em pedaços sem nenhum pedaço novo por tanto tempo foi abandonado. */
+const ABANDONED_UPLOAD_MS = 60 * 60 * 1000;
 
 /** Marca um arquivo do cache como usado agora (o LRU usa o mtime; atime costuma estar desligado). */
 export function touchCacheFile(file: string) {
@@ -57,32 +61,54 @@ function newestMtime(target: string): number {
   return newest;
 }
 
-export function sweepUploads(now = Date.now()): number {
+export function sweepUploads(
+  now = Date.now(),
+  dirPath = UPLOAD_DIR,
+  ttlMs = config.uploadTtlMs,
+  idleMs = config.uploadIdleMs
+): number {
   let entries: fs.Dirent[];
   try {
-    entries = fs.readdirSync(UPLOAD_DIR, { withFileTypes: true });
+    entries = fs.readdirSync(dirPath, { withFileTypes: true });
   } catch {
     return 0;
   }
   let removed = 0;
   for (const e of entries) {
     if (!e.isDirectory()) continue;
-    const dir = path.join(UPLOAD_DIR, e.name);
+    const dir = path.join(dirPath, e.name);
     let roomId: string | undefined;
     let createdAt = 0;
+    let incomplete = false;
     try {
       const meta = JSON.parse(fs.readFileSync(path.join(dir, UPLOAD_META), 'utf-8'));
       roomId = typeof meta.roomId === 'string' ? meta.roomId : undefined;
       createdAt = Number(meta.createdAt) || 0;
+      incomplete = meta.complete === false;
     } catch {
       // envio antigo, sem metadados
     }
-    if (roomId && roomManager.isRoomActive(roomId)) continue;
+    // Envio em pedaços que parou (conexão perdida, aba fechada) e ninguém retomou: não serve para nada e ocupa disco
+    if (incomplete && now - newestMtime(dir) > ABANDONED_UPLOAD_MS) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      removed++;
+      console.log(`[Limpeza] Envio incompleto ${e.name} removido (parado há mais de 1 h).`);
+      continue;
+    }
+    if (roomId && roomManager.isRoomActive(roomId)) {
+      // Sala aberta: o envio fica enquanto alguém lê (cada leitura atualiza a data); sem leitura há `idleMs`, sai
+      const idle = now - newestMtime(dir);
+      if (idle < idleMs) continue;
+      fs.rmSync(dir, { recursive: true, force: true });
+      removed++;
+      console.log(`[Limpeza] Envio ${e.name} removido (sala ${roomId} aberta, mas ninguém o lê há ${Math.round(idle / 3600_000)} h).`);
+      continue;
+    }
     // Sala encerrada: conta a partir de quando fechou. Se o servidor reiniciou e não sabe,
     // conta a partir do início do processo (nunca apaga antes de dar o prazo inteiro).
     const closedAt = (roomId && roomManager.getClosedAt(roomId)) || Math.max(startedAt, createdAt);
     const lastUse = Math.max(closedAt, newestMtime(dir) > now - BUSY_WINDOW_MS ? now : 0);
-    if (now - lastUse < config.uploadTtlMs) continue;
+    if (now - lastUse < ttlMs) continue;
     fs.rmSync(dir, { recursive: true, force: true });
     removed++;
     console.log(`[Limpeza] Envio ${e.name} removido (sala ${roomId || 'desconhecida'} encerrada).`);
@@ -90,29 +116,34 @@ export function sweepUploads(now = Date.now()): number {
   return removed;
 }
 
+type CacheGroup = 'subtitles' | 'fonts' | 'hls' | 'audio';
+const CACHE_GROUPS: CacheGroup[] = ['subtitles', 'fonts', 'hls', 'audio'];
+
 interface CacheUnit {
   path: string;
+  group: string;
   size: number;
   mtime: number;
 }
 
-/** Unidades de despejo: cada arquivo de legenda/áudio e cada pasta de fontes (que tem um marcador `.extracted`). */
-function cacheUnits(): CacheUnit[] {
+/** Unidades de despejo: cada arquivo de legenda/áudio e cada pasta de fontes ou de HLS de uma mídia. */
+function cacheUnits(root: string): CacheUnit[] {
   const units: CacheUnit[] = [];
   let groups: fs.Dirent[];
   try {
-    groups = fs.readdirSync(CACHE_ROOT, { withFileTypes: true });
+    groups = fs.readdirSync(root, { withFileTypes: true });
   } catch {
     return units;
   }
   for (const g of groups) {
     if (!g.isDirectory()) continue;
-    const groupDir = path.join(CACHE_ROOT, g.name);
+    const groupDir = path.join(root, g.name);
     for (const e of fs.readdirSync(groupDir, { withFileTypes: true })) {
       const full = path.join(groupDir, e.name);
       try {
         units.push({
           path: full,
+          group: g.name,
           size: e.isDirectory() ? dirSize(full) : fs.statSync(full).size,
           mtime: newestMtime(full),
         });
@@ -124,20 +155,120 @@ function cacheUnits(): CacheUnit[] {
   return units;
 }
 
-export function sweepCache(now = Date.now()): number {
-  const units = cacheUnits();
-  let total = units.reduce((sum, u) => sum + u.size, 0);
-  if (total <= config.maxCacheBytes) return 0;
-  let removed = 0;
-  for (const unit of units.sort((a, b) => a.mtime - b.mtime)) {
-    if (total <= config.maxCacheBytes) break;
-    if (now - unit.mtime < BUSY_WINDOW_MS) continue;
-    fs.rmSync(unit.path, { recursive: true, force: true });
-    total -= unit.size;
-    removed++;
+/** Quem precisa saber que uma unidade do cache saiu do disco (ex.: o HLS esquece o plano em memória). */
+const removalListeners = new Set<(unitPath: string) => void>();
+export function onCacheUnitRemoved(listener: (unitPath: string) => void) {
+  removalListeners.add(listener);
+}
+
+function removeUnit(unit: CacheUnit) {
+  fs.rmSync(unit.path, { recursive: true, force: true });
+  for (const listener of removalListeners) {
+    try {
+      listener(unit.path);
+    } catch {
+      // um ouvinte com defeito não impede a limpeza
+    }
   }
-  if (removed) console.log(`[Limpeza] Cache acima do limite: ${removed} item(ns) menos usados removidos.`);
-  return removed;
+}
+
+export interface SweepReport {
+  at: number;
+  /** Itens removidos por idade, por estouro do limite de tamanho, e quanto isso liberou. */
+  byAge: number;
+  byLimit: number;
+  freedBytes: number;
+}
+let lastSweep: SweepReport | null = null;
+
+/**
+ * Duas regras, nesta ordem:
+ *  1. idade: o que ficou sem uso além do prazo do seu tipo (`config.cacheMaxAgeMs`) sai, mesmo com disco sobrando;
+ *  2. tamanho: se ainda passar de `MAX_CACHE_GB`, sai o menos usado (LRU) até caber.
+ * Nada mexido há menos de 2 min é apagado (pode estar sendo gravado).
+ */
+export function sweepCache(
+  now = Date.now(),
+  root = CACHE_ROOT,
+  maxAge: Partial<Record<string, number>> = config.cacheMaxAgeMs,
+  limitBytes = config.maxCacheBytes
+): number {
+  const units = cacheUnits(root);
+  let total = units.reduce((sum, u) => sum + u.size, 0);
+  let byAge = 0;
+  let byLimit = 0;
+  let freed = 0;
+
+  const kept: CacheUnit[] = [];
+  for (const unit of units) {
+    const limit = maxAge[unit.group];
+    const idle = now - unit.mtime;
+    if (limit && idle > limit && idle >= BUSY_WINDOW_MS) {
+      removeUnit(unit);
+      total -= unit.size;
+      freed += unit.size;
+      byAge++;
+    } else {
+      kept.push(unit);
+    }
+  }
+
+  if (total > limitBytes) {
+    for (const unit of kept.sort((a, b) => a.mtime - b.mtime)) {
+      if (total <= limitBytes) break;
+      if (now - unit.mtime < BUSY_WINDOW_MS) continue;
+      removeUnit(unit);
+      total -= unit.size;
+      freed += unit.size;
+      byLimit++;
+    }
+  }
+
+  lastSweep = { at: now, byAge, byLimit, freedBytes: freed };
+  statsMemo = null;
+  if (byAge) console.log(`[Limpeza] ${byAge} item(ns) do cache sem uso além do prazo removidos.`);
+  if (byLimit) console.log(`[Limpeza] Cache acima do limite: ${byLimit} item(ns) menos usados removidos.`);
+  return byAge + byLimit;
+}
+
+export interface CacheStats {
+  bytes: number;
+  limitBytes: number;
+  groups: Record<CacheGroup, number>;
+  /** Envios de vídeo (`.uploads/`): uso, cota da pasta e quantos há. */
+  uploads: { bytes: number; limitBytes: number; count: number };
+  disk: { freeBytes: number; totalBytes: number } | null;
+  lastSweep: SweepReport | null;
+}
+
+let statsMemo: { at: number; value: CacheStats } | null = null;
+
+/** Tamanho do cache por tipo, disco livre e a última limpeza. Recalcula no máximo 1 vez por minuto. */
+export function getCacheStats(now = Date.now()): CacheStats {
+  if (statsMemo && now - statsMemo.at < 60_000) return { ...statsMemo.value, lastSweep };
+  const groups: Record<CacheGroup, number> = { subtitles: 0, fonts: 0, hls: 0, audio: 0 };
+  let bytes = 0;
+  for (const unit of cacheUnits(CACHE_ROOT)) {
+    bytes += unit.size;
+    if ((CACHE_GROUPS as string[]).includes(unit.group)) groups[unit.group as CacheGroup] += unit.size;
+  }
+  let disk: CacheStats['disk'] = null;
+  try {
+    const st = fs.statfsSync(CACHE_ROOT);
+    disk = { freeBytes: Number(st.bavail) * Number(st.bsize), totalBytes: Number(st.blocks) * Number(st.bsize) };
+  } catch {
+    // sem statfs nesta plataforma/volume
+  }
+  let uploadCount = 0;
+  try {
+    uploadCount = fs.readdirSync(UPLOAD_DIR, { withFileTypes: true }).filter((e) => e.isDirectory()).length;
+  } catch {
+    // ainda não existe
+  }
+  const uploads = { bytes: dirSize(UPLOAD_DIR), limitBytes: config.maxUploadDiskBytes, count: uploadCount };
+  const value: CacheStats = { bytes, limitBytes: config.maxCacheBytes, groups, uploads, disk, lastSweep };
+  statsMemo = { at: now, value };
+  return value;
 }
 
 let timer: NodeJS.Timeout | null = null;

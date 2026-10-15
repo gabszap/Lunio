@@ -11,7 +11,7 @@ import { handleSpeed, handleStatus } from './routes/status';
 import { handleSubtitle } from './routes/subtitle';
 import { handleToken } from './routes/token';
 import { handleTracks } from './routes/tracks';
-import { handleUpload, handleUploadServe } from './routes/upload';
+import { handleUploadApi, handleUploadServe } from './routes/upload';
 
 /**
  * Todas as rotas da API num único Router do Express. Quem hospeda decide como plugá-lo:
@@ -34,7 +34,7 @@ export function createApiRouter(): Router {
   router.use('/api/status', handleStatus);
   router.use('/api/speed', handleSpeed);
   router.use('/api/room', handleRoomInfo);
-  router.use('/api/upload', (req, res, next) => (req.method === 'POST' ? handleUpload(req, res) : next()));
+  router.use('/api/upload', handleUploadApi);
   router.use('/api/uploads', handleUploadServe);
   router.use('/api/drive', (req, res) => void handleDrive(req, res));
   router.use('/api/token', (req, res) => void handleToken(req, res));

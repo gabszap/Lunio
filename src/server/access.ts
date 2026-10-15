@@ -34,6 +34,11 @@ export function issueSoloToken(): { token: string; expiresAt: number } {
   return { token: sign({ k: 'solo', exp, n: crypto.randomBytes(8).toString('hex') }), expiresAt: exp };
 }
 
+/** Token solo de curta duração para o servidor ler os próprios arquivos enviados (proxy, FFmpeg, extrator). */
+export function issueInternalToken(ttlMs = 2 * 3600 * 1000): string {
+  return sign({ k: 'solo', exp: Date.now() + ttlMs, n: crypto.randomBytes(8).toString('hex') });
+}
+
 export function issueRoomToken(roomId: string, userId: string): string {
   return sign({ k: 'room', r: roomId, u: userId });
 }

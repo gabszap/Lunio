@@ -38,7 +38,8 @@ const ROUTES: Record<string, { auth: AuthMode; rate: RateRule }> = {
   subtitle: { auth: 'any', rate: { max: 60, windowMs: MIN } },
   font: { auth: 'any', rate: { max: 300, windowMs: MIN } },
   drive: { auth: 'any', rate: { max: 20, windowMs: MIN } },
-  upload: { auth: 'host', rate: { max: 10, windowMs: 10 * MIN } },
+  // Um arquivo grande sobe em dezenas de pedaços (32 MB cada): o limite é por pedido, com folga para ~50 GB
+  upload: { auth: 'host', rate: { max: 2500, windowMs: 10 * MIN } },
   uploads: { auth: 'any', rate: { max: 600, windowMs: MIN } },
   hls: { auth: 'any', rate: { max: 1200, windowMs: MIN } },
 };

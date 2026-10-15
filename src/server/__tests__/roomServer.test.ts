@@ -94,6 +94,32 @@ describe('fila (playlist)', () => {
     expect(stateOf('FILA3').playlist!.map((i) => i.id)).toEqual([a.id]);
   });
 
+  it('trocar a mídia apaga o envio anterior da sala, mas não o que a fila ainda usa', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const { UPLOAD_DIR, UPLOAD_META } = await import('../media/uploads');
+    const ids = ['a1a1a1a1a1a1a1a1', 'b2b2b2b2b2b2b2b2', 'c3c3c3c3c3c3c3c3'];
+    for (const id of ids) {
+      fs.mkdirSync(path.join(UPLOAD_DIR, id), { recursive: true });
+      fs.writeFileSync(path.join(UPLOAD_DIR, id, 'v.mp4'), 'x');
+      fs.writeFileSync(path.join(UPLOAD_DIR, id, UPLOAD_META), JSON.stringify({ roomId: 'ENVIO1', createdAt: Date.now() }));
+    }
+    const exists = (id: string) => fs.existsSync(path.join(UPLOAD_DIR, id));
+    try {
+      const host = connect('ENVIO1', 'h');
+      const media = (id: string) => ({ type: 'media:set', media: { url: `/api/uploads/${id}/v.mp4`, title: id, duration: 10 }, initialPosition: 0 });
+      send(host, { type: 'playlist:add', url: `https://exemplo.test/api/uploads/${ids[2]}/v.mp4`, title: 'na fila' });
+
+      send(host, media(ids[0])); // toca A: B sobra e sai; C está na fila e fica
+      expect([exists(ids[0]), exists(ids[1]), exists(ids[2])]).toEqual([true, false, true]);
+
+      send(host, { type: 'media:set', media: { url: 'https://exemplo.test/outro.mkv', title: 'x', duration: 10 }, initialPosition: 0 });
+      expect([exists(ids[0]), exists(ids[2])]).toEqual([false, true]); // A saiu; C continua (fila)
+    } finally {
+      for (const id of ids) fs.rmSync(path.join(UPLOAD_DIR, id), { recursive: true, force: true });
+    }
+  });
+
   it('arrastar: o Host leva o item direto para a posição (e posição inválida é ignorada)', () => {
     const host = connect('FILA5', 'h');
     const guest = connect('FILA5', 'g');

@@ -4,6 +4,8 @@ import { isBlockedError } from '../security';
 import { pipeMediaStreamDirect } from '../media/stream';
 import { handleRemux } from '../media/remux';
 import { resolveFinalCdnUrl } from '../media/resolver';
+import { ownUploadPath } from '../media/uploads';
+import { handleUploadServe } from './upload';
 
 /** GET /api/proxy?url=… — stream com HTTP Range; com `audio=` faz remux fMP4 via FFmpeg. */
 export async function handleProxy(req: IncomingMessage, res: ServerResponse) {
@@ -37,6 +39,14 @@ export async function handleProxy(req: IncomingMessage, res: ServerResponse) {
 
     if (shouldRemux) {
       await handleRemux(req, res, { targetUrl, audioTrack, seekSeconds, sessionId, generation });
+      return;
+    }
+
+    // Arquivo enviado a este servidor: serve do disco com Range, sem dar a volta por HTTP
+    const uploadPath = ownUploadPath(targetUrl);
+    if (uploadPath) {
+      req.url = uploadPath.replace(/^\/api\/uploads/, '');
+      handleUploadServe(req, res);
       return;
     }
 

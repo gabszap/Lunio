@@ -1,3 +1,4 @@
+import { BoundedCache } from '../cache';
 import { parseTorrentTitle } from '@viren070/parse-torrent-title';
 import { extractFilenameFromUrl } from './fingerprint';
 
@@ -14,7 +15,7 @@ export interface TracksResult {
 }
 
 /** Resultado da inspeção por URL (evita rodar o FFmpeg de novo para o mesmo vídeo). */
-export const tracksCache = new Map<string, TracksResult>();
+export const tracksCache = new BoundedCache<TracksResult>(300, 6 * 3600 * 1000);
 
 /** Interpreta a saída de `ffmpeg -i` (stderr): faixas de áudio/legenda/anexos, capítulos, duração e título. */
 export function parseTracks(stderr: string, targetUrl: string, streamUrl: string): TracksResult {

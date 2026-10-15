@@ -1,5 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import { assertPublicUrl, isBlockedError, safeRequest } from '../security';
+import { internalUploadUrl } from './uploads';
 import { hostOf, noteRateLimited, runOnHost } from './upstreamGate';
 
 /**
@@ -71,6 +72,9 @@ function cacheState(target: string): CacheState {
 const inflight = new Map<string, Promise<string>>();
 
 export async function resolveFinalCdnUrl(url: string): Promise<string> {
+  // Arquivo enviado a este servidor: lê pelo endereço interno, sem sondar nem passar pela internet
+  const own = internalUploadUrl(url);
+  if (own) return own;
   // Lança UrlBlockedError se a URL (ou algum redirecionamento) apontar para rede interna
   await assertPublicUrl(url);
   const state = cacheState(url);
