@@ -16,6 +16,255 @@ const pendingBytes = new Map<string, number>();
 /** Última vez que cada envio foi marcado como lido (evita um utimes a cada pedido de Range). */
 const touchedAt = new Map<string, number>();
 
+// ───────────── envio em pedaços (resiste ao limite de corpo do proxy e permite retomar) ─────────────
+
+/** Um envio em pedaços: o arquivo cresce no disco, `received` só conta o que já foi confirmado inteiro. */
+interface UploadSession {
+  id: string;
+  roomId: string;
+  name: string;
+  size: number;
+  received: number;
+  dir: string;
+  file: string;
+  lastActivity: number;
+  writing: boolean;
+}
+const sessions = new Map<string, UploadSession>();
+/** Sessão sem nenhum pedaço há tanto tempo é abandonada (o espaço reservado volta para a cota). */
+const SESSION_IDLE_MS = 60 * 60 * 1000;
+/** Nenhum pedaço pode passar disto, quaisquer que sejam as configurações (teto de corpo do proxy). */
+const MAX_CHUNK_BYTES = 96 * 1024 * 1024;
+
+function writeSessionMeta(s: UploadSession, complete: boolean) {
+  fs.writeFileSync(
+    path.join(s.dir, UPLOAD_META),
+    JSON.stringify({ roomId: s.roomId, name: s.name, createdAt: s.lastActivity, declaredSize: s.size, received: s.received, complete })
+  );
+}
+
+function dropSession(s: UploadSession, removeFiles: boolean) {
+  sessions.delete(s.id);
+  uploadsInProgress.delete(s.id);
+  roomsUploading.delete(s.roomId);
+  // Síncrono: uma consulta logo depois não pode reencontrar a pasta no disco e ressuscitar a sessão
+  if (removeFiles) fs.rmSync(s.dir, { recursive: true, force: true });
+}
+
+function expireStaleSessions(now = Date.now()) {
+  for (const s of Array.from(sessions.values())) {
+    if (!s.writing && now - s.lastActivity > SESSION_IDLE_MS) dropSession(s, true);
+  }
+}
+
+/** A sessão, da memória ou (depois de um restart do servidor) reconstruída do disco; só para a sala dona dela. */
+function findSession(id: string, roomId: string): UploadSession | null {
+  const live = sessions.get(id);
+  if (live) return live.roomId === roomId ? live : null;
+  try {
+    const dir = path.join(UPLOAD_DIR, id);
+    const meta = JSON.parse(fs.readFileSync(path.join(dir, UPLOAD_META), 'utf-8'));
+    if (meta.complete !== false || meta.roomId !== roomId) return null;
+    const name = safeFileName(String(meta.name || 'video'));
+    const s: UploadSession = {
+      id,
+      roomId,
+      name,
+      size: Number(meta.declaredSize) || 0,
+      received: Math.max(0, Number(meta.received) || 0),
+      dir,
+      file: path.join(dir, name),
+      lastActivity: Date.now(),
+      writing: false,
+    };
+    if (!s.size) return null;
+    sessions.set(id, s);
+    uploadsInProgress.add(id);
+    roomsUploading.add(roomId);
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+function jsonBody(res: ServerResponse, status: number, body: unknown) {
+  sendJson(res, status, body);
+}
+
+function handleStart(req: IncomingMessage, res: ServerResponse, roomId: string) {
+  const url = new URL(req.url || '', 'http://localhost');
+  const name = safeFileName(url.searchParams.get('name') || 'video');
+  const size = Number(url.searchParams.get('size'));
+  if (!Number.isInteger(size) || size <= 0) return sendApiError(res, 400, 'bad_request');
+  if (size > config.maxUploadFileBytes) return sendApiError(res, 413, 'too_large');
+
+  expireStaleSessions();
+  // Um envio parado da mesma sala (aba fechada, conexão perdida) não pode travar o próximo: é substituído.
+  // Só um que recebeu pedaço agora há pouco conta como "em andamento".
+  for (const s of Array.from(sessions.values())) {
+    if (s.roomId !== roomId) continue;
+    if (s.writing || Date.now() - s.lastActivity < 15_000) return sendApiError(res, 409, 'upload_in_progress');
+    dropSession(s, true);
+  }
+  if (roomsUploading.has(roomId)) return sendApiError(res, 409, 'upload_in_progress'); // envio inteiro (antigo) em curso
+
+  if (uploadsDiskUsage() + pendingTotal() + size > config.maxUploadDiskBytes) {
+    console.warn('[Upload] Cota de disco cheia; envio recusado.');
+    return sendApiError(res, 507, 'quota_exceeded');
+  }
+  if (diskTooFull(size)) {
+    console.warn('[Upload] Pouco espaço livre no disco; envio recusado.');
+    return sendApiError(res, 507, 'quota_exceeded');
+  }
+
+  const id = crypto.randomBytes(8).toString('hex');
+  const dir = path.join(UPLOAD_DIR, id);
+  const file = path.join(dir, name);
+  if (path.dirname(file) !== dir) return sendApiError(res, 400, 'bad_request');
+  fs.mkdirSync(dir, { recursive: true });
+  const s: UploadSession = { id, roomId, name, size, received: 0, dir, file, lastActivity: Date.now(), writing: false };
+  try {
+    writeSessionMeta(s, false);
+    fs.writeFileSync(file, '');
+  } catch (err) {
+    console.error('[Upload] Não foi possível iniciar o envio:', err);
+    fs.rmSync(dir, { recursive: true, force: true });
+    return sendApiError(res, 500, 'internal');
+  }
+  sessions.set(id, s);
+  uploadsInProgress.add(id);
+  roomsUploading.add(roomId);
+  console.log(`[Upload] Envio iniciado: ${name} (${(size / 1024 ** 2).toFixed(1)} MB) → ${id} (sala ${roomId})`);
+  jsonBody(res, 200, { id, chunkSize: Math.min(config.uploadChunkBytes, MAX_CHUNK_BYTES), received: 0 });
+}
+
+function handleChunk(req: IncomingMessage, res: ServerResponse, s: UploadSession) {
+  const refuse = (status: number, code: string, extra: object = {}) => {
+    if (!res.headersSent) res.statusCode = status;
+    sendApiError(res, status, code, undefined, extra);
+    req.resume();
+  };
+  const url = new URL(req.url || '', 'http://localhost');
+  const offset = Number(url.searchParams.get('offset'));
+  const length = Number(req.headers['content-length'] || 0);
+  if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(length) || length <= 0) return refuse(400, 'bad_request');
+  if (length > MAX_CHUNK_BYTES) return refuse(413, 'too_large');
+  if (s.writing) return refuse(409, 'upload_in_progress');
+  // O cliente e o servidor discordam de onde o arquivo está: devolve o ponto certo para ele continuar dali
+  if (offset !== s.received) return refuse(409, 'offset_mismatch', { received: s.received });
+  if (offset + length > s.size) return refuse(413, 'too_large');
+
+  // Sobra de um pedaço anterior que não terminou (conexão cortada no meio): volta o arquivo ao que foi confirmado
+  try {
+    if (!fs.existsSync(s.file)) fs.writeFileSync(s.file, '');
+    if (fs.statSync(s.file).size > s.received) fs.truncateSync(s.file, s.received);
+  } catch (err) {
+    console.error('[Upload] Erro ao preparar o pedaço:', err);
+    return refuse(500, 'internal');
+  }
+
+  s.writing = true;
+  s.lastActivity = Date.now();
+  const out = fs.createWriteStream(s.file, { flags: 'a' });
+  let got = 0;
+  let settled = false;
+  const abort = (status: number, code: string) => {
+    if (settled) return;
+    settled = true;
+    s.writing = false;
+    out.destroy();
+    if (!res.headersSent && !res.writableEnded) refuse(status, code);
+  };
+  req.on('data', (chunk: Buffer) => {
+    got += chunk.length;
+    if (got > length) {
+      abort(413, 'too_large');
+      req.destroy();
+    }
+  });
+  req.on('aborted', () => abort(499, 'bad_request'));
+  req.on('error', () => abort(499, 'bad_request'));
+  out.on('error', (err) => {
+    console.error('[Upload] Erro de escrita:', err);
+    abort(500, 'internal');
+  });
+  out.on('finish', () => {
+    if (settled) return;
+    settled = true;
+    s.writing = false;
+    if (got !== length) return refuse(400, 'bad_request'); // chegou menos do que o declarado
+    s.received += got;
+    s.lastActivity = Date.now();
+    try {
+      writeSessionMeta(s, false);
+    } catch {
+      // a posição também vale em memória; só não sobrevive a um restart
+    }
+    jsonBody(res, 200, { received: s.received });
+  });
+  req.pipe(out);
+}
+
+function handleFinish(res: ServerResponse, s: UploadSession) {
+  if (s.writing) return sendApiError(res, 409, 'upload_in_progress');
+  if (s.received !== s.size) return sendApiError(res, 409, 'offset_mismatch', undefined, { received: s.received });
+  try {
+    writeSessionMeta(s, true);
+  } catch (err) {
+    console.error('[Upload] Não foi possível concluir o envio:', err);
+    return sendApiError(res, 500, 'internal');
+  }
+  dropSession(s, false);
+  console.log(`[Upload] ${s.name} (${(s.size / 1024 ** 2).toFixed(1)} MB) → ${s.id} (sala ${s.roomId})`);
+  // Uma sala, um envio: o que a sala não está usando (e não é este) sai agora
+  pruneRoomUploads(s.roomId, new Set([...roomManager.referencedUploadIds(s.roomId), s.id]));
+  jsonBody(res, 200, { id: s.id, name: s.name, size: s.size, url: `/api/uploads/${s.id}/${encodeURIComponent(s.name)}` });
+}
+
+/** /api/upload/*: envio inteiro (antigo), início, pedaços, estado, conclusão e cancelamento. Só o Host da sala. */
+export function handleUploadApi(req: IncomingMessage, res: ServerResponse) {
+  const access = getAccess(req);
+  if (!access || access.kind !== 'room' || !roomManager.isHostMember(access.roomId!, access.userId!)) {
+    sendApiError(res, 403, 'not_host');
+    req.resume();
+    return;
+  }
+  const roomId = access.roomId!;
+  const pathname = new URL(req.url || '', 'http://localhost').pathname; // montado em /api/upload: "/", "/start", "/<id>"…
+  const parts = pathname.split('/').filter(Boolean);
+
+  if (parts.length === 0) {
+    if (req.method === 'POST') return handleUpload(req, res);
+    return sendApiError(res, 405, 'method_not_allowed');
+  }
+  if (parts[0] === 'start' && parts.length === 1) {
+    if (req.method !== 'POST') return sendApiError(res, 405, 'method_not_allowed');
+    return handleStart(req, res, roomId);
+  }
+  if (!/^[a-f0-9]{16}$/.test(parts[0]) || parts.length > 2) return sendApiError(res, 404, 'not_found');
+
+  const s = findSession(parts[0], roomId);
+  if (!s) {
+    req.resume();
+    return sendApiError(res, 404, 'not_found');
+  }
+  if (parts.length === 2) {
+    if (parts[1] === 'finish' && req.method === 'POST') return handleFinish(res, s);
+    return sendApiError(res, 404, 'not_found');
+  }
+  if (req.method === 'GET') {
+    return jsonBody(res, 200, { received: s.received, size: s.size, chunkSize: Math.min(config.uploadChunkBytes, MAX_CHUNK_BYTES) });
+  }
+  if (req.method === 'PUT') return handleChunk(req, res, s);
+  if (req.method === 'DELETE') {
+    if (s.writing) return sendApiError(res, 409, 'upload_in_progress');
+    dropSession(s, true);
+    res.statusCode = 204;
+    return void res.end();
+  }
+  return sendApiError(res, 405, 'method_not_allowed');
+}
+
 /** Tamanho total de `.uploads/` no disco (inclui os envios em andamento, que já estão parcialmente gravados). */
 export function uploadsDiskUsage(): number {
   let total = 0;
@@ -43,9 +292,21 @@ export function uploadsDiskUsage(): number {
 }
 
 function pendingTotal(): number {
+  expireStaleSessions();
   let sum = 0;
   for (const v of pendingBytes.values()) sum += v;
+  for (const s of sessions.values()) sum += Math.max(0, s.size - s.received);
   return sum;
+}
+
+/** Espaço livre do disco da máquina depois de gravar `declared` bytes; os envios não podem deixá-lo abaixo do mínimo. */
+function diskTooFull(declared: number): boolean {
+  try {
+    const st = fs.statfsSync(config.rootDir);
+    return Number(st.bavail) * Number(st.bsize) - declared < config.minFreeDiskBytes;
+  } catch {
+    return false; // sem statfs nesta plataforma: vale só a cota da pasta
+  }
 }
 
 export function handleUpload(req: IncomingMessage, res: ServerResponse) {
@@ -84,14 +345,9 @@ export function handleUpload(req: IncomingMessage, res: ServerResponse) {
   }
 
   // Além da cota da pasta: o disco da máquina inteira não pode ficar sem folga (o cache e o sistema também precisam)
-  try {
-    const st = fs.statfsSync(config.rootDir);
-    if (Number(st.bavail) * Number(st.bsize) - declared < config.minFreeDiskBytes) {
-      console.warn('[Upload] Pouco espaço livre no disco; envio recusado.');
-      return refuse(507, 'quota_exceeded');
-    }
-  } catch {
-    // sem statfs nesta plataforma: vale só a cota da pasta
+  if (diskTooFull(declared)) {
+    console.warn('[Upload] Pouco espaço livre no disco; envio recusado.');
+    return refuse(507, 'quota_exceeded');
   }
 
   const id = crypto.randomBytes(8).toString('hex');

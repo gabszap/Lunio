@@ -50,6 +50,11 @@ export const config = {
   /** Quantas horas um envio de sala encerrada continua no disco. */
   uploadTtlMs: num('UPLOAD_TTL_HOURS', 6) * 3600 * 1000,
   /** Envio de sala que continua aberta, mas que ninguém lê há tanto tempo, também sai. */
+  /**
+   * Tamanho de cada pedaço do envio. Precisa ficar abaixo do limite de corpo do proxy na frente do servidor (a
+   * Cloudflare gratuita recusa mais de 100 MB por requisição), então um arquivo grande sobe em vários pedaços.
+   */
+  uploadChunkBytes: Math.max(1024, Math.floor(num('UPLOAD_CHUNK_MB', 32) * 1024 * 1024)),
   uploadIdleMs: num('UPLOAD_IDLE_HOURS', 24) * 3600 * 1000,
   /** Um envio só começa se, depois dele, ainda sobrarem tantos GB livres no disco da máquina. */
   minFreeDiskBytes: num('MIN_FREE_DISK_GB', 5) * GB,

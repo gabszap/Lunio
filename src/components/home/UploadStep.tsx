@@ -3,7 +3,8 @@ import { ChevronLeft, Copy, FileVideo, FolderOpen, Link, Play, Upload, Users, X,
 import { formatRoomUrl } from '../../lib/roomCode';
 import { copyText, formatBytes } from '../../lib/recent';
 import { logger } from '../../lib/logger';
-import { waitForRoomToken } from '../../lib/access';
+import { getAccessToken, waitForRoomToken } from '../../lib/access';
+import { UploadError, uploadInChunks, type UploadSession } from '../../lib/chunkedUpload';
 import { BigInput, CardFooter, FieldLabel, GhostButton, HomeCard, HomeCardTitle, PrimaryButton, TextButton, cx } from '../ui';
 import type { SourceCommit } from './types';
 import type { SourceStep } from './RoomMenu';
@@ -25,7 +26,7 @@ type Phase =
   | { kind: 'pick' }
   | { kind: 'chosen'; file: File }
   | { kind: 'too_large'; file: File }
-  | { kind: 'uploading'; file: File; loaded: number; speed: number; roomCode: string }
+  | { kind: 'uploading'; file: File; loaded: number; speed: number; roomCode: string; retrying?: boolean }
   | { kind: 'done'; file: File; url: string; roomCode: string }
   | { kind: 'error'; file: File; message: string };
 
@@ -34,14 +35,16 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
   const [dragging, setDragging] = useState(false);
   const [copied, setCopied] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const xhrRef = useRef<XMLHttpRequest | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  /** Sessão de envio no servidor: guardada para "Continuar o envio" retomar de onde parou. */
+  const sessionRef = useRef<UploadSession | null>(null);
   /** Invalida um envio que ainda esperava a entrada na sala quando a pessoa cancela. */
   const attemptRef = useRef(0);
 
   useEffect(
     () => () => {
       attemptRef.current++;
-      xhrRef.current?.abort();
+      abortRef.current?.abort();
     },
     []
   );
@@ -78,53 +81,70 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
     }
     if (attemptRef.current !== attempt) return;
 
-    const xhr = new XMLHttpRequest();
-    xhrRef.current = xhr;
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     const startedAt = performance.now();
+    let startedFrom = -1;
 
-    xhr.upload.onprogress = (e) => {
-      const elapsed = (performance.now() - startedAt) / 1000;
-      setPhase({ kind: 'uploading', file, loaded: e.loaded, speed: elapsed > 0 ? e.loaded / elapsed : 0, roomCode });
-    };
-    xhr.onload = () => {
-      xhrRef.current = null;
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const body = JSON.parse(xhr.responseText);
-          const absolute = new URL(body.url, window.location.origin).toString();
-          logger.info(`[Mídia] Envio concluído: ${file.name}`);
-          setPhase({ kind: 'done', file, url: absolute, roomCode });
-        } catch {
-          setPhase({ kind: 'error', file, message: t('O servidor respondeu de um jeito inesperado.') });
-        }
-      } else if (xhr.status === 413) {
+    try {
+      const result = await uploadInChunks({
+        file,
+        signal: ctrl.signal,
+        getToken: getAccessToken,
+        session: sessionRef.current,
+        onSession: (s) => {
+          sessionRef.current = s;
+        },
+        onProgress: (loaded, resumedFrom) => {
+          if (attemptRef.current !== attempt) return;
+          if (startedFrom < 0) startedFrom = resumedFrom;
+          const elapsed = (performance.now() - startedAt) / 1000;
+          const speed = elapsed > 0.5 ? Math.max(0, loaded - startedFrom) / elapsed : 0;
+          setPhase((prev) => (prev.kind === 'uploading' ? { ...prev, loaded, speed } : prev));
+        },
+        onRetry: (waiting) => {
+          if (attemptRef.current !== attempt) return;
+          setPhase((prev) => (prev.kind === 'uploading' ? { ...prev, retrying: waiting } : prev));
+        },
+      });
+      if (attemptRef.current !== attempt) return;
+      abortRef.current = null;
+      sessionRef.current = null;
+      logger.info(`[Mídia] Envio concluído: ${file.name}`);
+      setPhase({ kind: 'done', file, url: new URL(result.url, window.location.origin).toString(), roomCode });
+    } catch (err) {
+      abortRef.current = null;
+      if ((err as Error)?.name === 'AbortError' || attemptRef.current !== attempt) return;
+      if (err instanceof UploadError && err.status === 413) {
+        sessionRef.current = null;
         setPhase({ kind: 'too_large', file });
-      } else {
-        // O servidor responde { error: frase em português, code }
-        let reason = '';
-        try {
-          const body = JSON.parse(xhr.responseText);
-          reason = apiErrorMessage(body?.code, body?.error);
-        } catch {
-          // corpo não-JSON
-        }
-        setPhase({ kind: 'error', file, message: reason || t('O envio falhou (HTTP {status}).', { status: xhr.status }) });
+        return;
       }
-    };
-    xhr.onerror = () => {
-      xhrRef.current = null;
-      setPhase({ kind: 'error', file, message: t('A conexão caiu durante o envio.') });
-    };
-    xhr.open('POST', `/api/upload?name=${encodeURIComponent(file.name)}`);
-    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-    xhr.setRequestHeader('X-Lunio-Token', token);
-    xhr.send(file);
+      if (err instanceof UploadError && err.status === 0) {
+        setPhase({ kind: 'error', file, message: t('A conexão caiu durante o envio.') });
+        return;
+      }
+      // O servidor responde { error: frase em português, code }
+      const reason = err instanceof UploadError ? apiErrorMessage(err.code, err.message) : '';
+      if (err instanceof UploadError && (err.status === 404 || err.status === 403)) sessionRef.current = null;
+      setPhase({ kind: 'error', file, message: reason || t('O envio falhou (HTTP {status}).', { status: err instanceof UploadError ? err.status : 0 }) });
+    }
+  };
+
+  /** Descarta o que já subiu: avisa o servidor (apaga o arquivo parcial) e esquece a sessão. */
+  const discardSession = () => {
+    const session = sessionRef.current;
+    sessionRef.current = null;
+    if (session) {
+      void fetch(`/api/upload/${session.id}`, { method: 'DELETE', headers: { 'X-Lunio-Token': getAccessToken() } }).catch(() => {});
+    }
   };
 
   const cancelUpload = () => {
     attemptRef.current++;
-    xhrRef.current?.abort();
-    xhrRef.current = null;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    discardSession();
     setPhase({ kind: 'pick' });
   };
 
@@ -210,7 +230,7 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
           </div>
           {phase.kind === 'uploading' && (
             <div className="flex justify-between text-[12px] text-lu-muted tabular">
-              <span>{speed > 0 ? etaText : t('Calculando…')}</span>
+              <span>{phase.retrying ? t('Reconectando…') : speed > 0 ? etaText : t('Calculando…')}</span>
               <span>{t('Não feche esta aba')}</span>
             </div>
           )}
@@ -311,7 +331,10 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
           <button
             type="button"
             aria-label={t('Remover arquivo')}
-            onClick={() => setPhase({ kind: 'pick' })}
+            onClick={() => {
+              discardSession();
+              setPhase({ kind: 'pick' });
+            }}
             className="w-10 h-10 rounded-lg inline-flex items-center justify-center text-lu-muted hover:bg-white/8 flex-none"
           >
             <X size={16} />
@@ -367,7 +390,7 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
           ) : phase.kind === 'error' ? (
             <PrimaryButton onClick={() => requireName(() => startUpload(phase.file))}>
               <Upload size={18} />
-              <span>{t('Tentar de novo')}</span>
+              <span>{sessionRef.current ? t('Continuar o envio') : t('Tentar de novo')}</span>
             </PrimaryButton>
           ) : (
             <GhostButton onClick={() => inputRef.current?.click()}>

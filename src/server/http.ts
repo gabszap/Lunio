@@ -14,8 +14,8 @@ export function sendJson(res: ServerResponse, status: number, body: unknown) {
  * Resposta de erro para o cliente: só um código estável e uma frase genérica.
  * Nunca inclui stack, caminhos, stderr do FFmpeg nem a URL (que pode carregar token). O detalhe vai pro log.
  */
-export function sendApiError(res: ServerResponse, status: number, code: string, message?: string) {
-  sendJson(res, status, { error: message || ERROR_MESSAGES[code] || 'Erro inesperado no servidor.', code });
+export function sendApiError(res: ServerResponse, status: number, code: string, message?: string, extra: object = {}) {
+  sendJson(res, status, { error: message || ERROR_MESSAGES[code] || 'Erro inesperado no servidor.', code, ...extra });
 }
 
 const ERROR_MESSAGES: Record<string, string> = {

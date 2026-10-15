@@ -17,6 +17,8 @@ const SWEEP_EVERY_MS = 15 * 60 * 1000;
 /** Arquivos mexidos há menos que isso podem estar sendo gravados agora: não apaga. */
 const BUSY_WINDOW_MS = 2 * 60 * 1000;
 const startedAt = Date.now();
+/** Um envio em pedaços sem nenhum pedaço novo por tanto tempo foi abandonado. */
+const ABANDONED_UPLOAD_MS = 60 * 60 * 1000;
 
 /** Marca um arquivo do cache como usado agora (o LRU usa o mtime; atime costuma estar desligado). */
 export function touchCacheFile(file: string) {
@@ -77,12 +79,21 @@ export function sweepUploads(
     const dir = path.join(dirPath, e.name);
     let roomId: string | undefined;
     let createdAt = 0;
+    let incomplete = false;
     try {
       const meta = JSON.parse(fs.readFileSync(path.join(dir, UPLOAD_META), 'utf-8'));
       roomId = typeof meta.roomId === 'string' ? meta.roomId : undefined;
       createdAt = Number(meta.createdAt) || 0;
+      incomplete = meta.complete === false;
     } catch {
       // envio antigo, sem metadados
+    }
+    // Envio em pedaços que parou (conexão perdida, aba fechada) e ninguém retomou: não serve para nada e ocupa disco
+    if (incomplete && now - newestMtime(dir) > ABANDONED_UPLOAD_MS) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      removed++;
+      console.log(`[Limpeza] Envio incompleto ${e.name} removido (parado há mais de 1 h).`);
+      continue;
     }
     if (roomId && roomManager.isRoomActive(roomId)) {
       // Sala aberta: o envio fica enquanto alguém lê (cada leitura atualiza a data); sem leitura há `idleMs`, sai
