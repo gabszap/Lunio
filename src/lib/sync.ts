@@ -717,9 +717,10 @@ class SyncManager {
     this.send({ type: 'playlist:remove', itemId });
   }
 
-  public emitPlaylistMove(itemId: string, direction: 'up' | 'down') {
+  /** `'up'`/`'down'` andam uma posição; um número leva o item direto para essa posição. */
+  public emitPlaylistMove(itemId: string, target: 'up' | 'down' | number) {
     if (!this.isConnected || !this.isRoomHost()) return;
-    this.send({ type: 'playlist:move', itemId, direction });
+    this.send(typeof target === 'number' ? { type: 'playlist:move', itemId, toIndex: target } : { type: 'playlist:move', itemId, direction: target });
   }
 
   public emitPlaylistTake(itemId: string) {

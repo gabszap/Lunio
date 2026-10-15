@@ -1,6 +1,7 @@
 import { performance } from 'node:perf_hooks';
 import { assertPublicUrl, isBlockedError, safeRequest } from '../security';
 import { internalUploadUrl } from './uploads';
+import { hostOf, noteRateLimited, runOnHost } from './upstreamGate';
 
 /**
  * Rótulo seguro para log: SÓ o host.
@@ -94,17 +95,33 @@ export async function resolveFinalCdnUrl(url: string): Promise<string> {
   return task;
 }
 
+/**
+ * O resolvedor de origem (Torrentio/torrentsdb → TorBox) responde 429 quando muita coisa chega junta, e um vídeo
+ * novo (nunca resolvido) é justamente o caso mais pesado para ele. O 429 é espera, não erro: a sondagem repete a mesma
+ * URL (respeitando Retry-After) enquanto as demais requisições do vídeo aguardam a mesma resposta (single-flight).
+ */
+export const ORIGIN_RETRIES = 3;
+const ORIGIN_RETRY_BASE_MS = 1500;
+const ORIGIN_RETRY_MAX_MS = 8000;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 async function probeFinalCdnUrl(url: string, state: CacheState): Promise<string> {
   invalidate(url);
   const startedAt = performance.now();
   try {
-    const res = await safeRequest(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Range': 'bytes=0-0',
-      },
-    });
-    res.body.destroy();
+    let res = await probeOnce(url);
+    for (let attempt = 0; (res.status === 429 || res.status === 503) && attempt < ORIGIN_RETRIES; attempt++) {
+      const retryAfter = Number(res.headers['retry-after']);
+      const waitMs = Math.min(ORIGIN_RETRY_MAX_MS, retryAfter > 0 ? retryAfter * 1000 : ORIGIN_RETRY_BASE_MS * 2 ** attempt);
+      console.warn(
+        `[Resolver] origem=${hostLabel(url)} respondeu ${res.status}; repetindo a sondagem em ${waitMs}ms ` +
+          `(${attempt + 1}/${ORIGIN_RETRIES}${retryAfter > 0 ? `, Retry-After ${retryAfter}s` : ''})`
+      );
+      if (res.status === 429) noteRateLimited(hostOf(url), retryAfter > 0 ? retryAfter : undefined);
+      await sleep(waitMs);
+      res = await probeOnce(url);
+    }
     const finalUrl = res.url || url;
     const durationMs = performance.now() - startedAt;
     const outcome = res.status < 400 ? 'ok' : 'erro';
@@ -128,6 +145,28 @@ async function probeFinalCdnUrl(url: string, state: CacheState): Promise<string>
     );
     return url;
   }
+}
+
+async function probeOnce(url: string) {
+  const res = await safeRequest(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Range': 'bytes=0-0',
+    },
+  });
+  res.body.destroy();
+  return res;
+}
+
+/**
+ * Aquece um vídeo da fila: resolve o link em segundo plano (uma sondagem por vez por host, depois do que o usuário
+ * está pedindo), para o primeiro acesso a um vídeo novo não acontecer na hora em que todos esperam por ele.
+ */
+export function warmUpMedia(url: string): void {
+  if (!/^https?:\/\//i.test(url) || cacheState(url) === 'hit') return;
+  runOnHost(hostOf(url), 'prefetch', () => resolveFinalCdnUrl(url)).promise.catch(() => {
+    // URL bloqueada ou origem fora do ar: na hora de tocar o fluxo normal trata e mostra o erro
+  });
 }
 
 export { invalidate as invalidateResolvedUrl, cacheResolved };
