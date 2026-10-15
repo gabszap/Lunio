@@ -33,12 +33,16 @@ export const tracksCache = new BoundedCache<TracksResult>(300, 6 * 3600 * 1000);
 
 /** `Stream #0:0: Video: hevc (Main 10), yuv420p10le(tv, progressive), 3840x2160 [SAR 1:1 DAR 16:9], 24 fps…` */
 export function parseVideoLine(line: string): VideoInfo | null {
-  const m = line.match(/Video:\s*([A-Za-z0-9_]+)\s*(?:\(([^)]*)\))?/);
+  const m = line.match(/Video:\s*([A-Za-z0-9_]+)((?:\s*\([^)]*\))*)/);
   if (!m) return null;
   const size = line.match(/,\s*(\d{2,5})x(\d{2,5})\b/);
   const pix = line.match(/,\s*((?:yuvj?|gbrap?|gray|nv|p0|rgb|bgr|argb|bgra|pal)[a-z0-9]*)/i);
-  // O parêntese depois do codec pode ser o perfil ("Main 10") ou a etiqueta ("avc1 / 0x31637661"): só o primeiro serve
-  const profile = m[2] && !/0x[0-9a-f]+/i.test(m[2]) ? m[2].trim() : '';
+  // Os parênteses depois do codec misturam decodificador ("libdav1d"), etiqueta do contêiner ("avc1 / 0x31637661") e
+  // perfil ("Main 10"): só o perfil interessa
+  const profile =
+    [...(m[2] || '').matchAll(/\(([^)]*)\)/g)]
+      .map((g) => g[1].trim())
+      .find((p) => p && !/0x[0-9a-f]+/i.test(p) && !/^(lib|native|h264_|hevc_)/i.test(p)) || '';
   return {
     codec: m[1].toLowerCase(),
     profile,

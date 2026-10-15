@@ -24,7 +24,9 @@ describe('parseVideoLine: lê o vídeo da saída do FFmpeg', () => {
   });
 
   it('AV1 e VP9', () => {
-    expect(parseVideoLine('Stream #0:0: Video: av1 (libdav1d) (Main), yuv420p(tv), 640x360, 24 fps')).toMatchObject({ codec: 'av1', width: 640, height: 360 });
+    // O primeiro parêntese do AV1 é o decodificador do FFmpeg, não o perfil
+    expect(parseVideoLine('Stream #0:0: Video: av1 (libdav1d) (Main), yuv420p(tv), 640x360, 24 fps')).toMatchObject({ codec: 'av1', profile: 'Main', width: 640, height: 360 });
+    expect(parseVideoLine('Stream #0:0: Video: av1 (libdav1d), yuv420p, 640x360, 24 fps')).toMatchObject({ codec: 'av1', profile: '' });
     expect(parseVideoLine('Stream #0:0: Video: vp9 (Profile 2), yuv420p10le(tv), 1920x1080, 24 fps')).toMatchObject({ codec: 'vp9', pixFmt: 'yuv420p10le' });
   });
 
