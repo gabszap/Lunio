@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
 import { RoomManager } from '../roomServer';
+import { warmUpMedia } from '../media/resolver';
 import { verifyToken } from '../access';
+
+// O aquecimento do link faz rede de verdade; aqui só interessa que foi pedido
+vi.mock('../media/resolver', () => ({ warmUpMedia: vi.fn() }));
 
 /** WebSocket falso: guarda o que o servidor enviou e o código com que fechou. */
 class FakeSocket {
@@ -114,6 +118,46 @@ describe('fila (playlist)', () => {
     } finally {
       for (const id of ids) fs.rmSync(path.join(UPLOAD_DIR, id), { recursive: true, force: true });
     }
+  });
+
+  it('arrastar: o Host leva o item direto para a posição (e posição inválida é ignorada)', () => {
+    const host = connect('FILA5', 'h');
+    const guest = connect('FILA5', 'g');
+    for (let i = 1; i <= 4; i++) send(host, item(i));
+    const [a, b, c, d] = stateOf('FILA5').playlist!;
+    send(host, { type: 'playlist:move', itemId: a.id, toIndex: 2 });
+    expect(stateOf('FILA5').playlist!.map((i) => i.id)).toEqual([b.id, c.id, a.id, d.id]);
+    send(host, { type: 'playlist:move', itemId: d.id, toIndex: 0 });
+    expect(stateOf('FILA5').playlist!.map((i) => i.id)).toEqual([d.id, b.id, c.id, a.id]);
+    send(host, { type: 'playlist:move', itemId: d.id, toIndex: 9 });
+    send(host, { type: 'playlist:move', itemId: d.id, toIndex: -1 });
+    send(host, { type: 'playlist:move', itemId: d.id, toIndex: 1.5 as number });
+    send(guest, { type: 'playlist:move', itemId: a.id, toIndex: 0 });
+    expect(stateOf('FILA5').playlist!.map((i) => i.id)).toEqual([d.id, b.id, c.id, a.id]);
+  });
+
+  it('o mesmo link não entra duas vezes na fila (nem com espaço ou #fragmento a mais)', () => {
+    const host = connect('FILA6', 'h');
+    send(host, item(1));
+    send(host, item(1));
+    send(host, { ...item(1), url: ' https://exemplo.test/ep1.mkv#x ' });
+    expect(stateOf('FILA6').playlist).toHaveLength(1);
+    send(host, item(2));
+    expect(stateOf('FILA6').playlist).toHaveLength(2);
+  });
+
+  it('adicionar aquece o link; remover avisa no chat', () => {
+    const host = connect('FILA7', 'h');
+    const guest = connect('FILA7', 'g');
+    vi.mocked(warmUpMedia).mockClear();
+    send(host, item(1));
+    expect(warmUpMedia).toHaveBeenCalledWith('https://exemplo.test/ep1.mkv');
+    send(host, { type: 'playlist:add', url: 'https://www.youtube.com/watch?v=abc', title: 'YT', mimeType: 'video/youtube' });
+    expect(warmUpMedia).toHaveBeenCalledTimes(1); // YouTube não passa pelo resolvedor
+
+    const [a] = stateOf('FILA7').playlist!;
+    send(host, { type: 'playlist:remove', itemId: a.id });
+    expect(guest.of('chat:message').some((m) => m.message.text.includes('removeu da fila: "Ep 1"'))).toBe(true);
   });
 
   it('o Host toca um item: ele sai da fila', () => {

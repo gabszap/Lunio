@@ -37,6 +37,9 @@ export interface PlaylistItem {
 
 export const PLAYLIST_MAX_ITEMS = 50;
 
+/** Chave para saber se dois links da fila são o mesmo vídeo (ignora espaços e o #fragmento). */
+export const playlistUrlKey = (url: string) => url.trim().replace(/#.*$/, '');
+
 export interface RoomPlaybackState {
   playing: boolean;
   position: number;
@@ -190,7 +193,10 @@ export type ClientMessage =
   | {
       type: 'playlist:move';
       itemId: string;
-      direction: 'up' | 'down';
+      /** Um passo para cima/baixo (teclado) ... */
+      direction?: 'up' | 'down';
+      /** ... ou a posição final (arrastar e soltar). */
+      toIndex?: number;
     }
   | {
       /** O Host tirou o item da fila para tocá-lo (o cliente do Host carrega a mídia em seguida). */
