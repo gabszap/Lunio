@@ -199,6 +199,25 @@ export function ResumePrompt({ prompt, onResume, onDismiss }: { prompt: { time: 
   );
 }
 
+export function CodecNotice({ notice, onDismiss }: { notice: { title: string; text: string }; onDismiss: () => void }) {
+  return (
+    <div id="video-codec-notice" role="alert" className="absolute top-3 left-3 right-3 sm:right-auto sm:max-w-[460px] z-40 pointer-events-auto">
+      <div className={`flex items-start gap-3 p-3 pl-3.5 rounded-[14px] ${floatingCard}`}>
+        <span className="w-9 h-9 flex-none rounded-[10px] bg-lu-warning/15 text-lu-warning flex items-center justify-center">
+          <TriangleAlert size={16} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[14px] font-semibold">{notice.title}</div>
+          <div className="mt-0.5 text-[13px] text-lu-muted">{notice.text}</div>
+        </div>
+        <IconButton label={t('Fechar aviso')} size={36} tone="muted" onClick={onDismiss}>
+          <X size={16} />
+        </IconButton>
+      </div>
+    </div>
+  );
+}
+
 export function SkipChapterButton({ chapter, showControls, skipProgress, onSkip }: { chapter: { targetTime: number; label: string }; showControls: boolean; skipProgress: number; onSkip: () => void }) {
   return (
     <button

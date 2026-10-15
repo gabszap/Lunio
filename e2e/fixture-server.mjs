@@ -73,11 +73,35 @@ Dialogue: 0,0:00:00.50,0:00:15.00,Default,,0,0,0,,${text}
   }
 }
 
+// Vídeos curtos em outros codecs, para testar o aviso de "o navegador não decodifica". Melhor esforço: se o FFmpeg não
+// tiver o encoder (libx265, libsvtav1), o arquivo não existe e o teste correspondente é pulado.
+const codecFiles = {
+  'codec-hevc.mkv': ['-c:v', 'libx265', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-tag:v', 'hvc1', '-x265-params', 'log-level=error'],
+  'codec-hevc10.mkv': ['-c:v', 'libx265', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p10le', '-tag:v', 'hvc1', '-x265-params', 'log-level=error'],
+  'codec-av1.mkv': ['-c:v', 'libsvtav1', '-preset', '12', '-pix_fmt', 'yuv420p'],
+  'codec-h264-10bit.mkv': ['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p10le'],
+};
+for (const [name, videoArgs] of Object.entries(codecFiles)) {
+  const out = path.join(dir, name);
+  if (fs.existsSync(out)) continue;
+  const r = spawnSync(
+    process.env.FFMPEG_PATH || 'ffmpeg',
+    ['-hide_banner', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=duration=6:size=320x180:rate=15', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=6', ...videoArgs, '-c:a', 'aac', '-shortest', out],
+    { encoding: 'utf-8' }
+  );
+  if (r.status !== 0) {
+    fs.rmSync(out, { force: true });
+    console.warn(`Sem ${name} (o FFmpeg não tem o encoder): o teste desse codec será pulado.`);
+  }
+}
+
 http
   .createServer((req, res) => {
     if (req.url === '/ready') return void res.end('ok');
     const name = path.basename((req.url || '').split('?')[0]);
-    const served = name === 'legendas.mkv' ? subsFile : file;
+    const codecFile = codecFiles[name] ? path.join(dir, name) : null;
+    if (codecFile && !fs.existsSync(codecFile)) return void res.writeHead(404).end();
+    const served = codecFile || (name === 'legendas.mkv' ? subsFile : file);
     const st = fs.statSync(served);
     const m = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
     if (m) {

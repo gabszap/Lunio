@@ -1,5 +1,5 @@
 import { useEffect, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
-import type { AudioTrackOption, Chapter, SubtitleTrack } from '../../types/media';
+import type { AudioTrackOption, Chapter, SubtitleTrack, VideoInfo } from '../../types/media';
 import { formatTime } from '../../lib/chapters';
 import { logger } from '../../lib/logger';
 import { getYouTubeId, resolveMediaRef } from '../../lib/media';
@@ -31,10 +31,11 @@ export function useMediaInspection(args: {
   setMediaTitle: Dispatch<SetStateAction<string>>;
   setParsedMetadata: Dispatch<SetStateAction<any>>;
   setDuration: Dispatch<SetStateAction<number>>;
+  setVideoInfo: Dispatch<SetStateAction<VideoInfo | null>>;
 }) {
   const {
     source, hasSource, title, autoPlay, initialChapters, initialSubtitles, initialAudioTracks, audio, subs,
-    currentChapterRef, pendingPlayRef, totalDurationRef, setPlaybackError, setResumePrompt, setMediaTitle, setParsedMetadata, setDuration,
+    currentChapterRef, pendingPlayRef, totalDurationRef, setPlaybackError, setResumePrompt, setMediaTitle, setParsedMetadata, setDuration, setVideoInfo,
   } = args;
   const { setResolvedStreamUrl, setDetectedAudioTracks, setActiveAudioTrack } = audio;
   const { setDetectedSubtitles, resetSubtitleState, applyResolvedSubtitles, applyLocalSubtitles } = subs;
@@ -50,6 +51,7 @@ export function useMediaInspection(args: {
   useEffect(() => {
     let isCancelled = false;
     setPlaybackError(null);
+    setVideoInfo(null);
     resetSubtitleState();
     currentChapterRef.current = null;
     pendingPlayRef.current = false;
@@ -107,6 +109,8 @@ export function useMediaInspection(args: {
 
           // Fase 2: Registra a sessão de mídia formal com generation tracking
           sessionManager.createSession(resolvedMedia, 0);
+
+          setVideoInfo(resolvedMedia.video ?? null);
 
           if (resolvedMedia.title) {
             setMediaTitle(resolvedMedia.title);
