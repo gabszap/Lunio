@@ -10,7 +10,7 @@ import { getMediaFingerprint } from '../media/fingerprint';
 import { SUB_CACHE_DIR } from '../media/paths';
 import { resolveFinalCdnUrl } from '../media/resolver';
 import { getOrExtractSubtitle } from '../media/subtitles';
-import { parseTracks, tracksCache } from '../media/tracks';
+import { parseTracks, tracksCache, videoLineForLog } from '../media/tracks';
 
 /** GET /api/tracks?url=… — faixas de áudio/legenda, capítulos, fontes e duração via FFmpeg. */
 export async function handleTracks(req: IncomingMessage, res: ServerResponse) {
@@ -119,6 +119,8 @@ export async function handleTracks(req: IncomingMessage, res: ServerResponse) {
 
         console.log(`[Tracks] 🎬 Título: "${cleanTitle}" | Duração: ${mediaDuration.toFixed(1)}s | Original: "${rawFileTitle}"`);
         console.log(`[Tracks] Detectados ${audios.length} áudios, ${subtitles.length} legendas, ${chapters.length} capítulos e ${fonts.length} fontes embutidas via FFmpeg.`);
+        const videoLine = videoLineForLog(stderr);
+        if (videoLine) console.log(`[Tracks] Vídeo: ${videoLine}`);
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify(result));
       } catch (err: any) {

@@ -31,6 +31,19 @@ export interface TracksResult {
 /** Resultado da inspeção por URL (evita rodar o FFmpeg de novo para o mesmo vídeo). */
 export const tracksCache = new BoundedCache<TracksResult>(300, 6 * 3600 * 1000);
 
+/**
+ * A linha do vídeo principal como o FFmpeg a escreveu, para o journal: com o tempo mostra os formatos reais que
+ * passam por aqui e confere o `parseVideoLine`. Sem URL nem texto longo (a linha só descreve o stream).
+ */
+export function videoLineForLog(stderr: string): string | null {
+  for (const raw of stderr.split('\n')) {
+    const line = raw.replace(/\r/g, '').trim();
+    if (!/^Stream #0:\d+.*Video:/.test(line) || /attached pic/i.test(line)) continue;
+    return line.replace(/https?:\/\/\S+/gi, '[url]').slice(0, 300);
+  }
+  return null;
+}
+
 /** `Stream #0:0: Video: hevc (Main 10), yuv420p10le(tv, progressive), 3840x2160 [SAR 1:1 DAR 16:9], 24 fps…` */
 export function parseVideoLine(line: string): VideoInfo | null {
   const m = line.match(/Video:\s*([A-Za-z0-9_]+)((?:\s*\([^)]*\))*)/);

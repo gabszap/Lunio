@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseTracks, parseVideoLine } from '../media/tracks';
+import { parseTracks, parseVideoLine, videoLineForLog } from '../media/tracks';
 
 describe('parseVideoLine: lê o vídeo da saída do FFmpeg', () => {
   it('HEVC 10 bits com perfil', () => {
@@ -54,5 +54,27 @@ describe('parseTracks: guarda o vídeo principal', () => {
   it('arquivo sem vídeo: null', () => {
     const result = parseTracks(header + '  Stream #0:0: Audio: mp3, 44100 Hz, stereo, fltp\n', 'https://exemplo.test/a.mp3', 'https://exemplo.test/a.mp3');
     expect(result.video).toBeNull();
+  });
+});
+
+describe('videoLineForLog: a linha do vídeo para o journal', () => {
+  it('devolve a primeira linha de vídeo de verdade, sem capa e sem URL', () => {
+    const out = [
+      "Input #0, matroska,webm, from 'https://cdn.exemplo.test/video.mkv?token=SEGREDO':",
+      '  Stream #0:0: Video: mjpeg (Baseline), yuvj420p(pc), 600x600, 90k tbr (attached pic)',
+      '  Stream #0:1(jpn): Video: hevc (Main 10), yuv420p10le(tv), 1920x1080, 23.98 fps, 23.98 tbr, 1k tbn',
+      '  Stream #0:2(jpn): Audio: aac (LC), 48000 Hz, stereo, fltp',
+    ].join('\n');
+    const line = videoLineForLog(out)!;
+    expect(line).toBe('Stream #0:1(jpn): Video: hevc (Main 10), yuv420p10le(tv), 1920x1080, 23.98 fps, 23.98 tbr, 1k tbn');
+    expect(line).not.toContain('SEGREDO');
+  });
+
+  it('troca URL que aparecer na linha e limita o tamanho; sem vídeo, null', () => {
+    const noisy = 'Stream #0:0: Video: h264 (High), yuv420p, 1280x720, handler_name https://x.test/a?t=abc ' + 'z'.repeat(400);
+    const line = videoLineForLog(noisy)!;
+    expect(line).toContain('[url]');
+    expect(line.length).toBeLessThanOrEqual(300);
+    expect(videoLineForLog('Stream #0:0: Audio: mp3, 44100 Hz')).toBeNull();
   });
 });
