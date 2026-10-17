@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { sweepUploads } from '../cleanup';
+import { getCacheStats, sweepCache, sweepUploads } from '../cleanup';
 import { pruneRoomUploads, UPLOAD_META, uploadIdFromUrl, uploadsInProgress } from '../media/uploads';
 import { roomManager } from '../roomServer';
 
@@ -91,5 +91,31 @@ describe('sweepUploads: validade por último uso', () => {
     // ...e 7 h depois sim.
     expect(sweepUploads(Date.now() + 7 * HOUR, root, 6 * HOUR, 24 * HOUR)).toBe(1);
     expect(fs.readdirSync(root)).toEqual([]);
+  });
+
+  it('o relatório da limpeza conta o que saiu dos envios e do cache, e soma desde o início do servidor', () => {
+    const uploads = makeUploads();
+    const cacheRoot = makeUploads();
+    sweepCache(Date.now(), cacheRoot); // fecha a rodada dos testes anteriores, que também chamaram sweepUploads
+    roomManager.getOrCreateRoom('RELATORIO1');
+    put(uploads, id(1), 'RELATORIO1', 30 * HOUR); // sem leitura há 30 h: sai
+    put(uploads, id(2), 'RELATORIO1', 1 * HOUR); // fica
+
+    const before = getCacheStats().totals;
+    expect(sweepUploads(Date.now(), uploads, 6 * HOUR, 24 * HOUR)).toBe(1);
+    // A passada do cache fecha o relatório da rodada (é assim que a limpeza roda: envios e depois cache)
+    sweepCache(Date.now(), cacheRoot);
+
+    const stats = getCacheStats(Date.now());
+    expect(stats.lastSweep).toMatchObject({ uploads: 1, byAge: 0, byLimit: 0 });
+    expect(stats.lastSweep!.freedBytes).toBeGreaterThanOrEqual(50); // o arquivo do envio removido
+    expect(stats.totals.items).toBe(before.items + 1);
+    expect(stats.totals.bytes).toBeGreaterThanOrEqual(before.bytes + 50);
+
+    // A rodada seguinte, sem nada para remover, zera o "desta passada" mas mantém o total
+    sweepCache(Date.now(), cacheRoot);
+    const next = getCacheStats(Date.now());
+    expect(next.lastSweep).toMatchObject({ uploads: 0, freedBytes: 0 });
+    expect(next.totals.items).toBe(before.items + 1);
   });
 });

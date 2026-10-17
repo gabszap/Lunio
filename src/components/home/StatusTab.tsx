@@ -19,7 +19,8 @@ interface StatusReport {
     limitBytes: number;
     uploads: { bytes: number; limitBytes: number; count: number };
     disk: { freeBytes: number; totalBytes: number } | null;
-    lastSweep: { at: number; byAge: number; byLimit: number; freedBytes: number } | null;
+    lastSweep: { at: number; byAge: number; byLimit: number; uploads: number; freedBytes: number } | null;
+    totals: { items: number; bytes: number };
   };
   ffmpeg: { found: boolean; version?: string };
   python: { found: boolean; version?: string; tooOld: boolean };
@@ -105,12 +106,15 @@ const Stat: React.FC<{ label: string; value: React.ReactNode }> = ({ label, valu
   </div>
 );
 
-const Metric: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+const Metric: React.FC<{ label: string; children: React.ReactNode; sub?: string }> = ({ label, children, sub }) => (
   <div className="min-w-0">
     <div className="text-[13px] text-lu-muted">{label}</div>
     <div className="mt-1 text-[16px] font-medium tabular truncate">{children}</div>
+    {sub && <div className="mt-0.5 text-[12px] text-lu-muted truncate">{sub}</div>}
   </div>
 );
+
+const itemsText = (n: number) => (n === 1 ? t('1 item') : t('{n} itens', { n }));
 
 export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
   const [report, setReport] = useState<StatusReport | null>(null);
@@ -239,15 +243,22 @@ export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
                 </span>
               </Metric>
               <Metric label={t('Disco livre')}>{report.cache.disk ? formatBytes(report.cache.disk.freeBytes) : dash}</Metric>
-              <Metric label={t('Última limpeza')}>
+              <Metric
+                label={t('Última limpeza')}
+                sub={
+                  report.cache.totals.items > 0
+                    ? t('{items} desde o início ({size})', { items: itemsText(report.cache.totals.items), size: formatBytes(report.cache.totals.bytes) })
+                    : t('nada removido desde o início')
+                }
+              >
                 {report.cache.lastSweep ? (
                   <span
                     title={t('{n} item(ns) removido(s), {size} liberados', {
-                      n: report.cache.lastSweep.byAge + report.cache.lastSweep.byLimit,
+                      n: report.cache.lastSweep.byAge + report.cache.lastSweep.byLimit + report.cache.lastSweep.uploads,
                       size: formatBytes(report.cache.lastSweep.freedBytes),
                     })}
                   >
-                    {timeAgo(report.cache.lastSweep.at)}
+                    {timeAgo(report.cache.lastSweep.at)} · {itemsText(report.cache.lastSweep.byAge + report.cache.lastSweep.byLimit + report.cache.lastSweep.uploads)}
                   </span>
                 ) : (
                   <span className="text-lu-muted">{t('Ainda não rodou')}</span>

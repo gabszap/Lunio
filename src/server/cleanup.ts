@@ -61,6 +61,18 @@ function newestMtime(target: string): number {
   return newest;
 }
 
+/** Envios removidos desde a última passada do cache; a passada do cache fecha o relatório (ver `sweepCache`). */
+let pendingUploads = { items: 0, bytes: 0 };
+/** Tudo o que a limpeza removeu desde que o servidor subiu. */
+const sweepTotals = { items: 0, bytes: 0 };
+
+function removeUploadDir(dir: string) {
+  const size = dirSize(dir);
+  fs.rmSync(dir, { recursive: true, force: true });
+  pendingUploads.items++;
+  pendingUploads.bytes += size;
+}
+
 export function sweepUploads(
   now = Date.now(),
   dirPath = UPLOAD_DIR,
@@ -90,7 +102,7 @@ export function sweepUploads(
     }
     // Envio em pedaços que parou (conexão perdida, aba fechada) e ninguém retomou: não serve para nada e ocupa disco
     if (incomplete && now - newestMtime(dir) > ABANDONED_UPLOAD_MS) {
-      fs.rmSync(dir, { recursive: true, force: true });
+      removeUploadDir(dir);
       removed++;
       console.log(`[Limpeza] Envio incompleto ${e.name} removido (parado há mais de 1 h).`);
       continue;
@@ -99,7 +111,7 @@ export function sweepUploads(
       // Sala aberta: o envio fica enquanto alguém lê (cada leitura atualiza a data); sem leitura há `idleMs`, sai
       const idle = now - newestMtime(dir);
       if (idle < idleMs) continue;
-      fs.rmSync(dir, { recursive: true, force: true });
+      removeUploadDir(dir);
       removed++;
       console.log(`[Limpeza] Envio ${e.name} removido (sala ${roomId} aberta, mas ninguém o lê há ${Math.round(idle / 3600_000)} h).`);
       continue;
@@ -109,7 +121,7 @@ export function sweepUploads(
     const closedAt = (roomId && roomManager.getClosedAt(roomId)) || Math.max(startedAt, createdAt);
     const lastUse = Math.max(closedAt, newestMtime(dir) > now - BUSY_WINDOW_MS ? now : 0);
     if (now - lastUse < ttlMs) continue;
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeUploadDir(dir);
     removed++;
     console.log(`[Limpeza] Envio ${e.name} removido (sala ${roomId || 'desconhecida'} encerrada).`);
   }
@@ -177,6 +189,9 @@ export interface SweepReport {
   /** Itens removidos por idade, por estouro do limite de tamanho, e quanto isso liberou. */
   byAge: number;
   byLimit: number;
+  /** Envios de vídeo removidos (`.uploads/`) nesta passada. */
+  uploads: number;
+  /** Bytes liberados no cache e nos envios. */
   freedBytes: number;
 }
 let lastSweep: SweepReport | null = null;
@@ -224,7 +239,12 @@ export function sweepCache(
     }
   }
 
-  lastSweep = { at: now, byAge, byLimit, freedBytes: freed };
+  const uploadsRemoved = pendingUploads.items;
+  freed += pendingUploads.bytes;
+  pendingUploads = { items: 0, bytes: 0 };
+  lastSweep = { at: now, byAge, byLimit, uploads: uploadsRemoved, freedBytes: freed };
+  sweepTotals.items += byAge + byLimit + uploadsRemoved;
+  sweepTotals.bytes += freed;
   statsMemo = null;
   if (byAge) console.log(`[Limpeza] ${byAge} item(ns) do cache sem uso além do prazo removidos.`);
   if (byLimit) console.log(`[Limpeza] Cache acima do limite: ${byLimit} item(ns) menos usados removidos.`);
@@ -239,13 +259,15 @@ export interface CacheStats {
   uploads: { bytes: number; limitBytes: number; count: number };
   disk: { freeBytes: number; totalBytes: number } | null;
   lastSweep: SweepReport | null;
+  /** Itens e bytes removidos pela limpeza desde que o servidor subiu. */
+  totals: { items: number; bytes: number };
 }
 
 let statsMemo: { at: number; value: CacheStats } | null = null;
 
 /** Tamanho do cache por tipo, disco livre e a última limpeza. Recalcula no máximo 1 vez por minuto. */
 export function getCacheStats(now = Date.now()): CacheStats {
-  if (statsMemo && now - statsMemo.at < 60_000) return { ...statsMemo.value, lastSweep };
+  if (statsMemo && now - statsMemo.at < 60_000) return { ...statsMemo.value, lastSweep, totals: { ...sweepTotals } };
   const groups: Record<CacheGroup, number> = { subtitles: 0, fonts: 0, hls: 0, audio: 0 };
   let bytes = 0;
   for (const unit of cacheUnits(CACHE_ROOT)) {
@@ -266,7 +288,7 @@ export function getCacheStats(now = Date.now()): CacheStats {
     // ainda não existe
   }
   const uploads = { bytes: dirSize(UPLOAD_DIR), limitBytes: config.maxUploadDiskBytes, count: uploadCount };
-  const value: CacheStats = { bytes, limitBytes: config.maxCacheBytes, groups, uploads, disk, lastSweep };
+  const value: CacheStats = { bytes, limitBytes: config.maxCacheBytes, groups, uploads, disk, lastSweep, totals: { ...sweepTotals } };
   statsMemo = { at: now, value };
   return value;
 }
