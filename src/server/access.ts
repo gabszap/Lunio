@@ -13,10 +13,13 @@ import { config } from './config';
  */
 
 const SOLO_TTL_MS = 12 * 3600 * 1000;
+/** O "claim" de reabrir um envio dura o mesmo que o próprio envio no disco (decisão ENVIOS-REDIS.md). */
+const UPLOAD_CLAIM_TTL_MS = 24 * 3600 * 1000;
 
 export type TokenPayload =
   | { k: 'solo'; exp: number; n: string }
-  | { k: 'room'; r: string; u: string };
+  | { k: 'room'; r: string; u: string }
+  | { k: 'upload'; id: string; u: string; exp: number };
 
 const b64u = (buf: Buffer | string) => Buffer.from(buf).toString('base64url');
 
@@ -43,6 +46,15 @@ export function issueRoomToken(roomId: string, userId: string): string {
   return sign({ k: 'room', r: roomId, u: userId });
 }
 
+/**
+ * Prova de dono de um envio, devolvida em `POST /api/upload/start` e no fim do envio. Quem guarda
+ * (o navegador, no `localStorage`) pode pedir para reabrir o arquivo depois (`POST /api/uploads/claim`),
+ * mesmo com a sala encerrada. Assinado como os outros tokens: sem tabela para limpar ou vazar.
+ */
+export function issueUploadClaim(id: string, ownerId: string): string {
+  return sign({ k: 'upload', id, u: ownerId, exp: Date.now() + UPLOAD_CLAIM_TTL_MS });
+}
+
 /** Confere assinatura e validade. Não sabe se a pessoa ainda está na sala — isso é do `gate.ts`. */
 export function verifyToken(token: string | null | undefined): TokenPayload | null {
   if (!token || token.length > 1024) return null;
@@ -56,6 +68,11 @@ export function verifyToken(token: string | null | undefined): TokenPayload | nu
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf-8')) as TokenPayload;
     if (payload.k === 'solo') return typeof payload.exp === 'number' && payload.exp > Date.now() ? payload : null;
     if (payload.k === 'room') return typeof payload.r === 'string' && typeof payload.u === 'string' ? payload : null;
+    if (payload.k === 'upload') {
+      return typeof payload.id === 'string' && typeof payload.u === 'string' && typeof payload.exp === 'number' && payload.exp > Date.now()
+        ? payload
+        : null;
+    }
   } catch {
     // payload corrompido
   }

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronLeft, Copy, FileVideo, FolderOpen, Link, Play, Upload, Users, X, Check } from 'lucide-react';
+import { ChevronLeft, Copy, FileVideo, FolderOpen, History, Link, Play, Upload, Users, X, Check } from 'lucide-react';
 import { formatRoomUrl } from '../../lib/roomCode';
 import { copyText, formatBytes } from '../../lib/recent';
+import { forgetRecentUpload, loadRecentUploads, rememberRecentUpload, type RecentUpload } from '../../lib/recentUploads';
 import { logger } from '../../lib/logger';
 import { getAccessToken, waitForRoomToken } from '../../lib/access';
 import { UploadError, uploadInChunks, type UploadSession } from '../../lib/chunkedUpload';
@@ -27,13 +28,17 @@ type Phase =
   | { kind: 'chosen'; file: File }
   | { kind: 'too_large'; file: File }
   | { kind: 'uploading'; file: File; loaded: number; speed: number; roomCode: string; retrying?: boolean }
+  | { kind: 'reopening'; rec: RecentUpload }
   | { kind: 'done'; file: File; url: string; roomCode: string }
-  | { kind: 'error'; file: File; message: string };
+  | { kind: 'error'; file: File; message: string }
+  | { kind: 'reopen_error'; rec: RecentUpload; message: string };
 
 export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensureRoom, requireName, onPickSource }) => {
   const [phase, setPhase] = useState<Phase>({ kind: 'pick' });
   const [dragging, setDragging] = useState(false);
   const [copied, setCopied] = useState(false);
+  /** "Seus envios recentes": o que este navegador enviou e pode reabrir (localStorage). */
+  const [recent, setRecent] = useState<RecentUpload[]>(() => loadRecentUploads());
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   /** Sessão de envio no servidor: guardada para "Continuar o envio" retomar de onde parou. */
@@ -48,6 +53,10 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
     },
     []
   );
+
+  useEffect(() => {
+    if (phase.kind === 'pick') setRecent(loadRecentUploads());
+  }, [phase.kind]);
 
   const choose = (file: File | undefined) => {
     if (!file) return;
@@ -111,6 +120,9 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
       abortRef.current = null;
       sessionRef.current = null;
       logger.info(`[Mídia] Envio concluído: ${file.name}`);
+      // A prova de dono vai pro localStorage: é o que permite "reabrir" este arquivo depois
+      rememberRecentUpload({ id: result.id, name: result.name, size: result.size, claim: result.claim, at: Date.now() });
+      setRecent(loadRecentUploads());
       setPhase({ kind: 'done', file, url: new URL(result.url, window.location.origin).toString(), roomCode });
     } catch (err) {
       abortRef.current = null;
@@ -162,6 +174,52 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
       },
       'room'
     );
+  };
+
+  /** Reabrir um envio de antes: entra na sala (como host) e apresenta o `claim` de dono ao servidor. */
+  const reopenUpload = async (rec: RecentUpload) => {
+    const attempt = ++attemptRef.current;
+    setPhase({ kind: 'reopening', rec });
+    const roomCode = ensureRoom();
+    let token: string;
+    try {
+      token = await waitForRoomToken(roomCode);
+    } catch {
+      if (attemptRef.current === attempt) {
+        setPhase({ kind: 'reopen_error', rec, message: t('Não deu pra entrar na sala para reabrir o envio. Tente de novo.') });
+      }
+      return;
+    }
+    if (attemptRef.current !== attempt) return;
+    let res: Response;
+    try {
+      res = await fetch('/api/uploads/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Lunio-Token': token },
+        body: JSON.stringify({ id: rec.id, claim: rec.claim }),
+      });
+    } catch {
+      if (attemptRef.current === attempt) {
+        setPhase({ kind: 'reopen_error', rec, message: t('A conexão caiu antes de reabrir. Tente de novo.') });
+      }
+      return;
+    }
+    if (attemptRef.current !== attempt) return;
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      // o servidor já apagou o envio (prazo vencido): desaparece da lista e volta à escolha
+      if (res.status === 404 && body?.code === 'claim_not_found') {
+        forgetRecentUpload(rec.id);
+        setRecent(loadRecentUploads());
+        setPhase({ kind: 'pick' });
+        return;
+      }
+      setPhase({ kind: 'reopen_error', rec, message: apiErrorMessage(body?.code, body?.error) || t('Não foi possível reabrir o envio.') });
+      return;
+    }
+    logger.info(`[Mídia] Envio reaberto: ${body.name ?? rec.name}`);
+    const stub = new File([], body.name ?? rec.name, { type: 'video/mp4', lastModified: rec.at }); // só nome/tipo; o conteúdo está no servidor
+    setPhase({ kind: 'done', file: stub, url: new URL(body.url, window.location.origin).toString(), roomCode });
   };
 
   const copyLink = async (code: string) => {
@@ -275,8 +333,42 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
     );
   }
 
+  // ───── Reabrindo um envio de antes ─────
+  if (phase.kind === 'reopening') {
+    return (
+      <HomeCard>
+        <HomeCardTitle
+          icon={<History size={20} />}
+          title={t('Reabrindo o arquivo')}
+          description={t('Entrando na sala e recuperando o envio que você fez antes.')}
+        />
+        <div className="flex items-center gap-3 px-4 py-3.5 rounded-[14px] bg-lu-bg2 border border-lu-border">
+          <span className="text-lu-accent flex">
+            <FileVideo size={22} />
+          </span>
+          <div className="flex-1 min-w-0 flex flex-col">
+            <span className="text-[14px] font-semibold truncate">{phase.rec.name}</span>
+            <span className="text-[12px] text-lu-muted tabular">{formatBytes(phase.rec.size)}</span>
+          </div>
+        </div>
+        <CardFooter>
+          <TextButton
+            onClick={() => {
+              attemptRef.current++;
+              setPhase({ kind: 'pick' });
+            }}
+          >
+            <X size={18} />
+            <span>{t('Cancelar')}</span>
+          </TextButton>
+          <span />
+        </CardFooter>
+      </HomeCard>
+    );
+  }
+
   // ───── Escolher arquivo / grande demais / erro ─────
-  const file = phase.kind === 'pick' ? null : phase.file;
+  const file = 'file' in phase ? phase.file : null;
   return (
     <HomeCard>
       {fileInput}
@@ -342,6 +434,53 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
         </div>
       )}
 
+      {phase.kind === 'reopen_error' && (
+        <div
+          role="alert"
+          className="flex items-center gap-3.5 px-4 py-3.5 rounded-[14px] border bg-lu-error/6 border-lu-error/35"
+        >
+          <span className="flex text-lu-error">
+            <FileVideo size={22} />
+          </span>
+          <div className="flex-1 min-w-0 flex flex-col">
+            <span className="text-[14px] font-semibold truncate">{phase.rec.name}</span>
+            <span className="text-[13px] text-lu-error">{phase.message}</span>
+          </div>
+          <button
+            type="button"
+            aria-label={t('Remover da lista')}
+            onClick={() => {
+              forgetRecentUpload(phase.rec.id);
+              setRecent(loadRecentUploads());
+            }}
+            className="w-10 h-10 rounded-lg inline-flex items-center justify-center text-lu-muted hover:bg-white/8 flex-none"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {phase.kind === 'pick' && recent.length > 0 && (
+        <div className="mt-4 flex flex-col gap-1.5">
+          <span className="mt-1 text-[13px] font-semibold">{t('Seus envios recentes')}</span>
+          {recent.map((rec) => (
+            <div key={rec.id} className="flex items-center gap-3 px-3.5 py-2.5 rounded-[12px] bg-lu-bg2 border border-lu-border">
+              <span className="flex text-lu-accent flex-none">
+                <FileVideo size={18} />
+              </span>
+              <div className="flex-1 min-w-0 flex flex-col">
+                <span className="text-[13px] font-semibold truncate">{rec.name}</span>
+                <span className="text-[12px] text-lu-muted tabular">{formatBytes(rec.size)}</span>
+              </div>
+              <GhostButton onClick={() => requireName(() => reopenUpload(rec))} className="flex-none">
+                <History size={16} />
+                <span>{t('Usar este arquivo')}</span>
+              </GhostButton>
+            </div>
+          ))}
+        </div>
+      )}
+
       {phase.kind === 'too_large' && (
         <>
           <p className="mt-5 mb-2.5 text-[13px] font-semibold">{t('Pra arquivos grandes, tente:')}</p>
@@ -391,6 +530,11 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
             <PrimaryButton onClick={() => requireName(() => startUpload(phase.file))}>
               <Upload size={18} />
               <span>{sessionRef.current ? t('Continuar o envio') : t('Tentar de novo')}</span>
+            </PrimaryButton>
+          ) : phase.kind === 'reopen_error' ? (
+            <PrimaryButton onClick={() => requireName(() => reopenUpload(phase.rec))}>
+              <History size={18} />
+              <span>{t('Usar este arquivo')}</span>
             </PrimaryButton>
           ) : (
             <GhostButton onClick={() => inputRef.current?.click()}>

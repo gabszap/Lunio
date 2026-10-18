@@ -115,7 +115,7 @@ function putChunk(url: string, token: string, blob: Blob, signal: AbortSignal, o
 /** Erro que vale a pena tentar de novo: rede caída, 5xx, 408/429 e 401 (token da sala sendo renovado). */
 const isTransient = (e: UploadError) => e.status === 0 || e.status >= 500 || e.status === 408 || e.status === 429 || e.status === 401;
 
-export async function uploadInChunks(opts: ChunkedUploadOptions): Promise<{ url: string; name: string }> {
+export async function uploadInChunks(opts: ChunkedUploadOptions): Promise<{ id: string; url: string; name: string; size: number; claim: string }> {
   const { file, signal, getToken } = opts;
   const delays = opts.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
 
@@ -123,12 +123,14 @@ export async function uploadInChunks(opts: ChunkedUploadOptions): Promise<{ url:
   let id = '';
   let chunkSize = 0;
   let received = 0;
+  let claim = '';
   if (opts.session) {
     try {
       const st = await call('GET', `/api/upload/${opts.session.id}`, getToken(), signal);
       id = opts.session.id;
       received = st.received;
       chunkSize = st.chunkSize ?? 0;
+      claim = st.claim ?? '';
     } catch (err) {
       if ((err as Error)?.name === 'AbortError') throw err;
       if (!(err instanceof UploadError) || (err.status !== 404 && !isTransient(err))) throw err;
@@ -140,6 +142,7 @@ export async function uploadInChunks(opts: ChunkedUploadOptions): Promise<{ url:
     id = started.id;
     chunkSize = started.chunkSize;
     received = started.received ?? 0;
+    claim = started.claim ?? '';
   }
   opts.onSession?.({ id });
   if (!chunkSize) chunkSize = 32 * 1024 * 1024; // servidor antigo que não informa o tamanho do pedaço
@@ -190,7 +193,7 @@ export async function uploadInChunks(opts: ChunkedUploadOptions): Promise<{ url:
   for (let attempt = 0; ; attempt++) {
     try {
       const done = await call('POST', `/api/upload/${id}/finish`, getToken(), signal);
-      return { url: done.url, name: done.name };
+      return { id, url: done.url, name: done.name, size: done.size ?? file.size, claim: done.claim || claim };
     } catch (err) {
       if ((err as Error)?.name === 'AbortError') throw err;
       if (!(err instanceof UploadError) || !isTransient(err) || attempt >= delays.length) throw err;

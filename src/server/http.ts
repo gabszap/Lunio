@@ -33,6 +33,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   quota_exceeded: 'O servidor não tem mais espaço para envios.',
   upload_in_progress: 'Já existe um envio em andamento nesta sala.',
   not_host: 'Só o Host da sala pode enviar arquivos.',
+  claim_invalid: 'A prova de dono do envio é inválida ou expirou. Envie o arquivo de novo.',
+  claim_not_found: 'O arquivo já não está no servidor (o prazo venceu e saiu na limpeza).',
   EXTRACTION_FAILED: 'Não foi possível extrair a legenda.',
   BITMAP_NOT_SUPPORTED: 'Esse formato de legenda (imagem) não é suportado.',
   internal: 'Erro inesperado no servidor.',
