@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { UPLOAD_DIR, UPLOAD_META } from './uploads';
+import { UPLOAD_DIR, UPLOAD_META, writeUploadMeta } from './uploads';
 
 /**
  * Índice do que os `.meta.json` não guardam bem: o último uso de cada envio (quente, muda a cada leitura)
@@ -71,7 +71,7 @@ function patchRoomUploadsClosedAt(roomId: string, dir: string, closedAt: number 
       const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
       if (meta.roomId !== roomId) continue;
       meta.closedAt = closedAt;
-      fs.writeFileSync(metaPath, JSON.stringify(meta));
+      writeUploadMeta(metaPath, meta);
     } catch {
       // sem metadados legíveis, ou pasta sumindo no meio da varredura: a limpeza cuida depois
     }

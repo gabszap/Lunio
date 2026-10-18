@@ -7,7 +7,7 @@ import { getAccess } from '../gate';
 import { sendApiError, sendJson } from '../http';
 import { roomManager } from '../roomServer';
 import { touchCacheFile } from '../cleanup';
-import { MIME_BY_EXT, pruneRoomUploads, safeFileName, UPLOAD_DIR, UPLOAD_META, uploadsInProgress } from '../media/uploads';
+import { MIME_BY_EXT, pruneRoomUploads, safeFileName, UPLOAD_DIR, UPLOAD_META, uploadsInProgress, writeUploadMeta } from '../media/uploads';
 import { uploadIndex } from '../media/uploadIndex';
 
 /** Salas com um envio em andamento (1 por vez por sala). */
@@ -37,10 +37,7 @@ const SESSION_IDLE_MS = 60 * 60 * 1000;
 const MAX_CHUNK_BYTES = 96 * 1024 * 1024;
 
 function writeSessionMeta(s: UploadSession, complete: boolean) {
-  fs.writeFileSync(
-    path.join(s.dir, UPLOAD_META),
-    JSON.stringify({ roomId: s.roomId, name: s.name, createdAt: s.lastActivity, declaredSize: s.size, received: s.received, complete, ownerId: s.ownerId, closedAt: null })
-  );
+  writeUploadMeta(path.join(s.dir, UPLOAD_META), { roomId: s.roomId, name: s.name, createdAt: s.lastActivity, declaredSize: s.size, received: s.received, complete, ownerId: s.ownerId, closedAt: null });
 }
 
 function dropSession(s: UploadSession, removeFiles: boolean) {
@@ -359,9 +356,9 @@ export function handleUpload(req: IncomingMessage, res: ServerResponse) {
 
   fs.mkdirSync(dir, { recursive: true });
   try {
-    fs.writeFileSync(
+    writeUploadMeta(
       path.join(dir, UPLOAD_META),
-      JSON.stringify({ roomId, name, createdAt: Date.now(), declaredSize: declared, ownerId: access.userId, closedAt: null })
+      { roomId, name, createdAt: Date.now(), declaredSize: declared, ownerId: access.userId, closedAt: null }
     );
   } catch (err) {
     console.error('[Upload] Não foi possível gravar os metadados:', err);

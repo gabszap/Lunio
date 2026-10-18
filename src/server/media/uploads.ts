@@ -6,6 +6,11 @@ import { issueInternalToken } from '../access';
 export const UPLOAD_DIR = path.resolve(config.rootDir, '.uploads');
 export const UPLOAD_META = '.meta.json';
 
+/** Grava os metadados do envio formatados (2 espaços): o arquivo é inspecionado a olho com frequência. */
+export function writeUploadMeta(metaPath: string, meta: unknown): void {
+  fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+}
+
 export const MIME_BY_EXT: Record<string, string> = {
   '.mp4': 'video/mp4',
   '.m4v': 'video/mp4',
