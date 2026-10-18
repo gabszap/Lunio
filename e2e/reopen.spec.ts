@@ -52,9 +52,10 @@ test.describe('reabrir envio (claim no navegador)', () => {
     await page.goto('/');
     await page.getByRole('button', { name: /Enviar um arquivo/ }).click();
 
-    // A lista guarda o envio do navegador
+    // A lista guarda o envio do navegador, com o prazo de reabrir à vista
     await expect(page.getByText('Seus envios recentes')).toBeVisible();
     await expect(page.getByText('episodio-reaberto.mp4')).toBeVisible();
+    await expect(page.getByText(/expira em/)).toBeVisible(); // o claim de 24 h conta o relógio
 
     // Reabrir numa sala nova: nenhum PUT pode disparar (sem envio de novo), só o claim
     await page.getByRole('button', { name: 'Usar este arquivo' }).click();

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, Copy, FileVideo, FolderOpen, History, Link, Play, Upload, Users, X, Check } from 'lucide-react';
 import { formatRoomUrl } from '../../lib/roomCode';
 import { copyText, formatBytes } from '../../lib/recent';
-import { forgetRecentUpload, loadRecentUploads, rememberRecentUpload, type RecentUpload } from '../../lib/recentUploads';
+import { forgetRecentUpload, loadRecentUploads, rememberRecentUpload, claimExpiry, type RecentUpload } from '../../lib/recentUploads';
 import { logger } from '../../lib/logger';
 import { getAccessToken, waitForRoomToken } from '../../lib/access';
 import { UploadError, uploadInChunks, type UploadSession } from '../../lib/chunkedUpload';
@@ -121,7 +121,7 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
       sessionRef.current = null;
       logger.info(`[Mídia] Envio concluído: ${file.name}`);
       // A prova de dono vai pro localStorage: é o que permite "reabrir" este arquivo depois
-      rememberRecentUpload({ id: result.id, name: result.name, size: result.size, claim: result.claim, at: Date.now() });
+      rememberRecentUpload({ id: result.id, name: result.name, size: result.size, claim: result.claim, at: Date.now(), exp: claimExpiry(result.claim) });
       setRecent(loadRecentUploads());
       setPhase({ kind: 'done', file, url: new URL(result.url, window.location.origin).toString(), roomCode });
     } catch (err) {
@@ -463,21 +463,40 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
       {phase.kind === 'pick' && recent.length > 0 && (
         <div className="mt-4 flex flex-col gap-1.5">
           <span className="mt-1 text-[13px] font-semibold">{t('Seus envios recentes')}</span>
-          {recent.map((rec) => (
-            <div key={rec.id} className="flex items-center gap-3 px-3.5 py-2.5 rounded-[12px] bg-lu-bg2 border border-lu-border">
-              <span className="flex text-lu-accent flex-none">
-                <FileVideo size={18} />
-              </span>
-              <div className="flex-1 min-w-0 flex flex-col">
-                <span className="text-[13px] font-semibold truncate">{rec.name}</span>
-                <span className="text-[12px] text-lu-muted tabular">{formatBytes(rec.size)}</span>
+          {recent.map((rec) => {
+            // O prazo vem de dentro do claim (exp): o mesmo relógio que o servidor usa para recusar
+            const hours = rec.exp !== undefined ? Math.max(0, Math.floor((rec.exp - Date.now()) / 3600_000)) : null;
+            const expiry = hours === null ? null : hours >= 1 ? t('expira em {v1} h', { v1: hours }) : t('expira em menos de 1 h');
+            return (
+              <div key={rec.id} className="flex items-center gap-3 px-3.5 py-2.5 rounded-[12px] bg-lu-bg2 border border-lu-border">
+                <span className="flex text-lu-accent flex-none">
+                  <FileVideo size={18} />
+                </span>
+                <div className="flex-1 min-w-0 flex flex-col">
+                  <span className="text-[13px] font-semibold truncate">{rec.name}</span>
+                  <span className="text-[12px] text-lu-muted tabular">
+                    {formatBytes(rec.size)}
+                    {expiry && <span> · {expiry}</span>}
+                  </span>
+                </div>
+                <GhostButton onClick={() => requireName(() => reopenUpload(rec))} className="flex-none">
+                  <History size={16} />
+                  <span>{t('Usar este arquivo')}</span>
+                </GhostButton>
+                <button
+                  type="button"
+                  aria-label={t('Remover da lista')}
+                  onClick={() => {
+                    forgetRecentUpload(rec.id);
+                    setRecent(loadRecentUploads());
+                  }}
+                  className="w-9 h-9 rounded-lg inline-flex items-center justify-center text-lu-muted hover:bg-white/8 flex-none"
+                >
+                  <X size={15} />
+                </button>
               </div>
-              <GhostButton onClick={() => requireName(() => reopenUpload(rec))} className="flex-none">
-                <History size={16} />
-                <span>{t('Usar este arquivo')}</span>
-              </GhostButton>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

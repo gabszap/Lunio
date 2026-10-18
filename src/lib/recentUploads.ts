@@ -13,6 +13,20 @@ export interface RecentUpload {
   claim: string;
   /** Quando o envio terminou (para a lista e para sumir o mais velho). */
   at: number;
+  /** Quando o claim (e o possível reabrir) vence, lido de dentro do claim. Ausente em registros antigos. */
+  exp?: number;
+}
+
+/** Lê o `exp` de dentro do claim assinado (base64url do payload antes do ponto). */
+export function claimExpiry(claim: string): number | undefined {
+  const body = claim.split('.')[0];
+  if (!body) return undefined;
+  try {
+    const payload = JSON.parse(atob(body.replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: unknown };
+    return typeof payload.exp === 'number' ? payload.exp : undefined;
+  } catch {
+    return undefined; // claim malformado: sem prazo à vista, o servidor recusa no reabrir
+  }
 }
 
 const KEY = 'lunio.recentUploads';
