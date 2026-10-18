@@ -83,6 +83,14 @@ describe('envio em pedaços', () => {
     expect(noToken.status).toBe(401);
   });
 
+  it('os metadados guardam o dono do envio e `closedAt` começa em null', async () => {
+    const { body } = await start(100, 'dono.mp4');
+    expect(body.id).toBeTruthy();
+    const meta = JSON.parse(fs.readFileSync(path.join(UPLOADS, body.id, '.meta.json'), 'utf-8'));
+    expect(meta.ownerId).toBe('host1'); // o id do Host que fez o envio
+    expect(meta.closedAt).toBeNull();   // sala de pé: não fechada
+  });
+
   it('sobe em pedaços, confere a posição e entrega o arquivo inteiro e íntegro', async () => {
     const { res, body } = await start(3000, 'serie.mp4');
     expect(res.status).toBe(200);

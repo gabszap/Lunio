@@ -8,13 +8,12 @@ import { sendApiError, sendJson } from '../http';
 import { roomManager } from '../roomServer';
 import { touchCacheFile } from '../cleanup';
 import { MIME_BY_EXT, pruneRoomUploads, safeFileName, UPLOAD_DIR, UPLOAD_META, uploadsInProgress } from '../media/uploads';
+import { uploadIndex } from '../media/uploadIndex';
 
 /** Salas com um envio em andamento (1 por vez por sala). */
 const roomsUploading = new Set<string>();
 /** Bytes que os envios em andamento ainda vão escrever (declarados − já recebidos). */
 const pendingBytes = new Map<string, number>();
-/** Última vez que cada envio foi marcado como lido (evita um utimes a cada pedido de Range). */
-const touchedAt = new Map<string, number>();
 
 // ───────────── envio em pedaços (resiste ao limite de corpo do proxy e permite retomar) ─────────────
 
@@ -22,6 +21,7 @@ const touchedAt = new Map<string, number>();
 interface UploadSession {
   id: string;
   roomId: string;
+  ownerId: string;
   name: string;
   size: number;
   received: number;
@@ -39,7 +39,7 @@ const MAX_CHUNK_BYTES = 96 * 1024 * 1024;
 function writeSessionMeta(s: UploadSession, complete: boolean) {
   fs.writeFileSync(
     path.join(s.dir, UPLOAD_META),
-    JSON.stringify({ roomId: s.roomId, name: s.name, createdAt: s.lastActivity, declaredSize: s.size, received: s.received, complete })
+    JSON.stringify({ roomId: s.roomId, name: s.name, createdAt: s.lastActivity, declaredSize: s.size, received: s.received, complete, ownerId: s.ownerId, closedAt: null })
   );
 }
 
@@ -69,6 +69,7 @@ function findSession(id: string, roomId: string): UploadSession | null {
     const s: UploadSession = {
       id,
       roomId,
+      ownerId: typeof meta.ownerId === 'string' ? meta.ownerId : '',
       name,
       size: Number(meta.declaredSize) || 0,
       received: Math.max(0, Number(meta.received) || 0),
@@ -91,7 +92,7 @@ function jsonBody(res: ServerResponse, status: number, body: unknown) {
   sendJson(res, status, body);
 }
 
-function handleStart(req: IncomingMessage, res: ServerResponse, roomId: string) {
+function handleStart(req: IncomingMessage, res: ServerResponse, roomId: string, ownerId: string) {
   const url = new URL(req.url || '', 'http://localhost');
   const name = safeFileName(url.searchParams.get('name') || 'video');
   const size = Number(url.searchParams.get('size'));
@@ -122,7 +123,7 @@ function handleStart(req: IncomingMessage, res: ServerResponse, roomId: string) 
   const file = path.join(dir, name);
   if (path.dirname(file) !== dir) return sendApiError(res, 400, 'bad_request');
   fs.mkdirSync(dir, { recursive: true });
-  const s: UploadSession = { id, roomId, name, size, received: 0, dir, file, lastActivity: Date.now(), writing: false };
+  const s: UploadSession = { id, roomId, ownerId, name, size, received: 0, dir, file, lastActivity: Date.now(), writing: false };
   try {
     writeSessionMeta(s, false);
     fs.writeFileSync(file, '');
@@ -239,7 +240,7 @@ export function handleUploadApi(req: IncomingMessage, res: ServerResponse) {
   }
   if (parts[0] === 'start' && parts.length === 1) {
     if (req.method !== 'POST') return sendApiError(res, 405, 'method_not_allowed');
-    return handleStart(req, res, roomId);
+    return handleStart(req, res, roomId, access.userId!);
   }
   if (!/^[a-f0-9]{16}$/.test(parts[0]) || parts.length > 2) return sendApiError(res, 404, 'not_found');
 
@@ -360,7 +361,7 @@ export function handleUpload(req: IncomingMessage, res: ServerResponse) {
   try {
     fs.writeFileSync(
       path.join(dir, UPLOAD_META),
-      JSON.stringify({ roomId, name, createdAt: Date.now(), declaredSize: declared })
+      JSON.stringify({ roomId, name, createdAt: Date.now(), declaredSize: declared, ownerId: access.userId, closedAt: null })
     );
   } catch (err) {
     console.error('[Upload] Não foi possível gravar os metadados:', err);
@@ -440,11 +441,7 @@ export function handleUploadServe(req: IncomingMessage, res: ServerResponse) {
   }
 
   // Marca o envio como lido agora (a limpeza por inatividade olha isto), no máximo 1 vez por minuto por envio
-  const lastTouch = touchedAt.get(id) || 0;
-  if (Date.now() - lastTouch > 60_000) {
-    touchedAt.set(id, Date.now());
-    touchCacheFile(filePath);
-  }
+  if (uploadIndex.touch(id, Date.now())) touchCacheFile(filePath);
 
   const total = stat.size;
   res.setHeader('Accept-Ranges', 'bytes');

@@ -15,3 +15,6 @@ __pycache__/
 e2e/.fixtures/
 playwright-report/
 test-results/
+.cortexkit/
+.claude/
+.vscode/

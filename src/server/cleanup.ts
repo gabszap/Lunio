@@ -3,6 +3,7 @@ import path from 'node:path';
 import { config } from './config';
 import { roomManager } from './roomServer';
 import { UPLOAD_DIR, UPLOAD_META } from './media/uploads';
+import { uploadIndex } from './media/uploadIndex';
 
 /**
  * Limpeza automática de disco:
@@ -91,11 +92,13 @@ export function sweepUploads(
     const dir = path.join(dirPath, e.name);
     let roomId: string | undefined;
     let createdAt = 0;
+    let metaClosedAt: number | undefined;
     let incomplete = false;
     try {
       const meta = JSON.parse(fs.readFileSync(path.join(dir, UPLOAD_META), 'utf-8'));
       roomId = typeof meta.roomId === 'string' ? meta.roomId : undefined;
       createdAt = Number(meta.createdAt) || 0;
+      if (typeof meta.closedAt === 'number' && meta.closedAt) metaClosedAt = meta.closedAt; // sala reaberta grava `null`
       incomplete = meta.complete === false;
     } catch {
       // envio antigo, sem metadados
@@ -103,6 +106,7 @@ export function sweepUploads(
     // Envio em pedaços que parou (conexão perdida, aba fechada) e ninguém retomou: não serve para nada e ocupa disco
     if (incomplete && now - newestMtime(dir) > ABANDONED_UPLOAD_MS) {
       removeUploadDir(dir);
+      uploadIndex.forget(e.name);
       removed++;
       console.log(`[Limpeza] Envio incompleto ${e.name} removido (parado há mais de 1 h).`);
       continue;
@@ -112,16 +116,18 @@ export function sweepUploads(
       const idle = now - newestMtime(dir);
       if (idle < idleMs) continue;
       removeUploadDir(dir);
+      uploadIndex.forget(e.name);
       removed++;
       console.log(`[Limpeza] Envio ${e.name} removido (sala ${roomId} aberta, mas ninguém o lê há ${Math.round(idle / 3600_000)} h).`);
       continue;
     }
-    // Sala encerrada: conta a partir de quando fechou. Se o servidor reiniciou e não sabe,
-    // conta a partir do início do processo (nunca apaga antes de dar o prazo inteiro).
-    const closedAt = (roomId && roomManager.getClosedAt(roomId)) || Math.max(startedAt, createdAt);
+    // Sala encerrada: conta a partir de quando fechou — a sala em memória, depois o `closedAt` gravado no
+    // `.meta.json` (sobrevive ao restart). Sem nenhum dos dois: a partir do início do processo (nunca antes do prazo).
+    const closedAt = (roomId && roomManager.getClosedAt(roomId)) || metaClosedAt || Math.max(startedAt, createdAt);
     const lastUse = Math.max(closedAt, newestMtime(dir) > now - BUSY_WINDOW_MS ? now : 0);
     if (now - lastUse < ttlMs) continue;
     removeUploadDir(dir);
+    uploadIndex.forget(e.name);
     removed++;
     console.log(`[Limpeza] Envio ${e.name} removido (sala ${roomId || 'desconhecida'} encerrada).`);
   }

@@ -47,8 +47,8 @@ export const config = {
   maxUploadFileBytes: num('MAX_UPLOAD_FILE_GB', 50) * GB,
   /** Cota total de disco para `.uploads/`. */
   maxUploadDiskBytes: num('MAX_UPLOAD_DISK_GB', 20) * GB,
-  /** Quantas horas um envio de sala encerrada continua no disco. */
-  uploadTtlMs: num('UPLOAD_TTL_HOURS', 6) * 3600 * 1000,
+  /** Quantas horas um envio de sala encerrada continua no disco (contadas do fechamento, gravado em `.meta.json`). */
+  uploadTtlMs: num('UPLOAD_TTL_HOURS', 24) * 3600 * 1000,
   /** Envio de sala que continua aberta, mas que ninguém lê há tanto tempo, também sai. */
   /**
    * Tamanho de cada pedaço do envio. Precisa ficar abaixo do limite de corpo do proxy na frente do servidor (a
