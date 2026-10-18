@@ -71,30 +71,30 @@ describe('pruneRoomUploads: uma sala, um envio', () => {
 });
 
 describe('sweepUploads: validade por último uso', () => {
-  it('sala aberta: sai só se ninguém lê há mais que o prazo; lido recentemente fica', () => {
+  it('sala aberta: sai só se ninguém lê há mais que o prazo; lido recentemente fica', async () => {
     const root = makeUploads();
     roomManager.getOrCreateRoom('ABERTA1'); // sala ativa
     put(root, id(1), 'ABERTA1', 30 * HOUR); // sem leitura há 30 h
     put(root, id(2), 'ABERTA1', 2 * HOUR); // lido há 2 h
 
-    const removed = sweepUploads(Date.now(), root, 6 * HOUR, 24 * HOUR);
+    const removed = await sweepUploads(Date.now(), root, 6 * HOUR, 24 * HOUR);
 
     expect(removed).toBe(1);
     expect(fs.existsSync(path.join(root, id(1)))).toBe(false);
     expect(fs.existsSync(path.join(root, id(2)))).toBe(true);
   });
 
-  it('sala encerrada: só sai depois do prazo pós-fechamento', () => {
+  it('sala encerrada: só sai depois do prazo pós-fechamento', async () => {
     const root = makeUploads();
     put(root, id(1), 'ENCERRADA1', 30 * HOUR);
     // Servidor "acabou de subir": o prazo de 6 h conta do início do processo, então agora ainda não vence...
-    expect(sweepUploads(Date.now(), root, 6 * HOUR, 24 * HOUR)).toBe(0);
+    expect(await sweepUploads(Date.now(), root, 6 * HOUR, 24 * HOUR)).toBe(0);
     // ...e 7 h depois sim.
-    expect(sweepUploads(Date.now() + 7 * HOUR, root, 6 * HOUR, 24 * HOUR)).toBe(1);
+    expect(await sweepUploads(Date.now() + 7 * HOUR, root, 6 * HOUR, 24 * HOUR)).toBe(1);
     expect(fs.readdirSync(root)).toEqual([]);
   });
 
-  it('o relatório da limpeza conta o que saiu dos envios e do cache, e soma desde o início do servidor', () => {
+  it('o relatório da limpeza conta o que saiu dos envios e do cache, e soma desde o início do servidor', async () => {
     const uploads = makeUploads();
     const cacheRoot = makeUploads();
     sweepCache(Date.now(), cacheRoot); // fecha a rodada dos testes anteriores, que também chamaram sweepUploads
@@ -103,7 +103,7 @@ describe('sweepUploads: validade por último uso', () => {
     put(uploads, id(2), 'RELATORIO1', 1 * HOUR); // fica
 
     const before = getCacheStats().totals;
-    expect(sweepUploads(Date.now(), uploads, 6 * HOUR, 24 * HOUR)).toBe(1);
+    expect(await sweepUploads(Date.now(), uploads, 6 * HOUR, 24 * HOUR)).toBe(1);
     // A passada do cache fecha o relatório da rodada (é assim que a limpeza roda: envios e depois cache)
     sweepCache(Date.now(), cacheRoot);
 
@@ -142,7 +142,7 @@ describe('closedAt gravado no disco (sobrevive ao restart)', () => {
     expect(readMeta(path.join(root, id(2))).closedAt).toBeNull();
   });
 
-  it('limpeza conta o prazo do fechamento gravado, mesmo sem a sala na memória (servidor reiniciou)', () => {
+  it('limpeza conta o prazo do fechamento gravado, mesmo sem a sala na memória (servidor reiniciou)', async () => {
     const root = makeUploads();
     const dir = put(root, id(1), 'ENCERRADA9', 8 * HOUR);
     const meta = readMeta(dir);
@@ -152,11 +152,11 @@ describe('closedAt gravado no disco (sobrevive ao restart)', () => {
     fs.utimesSync(path.join(dir, UPLOAD_META), when, when); // o toque de meta não vale como leitura do arquivo
 
     // Sem o closedAt do disco, o prazo contaria do início do processo e o envio ficaria
-    expect(sweepUploads(Date.now(), root, 6 * HOUR, 24 * HOUR)).toBe(1);
+    expect(await sweepUploads(Date.now(), root, 6 * HOUR, 24 * HOUR)).toBe(1);
     expect(fs.readdirSync(root)).toEqual([]);
   });
 
-  it('closedAt null (sala reaberta) não conta como fechamento: vale o comportamento antigo', () => {
+  it('closedAt null (sala reaberta) não conta como fechamento: vale o comportamento antigo', async () => {
     const root = makeUploads();
     const dir = put(root, id(1), 'REABERTA1');
     const meta = readMeta(dir);
@@ -164,21 +164,21 @@ describe('closedAt gravado no disco (sobrevive ao restart)', () => {
     fs.writeFileSync(path.join(dir, UPLOAD_META), JSON.stringify(meta));
 
     // servidor acabou de subir e a sala não está mais lá: conta do início do processo → dentro do prazo
-    expect(sweepUploads(Date.now(), root, 6 * HOUR, 24 * HOUR)).toBe(0);
+    expect(await sweepUploads(Date.now(), root, 6 * HOUR, 24 * HOUR)).toBe(0);
     expect(fs.existsSync(dir)).toBe(true);
   });
 });
 
 describe('uploadIndex: última leitura', () => {
-  it('touch anota (teto de 1/min), lastRead devolve e forget esquece', () => {
+  it('touch anota (teto de 1/min), lastRead devolve e forget esquece', async () => {
     expect(uploadIndex.touch('abc', 1_000_000)).toBe(true);
     expect(uploadIndex.touch('abc', 1_000_001)).toBe(false); // dentro do teto de 1 min
-    expect(uploadIndex.lastRead('abc')).toBe(1_000_000);
+    expect(await uploadIndex.lastRead('abc')).toBe(1_000_000);
 
     expect(uploadIndex.touch('abc', 1_000_000 + 60_000)).toBe(true);
-    expect(uploadIndex.lastRead('abc')).toBe(1_000_000 + 60_000);
+    expect(await uploadIndex.lastRead('abc')).toBe(1_000_000 + 60_000);
 
     uploadIndex.forget('abc');
-    expect(uploadIndex.lastRead('abc')).toBeUndefined();
+    expect(await uploadIndex.lastRead('abc')).toBeUndefined();
   });
 });

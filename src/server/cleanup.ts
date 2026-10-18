@@ -74,12 +74,12 @@ function removeUploadDir(dir: string) {
   pendingUploads.bytes += size;
 }
 
-export function sweepUploads(
+export async function sweepUploads(
   now = Date.now(),
   dirPath = UPLOAD_DIR,
   ttlMs = config.uploadTtlMs,
   idleMs = config.uploadIdleMs
-): number {
+): Promise<number> {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dirPath, { withFileTypes: true });
@@ -111,9 +111,12 @@ export function sweepUploads(
       console.log(`[Limpeza] Envio incompleto ${e.name} removido (parado há mais de 1 h).`);
       continue;
     }
+    const diskLastUse = newestMtime(dir);
+    // Última leitura: o Redis quando soube; o `mtime` como reserva (Redis zerado, sem `REDIS_URL`, envio antigo)
+    const lastRead = (await uploadIndex.lastRead(e.name)) ?? diskLastUse;
     if (roomId && roomManager.isRoomActive(roomId)) {
       // Sala aberta: o envio fica enquanto alguém lê (cada leitura atualiza a data); sem leitura há `idleMs`, sai
-      const idle = now - newestMtime(dir);
+      const idle = now - lastRead;
       if (idle < idleMs) continue;
       removeUploadDir(dir);
       uploadIndex.forget(e.name);
@@ -124,7 +127,7 @@ export function sweepUploads(
     // Sala encerrada: conta a partir de quando fechou — a sala em memória, depois o `closedAt` gravado no
     // `.meta.json` (sobrevive ao restart). Sem nenhum dos dois: a partir do início do processo (nunca antes do prazo).
     const closedAt = (roomId && roomManager.getClosedAt(roomId)) || metaClosedAt || Math.max(startedAt, createdAt);
-    const lastUse = Math.max(closedAt, newestMtime(dir) > now - BUSY_WINDOW_MS ? now : 0);
+    const lastUse = Math.max(closedAt, lastRead, diskLastUse > now - BUSY_WINDOW_MS ? now : 0);
     if (now - lastUse < ttlMs) continue;
     removeUploadDir(dir);
     uploadIndex.forget(e.name);
@@ -304,15 +307,16 @@ let timer: NodeJS.Timeout | null = null;
 /** Roda uma varredura agora e depois a cada 15 min. Idempotente (o plugin do Vite pode registrar mais de uma vez). */
 export function startCleanup() {
   if (timer) return;
-  const run = () => {
+  const run = async () => {
     try {
-      sweepUploads();
+      await sweepUploads();
       sweepCache();
     } catch (err) {
       console.warn('[Limpeza] Falha na varredura:', (err as Error)?.message);
     }
   };
-  setTimeout(run, 5000).unref();
-  timer = setInterval(run, SWEEP_EVERY_MS);
+  void uploadIndex.rebuild(); // repõe o Redis com o que o disco sabe (não-op sem REDIS_URL)
+  setTimeout(() => void run(), 5000).unref();
+  timer = setInterval(() => void run(), SWEEP_EVERY_MS);
   timer.unref();
 }
