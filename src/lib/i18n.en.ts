@@ -272,6 +272,8 @@ export const EN: Record<string, string> = {
   "Não deu pra falar com o Google Drive agora.": "Couldn't reach Google Drive right now.",
   "Não deu pra falar com o servidor.": "Couldn't reach the server.",
   "Não encontrado. Legendas usam o FFmpeg, mais lento.": "Not found. Subtitles use FFmpeg, which is slower.",
+  "Conectado. Envios guardam o último uso e as salas fechadas nele, com fallback para o disco.": "Connected. Uploads keep their last use and closed rooms in it, with disk as fallback.",
+  "Indisponível. O disco sozinho dá conta dos envios; reconexão automática a cada uso.": "Unavailable. The disk alone handles the uploads; reconnects automatically on each use.",
   "Não encontrado. Troca de áudio e leitura de faixas não vão funcionar.": "Not found. Audio switching and track reading won't work.",
   "Não feche esta aba": "Don't close this tab",
   "Não foi possível acessar o vídeo de origem.": "Couldn't access the source video.",

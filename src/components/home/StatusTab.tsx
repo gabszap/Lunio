@@ -24,6 +24,7 @@ interface StatusReport {
   };
   ffmpeg: { found: boolean; version?: string };
   python: { found: boolean; version?: string; tooOld: boolean };
+  redis: { enabled: boolean; connected: boolean };
 }
 
 type Tone = 'success' | 'warning' | 'error';
@@ -169,6 +170,16 @@ export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
         ? t('Versão {version} é antiga (precisa de 3.10+). Legendas usam o FFmpeg, mais lento.', { version: report.python.version ?? '' })
         : t('Não encontrado. Legendas usam o FFmpeg, mais lento.'),
     });
+    if (report.redis.enabled) {
+      components.push({
+        id: 'redis',
+        label: 'Redis',
+        tone: report.redis.connected ? 'success' : 'warning',
+        detail: report.redis.connected
+          ? t('Conectado. Envios guardam o último uso e as salas fechadas nele, com fallback para o disco.')
+          : t('Indisponível. O disco sozinho dá conta dos envios; reconexão automática a cada uso.'),
+      });
+    }
   }
   if (catalogOk !== null) {
     components.push({
