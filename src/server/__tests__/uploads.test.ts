@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { getCacheStats, sweepCache, sweepUploads } from '../cleanup';
 import { pruneRoomUploads, UPLOAD_META, uploadIdFromUrl, uploadsInProgress } from '../media/uploads';
+import { uploadIndex } from '../media/uploadIndex';
 import { roomManager } from '../roomServer';
 
 const HOUR = 3_600_000;
@@ -117,5 +118,67 @@ describe('sweepUploads: validade por último uso', () => {
     const next = getCacheStats(Date.now());
     expect(next.lastSweep).toMatchObject({ uploads: 0, freedBytes: 0 });
     expect(next.totals.items).toBe(before.items + 1);
+  });
+});
+
+describe('closedAt gravado no disco (sobrevive ao restart)', () => {
+  const readMeta = (dir: string) => JSON.parse(fs.readFileSync(path.join(dir, UPLOAD_META), 'utf-8'));
+
+  it('closeRoom grava fechado nos envios da sala; reopenRoom volta a null; outras salas intocadas', () => {
+    const root = makeUploads();
+    put(root, id(1), 'FECHA1');
+    put(root, id(2), 'FECHA1');
+    put(root, id(3), 'OUTRA3');
+
+    uploadIndex.closeRoom('FECHA1', 1234567890, root);
+
+    expect(readMeta(path.join(root, id(1))).closedAt).toBe(1234567890);
+    expect(readMeta(path.join(root, id(2))).closedAt).toBe(1234567890);
+    expect(readMeta(path.join(root, id(3))).closedAt).toBeUndefined(); // de outra sala
+
+    uploadIndex.reopenRoom('FECHA1', root);
+
+    expect(readMeta(path.join(root, id(1))).closedAt).toBeNull();
+    expect(readMeta(path.join(root, id(2))).closedAt).toBeNull();
+  });
+
+  it('limpeza conta o prazo do fechamento gravado, mesmo sem a sala na memória (servidor reiniciou)', () => {
+    const root = makeUploads();
+    const dir = put(root, id(1), 'ENCERRADA9', 8 * HOUR);
+    const meta = readMeta(dir);
+    meta.closedAt = Date.now() - 7 * HOUR;
+    const when = new Date(Date.now() - 7 * HOUR);
+    fs.writeFileSync(path.join(dir, UPLOAD_META), JSON.stringify(meta));
+    fs.utimesSync(path.join(dir, UPLOAD_META), when, when); // o toque de meta não vale como leitura do arquivo
+
+    // Sem o closedAt do disco, o prazo contaria do início do processo e o envio ficaria
+    expect(sweepUploads(Date.now(), root, 6 * HOUR, 24 * HOUR)).toBe(1);
+    expect(fs.readdirSync(root)).toEqual([]);
+  });
+
+  it('closedAt null (sala reaberta) não conta como fechamento: vale o comportamento antigo', () => {
+    const root = makeUploads();
+    const dir = put(root, id(1), 'REABERTA1');
+    const meta = readMeta(dir);
+    meta.closedAt = null;
+    fs.writeFileSync(path.join(dir, UPLOAD_META), JSON.stringify(meta));
+
+    // servidor acabou de subir e a sala não está mais lá: conta do início do processo → dentro do prazo
+    expect(sweepUploads(Date.now(), root, 6 * HOUR, 24 * HOUR)).toBe(0);
+    expect(fs.existsSync(dir)).toBe(true);
+  });
+});
+
+describe('uploadIndex: última leitura', () => {
+  it('touch anota (teto de 1/min), lastRead devolve e forget esquece', () => {
+    expect(uploadIndex.touch('abc', 1_000_000)).toBe(true);
+    expect(uploadIndex.touch('abc', 1_000_001)).toBe(false); // dentro do teto de 1 min
+    expect(uploadIndex.lastRead('abc')).toBe(1_000_000);
+
+    expect(uploadIndex.touch('abc', 1_000_000 + 60_000)).toBe(true);
+    expect(uploadIndex.lastRead('abc')).toBe(1_000_000 + 60_000);
+
+    uploadIndex.forget('abc');
+    expect(uploadIndex.lastRead('abc')).toBeUndefined();
   });
 });

@@ -9,6 +9,8 @@ const UPLOADS = path.resolve(process.cwd(), '.uploads');
 const env = vi.hoisted(() => ({ headroom: 150_000 }));
 process.env.ALLOW_PRIVATE_URLS = '';
 process.env.MAX_UPLOAD_DISK_GB = String((dirSize(UPLOADS) + env.headroom) / 1024 ** 3);
+// O teste não depende de quanto o disco do desenvolvedor tem livre (a checagem real de 5 GB recusaria tudo com 507)
+process.env.MIN_FREE_DISK_GB = '0';
 process.env.SESSION_SECRET = 'segredo-de-teste';
 
 type Api = Awaited<ReturnType<typeof import('./helpers').startApi>>;

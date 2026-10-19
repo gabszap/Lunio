@@ -6,6 +6,7 @@ import { isOriginAllowed } from './cors';
 import { PLAYLIST_MAX_ITEMS, playlistUrlKey } from '../types/sync';
 import { warmUpMedia } from './media/resolver';
 import { pruneRoomUploads, uploadIdFromUrl } from './media/uploads';
+import { uploadIndex } from './media/uploadIndex';
 import type {
   ClientMessage,
   ServerMessage,
@@ -150,6 +151,7 @@ export class RoomManager {
       };
       this.rooms.set(roomId, room);
       this.closedRooms.delete(roomId);
+      uploadIndex.reopenRoom(roomId); // a sala voltou: o envio dela volta a "não fechada"
       console.log(`[WatchParty] 🏠 Nova sala criada: "${roomId}"`);
     } else if (room.cleanupTimer) {
       clearTimeout(room.cleanupTimer);
@@ -376,8 +378,10 @@ export class RoomManager {
               // Sala vazia: encerra após EMPTY_ROOM_TTL_MS (cancelado se alguém reentrar antes)
               if (room.clients.size === 0 && room.pendingLeaves.size === 0) {
                 room.cleanupTimer = setTimeout(() => {
+                  const closedAt = Date.now();
                   this.rooms.delete(roomId);
-                  this.closedRooms.set(roomId, Date.now());
+                  this.closedRooms.set(roomId, closedAt);
+                  uploadIndex.closeRoom(roomId, closedAt); // persiste nos metadados: o prazo sobrevive ao restart
                   console.log(`[WatchParty] 🧹 Sala vazia "${roomId}" encerrada após ${EMPTY_ROOM_TTL_MS / 1000}s sem ninguém.`);
                 }, EMPTY_ROOM_TTL_MS);
               }
