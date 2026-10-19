@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { getCacheStats } from '../cleanup';
 import { roomManager } from '../roomServer';
 import { getTools } from '../tools';
+import { getRedisStatus } from '../media/redis';
 
 /** GET /api/status — FFmpeg e Python foram encontrados? Só versões: o caminho no disco não sai do servidor. Mais: salas, pessoas e tempo no ar. */
 export function handleStatus(_req: IncomingMessage, res: ServerResponse) {
@@ -15,6 +16,7 @@ export function handleStatus(_req: IncomingMessage, res: ServerResponse) {
     cache: getCacheStats(),
     ffmpeg: { found: ffmpeg.found, version: ffmpeg.version },
     python: { found: python.found, version: python.version, tooOld: python.tooOld === true },
+    redis: getRedisStatus(),
   });
 }
 

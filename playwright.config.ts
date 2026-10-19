@@ -39,6 +39,7 @@ export default defineConfig({
         ALLOW_PRIVATE_URLS: '1', // só aqui: o proxy precisa alcançar o fixture em 127.0.0.1
         SESSION_SECRET: 'segredo-e2e',
         UPLOAD_CHUNK_MB: '0.0625', // pedaços de 64 KiB: o envio de teste passa por vários pedidos
+        MIN_FREE_DISK_GB: '0', // o teste não depende do espaço livre da máquina do dev (mesma regra do routes.security.test)
       },
     },
   ],
