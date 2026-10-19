@@ -13,9 +13,9 @@ afterAll(() => {
 });
 
 describe('sem REDIS_URL', () => {
-  it('não há cliente e o índice é o de memória', () => {
+  it('não há cliente e o índice é o de memória', async () => {
     config.redisUrl = undefined;
-    expect(getRedisStatus()).toEqual({ enabled: false, connected: false });
+    expect(await getRedisStatus()).toEqual({ enabled: false, connected: false });
     expect(uploadIndex).toBeInstanceOf(Object);
     expect((uploadIndex as object).constructor.name).toBe('MemoryUploadIndex');
   });
@@ -31,7 +31,7 @@ describe('com REDIS_URL (o sistema cai no disco quando o Redis não responde)', 
     expect(value).toBe('cade o disco'); // caiu no fallback (conexão recusada)
     const hung = await withRedis('a', () => new Promise<string>(() => {})); // sem resposta: o teto de 300 ms decide
     expect(hung).toBe('a');
-    expect(getRedisStatus().enabled).toBe(true);
+    expect((await getRedisStatus()).enabled).toBe(true);
   }, 2_000);
 
   it('índice com Redis funciona do mesmo jeito com o Redis morto (closeRoom grava só no disco)', async () => {
