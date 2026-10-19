@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config';
 import { getAccess } from '../gate';
+import { issueUploadClaim, verifyToken } from '../access';
 import { sendApiError, sendJson } from '../http';
 import { roomManager } from '../roomServer';
 import { touchCacheFile } from '../cleanup';
@@ -133,7 +134,7 @@ function handleStart(req: IncomingMessage, res: ServerResponse, roomId: string, 
   uploadsInProgress.add(id);
   roomsUploading.add(roomId);
   console.log(`[Upload] Envio iniciado: ${name} (${(size / 1024 ** 2).toFixed(1)} MB) → ${id} (sala ${roomId})`);
-  jsonBody(res, 200, { id, chunkSize: Math.min(config.uploadChunkBytes, MAX_CHUNK_BYTES), received: 0 });
+  jsonBody(res, 200, { id, chunkSize: Math.min(config.uploadChunkBytes, MAX_CHUNK_BYTES), received: 0, claim: issueUploadClaim(id, ownerId) });
 }
 
 function handleChunk(req: IncomingMessage, res: ServerResponse, s: UploadSession) {
@@ -216,7 +217,7 @@ function handleFinish(res: ServerResponse, s: UploadSession) {
   console.log(`[Upload] ${s.name} (${(s.size / 1024 ** 2).toFixed(1)} MB) → ${s.id} (sala ${s.roomId})`);
   // Uma sala, um envio: o que a sala não está usando (e não é este) sai agora
   pruneRoomUploads(s.roomId, new Set([...roomManager.referencedUploadIds(s.roomId), s.id]));
-  jsonBody(res, 200, { id: s.id, name: s.name, size: s.size, url: `/api/uploads/${s.id}/${encodeURIComponent(s.name)}` });
+  jsonBody(res, 200, { id: s.id, name: s.name, size: s.size, url: `/api/uploads/${s.id}/${encodeURIComponent(s.name)}`, claim: issueUploadClaim(s.id, s.ownerId) });
 }
 
 /** /api/upload/*: envio inteiro (antigo), início, pedaços, estado, conclusão e cancelamento. Só o Host da sala. */
@@ -408,7 +409,7 @@ export function handleUpload(req: IncomingMessage, res: ServerResponse) {
     console.log(`[Upload] ${name} (${(received / 1024 ** 2).toFixed(1)} MB) → ${id} (sala ${roomId})`);
     // Uma sala, um envio: o que a sala não está usando (e não é este) sai agora
     pruneRoomUploads(roomId, new Set([...roomManager.referencedUploadIds(roomId), id]));
-    sendJson(res, 200, { id, name, size: received, url: `/api/uploads/${id}/${encodeURIComponent(name)}` });
+    sendJson(res, 200, { id, name, size: received, url: `/api/uploads/${id}/${encodeURIComponent(name)}`, claim: issueUploadClaim(id, access.userId) });
   });
   req.pipe(out);
 }
@@ -474,4 +475,75 @@ export function handleUploadServe(req: IncomingMessage, res: ServerResponse) {
   res.setHeader('Content-Length', String(total));
   if (req.method === 'HEAD') return void res.end();
   fs.createReadStream(filePath).pipe(res);
+}
+
+/**
+ * POST /api/uploads/claim { id, claim } — reabrir um envio (ENVIOS-REDIS.md, 4.6).
+ * O navegador guarda o `claim` assinado que recebeu no envio; quem o apresenta recupera o arquivo,
+ * mesmo com a sala encerrada (disco confirmado e `complete`): `closedAt` volta a `null` e, quem
+ * pedir com token de sala de Host ativa e sala diferente, leva o envio para essa sala (regra
+ * "uma sala, um envio" aplicada na sala nova, como em um envio novo).
+ */
+export async function handleUploadClaim(req: IncomingMessage, res: ServerResponse) {
+  if (req.method !== 'POST') {
+    sendApiError(res, 405, 'method_not_allowed');
+    return;
+  }
+  const access = getAccess(req); // token solo ou de sala de quem pede (habilitado no gate)
+  let raw = '';
+  let body: { id?: unknown; claim?: unknown } | null = null;
+  req.on('data', (c: Buffer) => {
+    raw += c.toString();
+    if (raw.length > 64 * 1024) raw = '';
+  });
+  const parse = new Promise<void>((resolve) => req.on('end', resolve));
+  await parse;
+  try {
+    body = JSON.parse(raw || '{}') as { id?: unknown; claim?: unknown };
+  } catch {
+    sendApiError(res, 400, 'bad_request');
+    return;
+  }
+  const id = typeof body.id === 'string' ? body.id : '';
+  const claim = typeof body.claim === 'string' ? body.claim : '';
+  const payload = verifyToken(claim);
+  if (!id || !/^[a-f0-9]{16}$/.test(id) || !payload || payload.k !== 'upload' || payload.id !== id) {
+    sendApiError(res, 403, 'claim_invalid');
+    return;
+  }
+
+  const dir = path.join(UPLOAD_DIR, id);
+  const metaPath = path.join(dir, UPLOAD_META);
+  let meta: Record<string, unknown> | null = null;
+  try {
+    meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as Record<string, unknown>;
+  } catch {
+    // sumiu do disco (envio venceu e saiu na limpeza) ou nunca existiu: o claim não serve
+  }
+  if (!meta || typeof meta.name !== 'string' || meta.complete === false) {
+    sendApiError(res, 404, 'claim_not_found');
+    return;
+  }
+
+  const fromRoomId = typeof meta.roomId === 'string' ? meta.roomId : undefined;
+  let roomId = fromRoomId;
+  if (access?.kind === 'room' && roomManager.isHostMember(access.roomId!, access.userId!)) {
+    roomId = access.roomId; // reabriu estando numa sala nova: o envio passa a ser dela
+  }
+  meta.roomId = roomId;
+  meta.closedAt = null;
+  try {
+    writeUploadMeta(metaPath, meta);
+  } catch (err) {
+    console.error('[Upload] Não foi possível reabrir o envio:', err);
+    sendApiError(res, 500, 'internal');
+    return;
+  }
+  if (roomId !== fromRoomId) uploadIndex.moveRoomUpload(id, fromRoomId, roomId!);
+  // Uma sala, um envio: vale também no reabrir — a sala que ganha o arquivo não fica guardando os velhos
+  if (roomId && roomManager.isRoomActive(roomId)) {
+    pruneRoomUploads(roomId, new Set([...roomManager.referencedUploadIds(roomId), id]));
+  }
+  console.log(`[Upload] Reaberto: ${id} (de ${fromRoomId ?? 'salas perdidas'} → ${roomId})`);
+  jsonBody(res, 200, { id, name: meta.name, size: Number(meta.declaredSize) || 0, url: `/api/uploads/${id}/${encodeURIComponent(String(meta.name))}` });
 }

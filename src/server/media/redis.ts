@@ -33,6 +33,15 @@ function getClient(): Redis | null {
       enableOfflineQueue: false,
       commandTimeout: CEILING_MS,
     });
+    client.on('error', (err) => {
+      // sem ouvinte o ioredis imprime "Unhandled error event"; com ele, avisamos no teto do lastWarn
+      if (Date.now() - lastWarn > WARN_EVERY_MS) {
+        lastWarn = Date.now();
+        console.warn(`[Redis] Falha de conexão (${err.message}); seguindo só com o disco.`);
+      }
+    });
+    // Conecta no arranque: o Status exibe o estado real sem depender de haver tráfego de envios
+    void client.connect().catch(() => undefined); // a falha vira o aviso do 'error' acima
   }
   return client;
 }
@@ -65,8 +74,12 @@ export interface RedisStatus {
   connected: boolean;
 }
 
-export function getRedisStatus(): RedisStatus {
+export async function getRedisStatus(): Promise<RedisStatus> {
   const c = getClient();
+  if (c && c.status === 'end') {
+    // desistiu no arranque (retryStrategy) — tenta de novo a cada consulta de Status
+    void c.connect().catch(() => undefined);
+  }
   return { enabled: c !== null, connected: c !== null && c.status === 'ready' };
 }
 

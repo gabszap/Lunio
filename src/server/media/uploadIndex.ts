@@ -29,6 +29,8 @@ export interface UploadIndex {
   reopenRoom(roomId: string, dir?: string): void;
   /** Na subida: repõe no Redis o que varrer o disco já sabe (sets da sala, `closedAt`, último uso). */
   rebuild(dir?: string): Promise<void>;
+  /** O envio mudou de sala (reaberto numa sala nova): muda o id de set (só o Redis se importa). */
+  moveRoomUpload(id: string, fromRoomId: string | undefined, toRoomId: string): void;
 }
 
 export class MemoryUploadIndex implements UploadIndex {
@@ -58,6 +60,8 @@ export class MemoryUploadIndex implements UploadIndex {
   }
 
   async rebuild(): Promise<void> {}
+
+  moveRoomUpload(): void {}
 }
 
 /** O mesmo io de disco do `MemoryUploadIndex`, com o Redis levando as chaves quentes por cima (fire-and-forget). */
@@ -123,6 +127,16 @@ export class RedisUploadIndex implements UploadIndex {
           // sem metadados legíveis: o Redis só não sabe esse envio
         }
       }
+      await pipeline.exec();
+    });
+  }
+
+  moveRoomUpload(id: string, fromRoomId: string | undefined, toRoomId: string): void {
+    void withRedis(undefined, async (r) => {
+      const pipeline = r.pipeline();
+      if (fromRoomId) pipeline.srem(redisKeys.roomUploads(fromRoomId), id);
+      pipeline.sadd(redisKeys.roomUploads(toRoomId), id);
+      pipeline.expire(redisKeys.roomUploads(toRoomId), REDIS_TTL_S);
       await pipeline.exec();
     });
   }
