@@ -96,6 +96,26 @@ describe('POST /api/uploads/claim (reabrir envio)', () => {
     expect(meta.closedAt).toBeNull();
   });
 
+  it('reabrir numa sala de Host ativa vale a regra "uma sala, um envio": o envio velho da sala sai', async () => {
+    const fs = await import('node:fs');
+    // o CLAIMB2 já tinha um envio na cara dura; o claim de outro envio passa a substituí-lo na hora
+    const velho = await uploadViaChunks(hostB.token, 1500, 'velho.mp4');
+    fs.writeFileSync(`${metaDir(velho.start.id)}/.meta.json`, JSON.stringify({ roomId: 'CLAIMB2', name: 'velho.mp4', createdAt: Date.now(), declaredSize: 1500, ownerId: 'hostB', closedAt: null, complete: true }));
+    const novo = await uploadViaChunks(hostA.token, 2000, 'novo.mp4');
+    fs.writeFileSync(`${metaDir(novo.start.id)}/.meta.json`, JSON.stringify({ roomId: 'CLAIMA1', name: 'novo.mp4', createdAt: Date.now(), declaredSize: 2000, ownerId: 'hostA', closedAt: 999, complete: true }));
+
+    const res = await fetch(`${api.base}/api/uploads/claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Lunio-Token': hostB.token },
+      body: JSON.stringify({ id: novo.start.id, claim: novo.finish.claim }),
+    });
+    expect(res.status).toBe(200);
+    const meta = JSON.parse(fs.readFileSync(`${metaDir(novo.start.id)}/.meta.json`, 'utf-8'));
+    expect(meta.roomId).toBe('CLAIMB2');
+    expect(fs.existsSync(metaDir(velho.start.id))).toBe(false); // o velho saiu com o claim, como num envio novo
+    expect(fs.existsSync(metaDir(novo.start.id))).toBe(true);
+  });
+
   it('claim inválido, de outro id ou expirado: 403', async () => {
     const { finish } = await uploadViaChunks(hostA.token);
     const post = (claim: string, id = 'fedcba9876543210') =>

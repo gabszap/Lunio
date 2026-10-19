@@ -540,6 +540,10 @@ export async function handleUploadClaim(req: IncomingMessage, res: ServerRespons
     return;
   }
   if (roomId !== fromRoomId) uploadIndex.moveRoomUpload(id, fromRoomId, roomId!);
+  // Uma sala, um envio: vale também no reabrir — a sala que ganha o arquivo não fica guardando os velhos
+  if (roomId && roomManager.isRoomActive(roomId)) {
+    pruneRoomUploads(roomId, new Set([...roomManager.referencedUploadIds(roomId), id]));
+  }
   console.log(`[Upload] Reaberto: ${id} (de ${fromRoomId ?? 'salas perdidas'} → ${roomId})`);
   jsonBody(res, 200, { id, name: meta.name, size: Number(meta.declaredSize) || 0, url: `/api/uploads/${id}/${encodeURIComponent(String(meta.name))}` });
 }
