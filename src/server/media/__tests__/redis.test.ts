@@ -3,13 +3,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { config } from '../../config';
-import { getRedisStatus, redisKeys, withRedis } from '../redis';
+import { closeRedis, getRedisStatus, redisKeys, withRedis } from '../redis';
 import { RedisUploadIndex, uploadIndex } from '../uploadIndex';
 
 const originalRedisUrl = config.redisUrl;
 
 afterAll(() => {
   config.redisUrl = originalRedisUrl;
+  closeRedis(); // o cliente da porta morta reconecta para sempre; sem desligar, o processo de teste não encerra
 });
 
 describe('sem REDIS_URL', () => {

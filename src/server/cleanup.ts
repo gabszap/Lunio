@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config';
 import { roomManager } from './roomServer';
-import { UPLOAD_DIR, UPLOAD_META } from './media/uploads';
+import { newestMtime, UPLOAD_DIR, UPLOAD_META } from './media/uploads';
 import { uploadIndex } from './media/uploadIndex';
 
 /**
@@ -44,22 +44,6 @@ function dirSize(dir: string): number {
     }
   }
   return total;
-}
-
-function newestMtime(target: string): number {
-  let newest = 0;
-  const walk = (p: string) => {
-    let st: fs.Stats;
-    try {
-      st = fs.statSync(p);
-    } catch {
-      return;
-    }
-    newest = Math.max(newest, st.mtimeMs);
-    if (st.isDirectory()) for (const name of fs.readdirSync(p)) walk(path.join(p, name));
-  };
-  walk(target);
-  return newest;
 }
 
 /** Envios removidos desde a última passada do cache; a passada do cache fecha o relatório (ver `sweepCache`). */
@@ -112,8 +96,9 @@ export async function sweepUploads(
       continue;
     }
     const diskLastUse = newestMtime(dir);
-    // Última leitura: o Redis quando soube; o `mtime` como reserva (Redis zerado, sem `REDIS_URL`, envio antigo)
-    const lastRead = (await uploadIndex.lastRead(e.name)) ?? diskLastUse;
+    // Última leitura: o MAIOR entre o Redis e o `mtime` do disco. O Redis perde tudo quando zera e o `rebuild` só repõe
+    // o que o disco sabia; confiar só nele apagaria um envio lido há minutos. Sem Redis, vale o disco.
+    const lastRead = Math.max((await uploadIndex.lastRead(e.name)) ?? 0, diskLastUse);
     if (roomId && roomManager.isRoomActive(roomId)) {
       // Sala aberta: o envio fica enquanto alguém lê (cada leitura atualiza a data); sem leitura há `idleMs`, sai
       const idle = now - lastRead;

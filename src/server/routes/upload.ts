@@ -6,7 +6,7 @@ import { config } from '../config';
 import { getAccess } from '../gate';
 import { issueUploadClaim, verifyToken } from '../access';
 import { sendApiError, sendJson } from '../http';
-import { roomManager } from '../roomServer';
+import { baseUserId, roomManager } from '../roomServer';
 import { touchCacheFile } from '../cleanup';
 import { MIME_BY_EXT, pruneRoomUploads, safeFileName, UPLOAD_DIR, UPLOAD_META, uploadsInProgress, writeUploadMeta } from '../media/uploads';
 import { uploadIndex } from '../media/uploadIndex';
@@ -244,7 +244,7 @@ export function handleUploadApi(req: IncomingMessage, res: ServerResponse) {
   }
   if (parts[0] === 'start' && parts.length === 1) {
     if (req.method !== 'POST') return sendApiError(res, 405, 'method_not_allowed');
-    return handleStart(req, res, roomId, access.userId!);
+    return handleStart(req, res, roomId, baseUserId(access.userId!));
   }
   if (!/^[a-f0-9]{16}$/.test(parts[0]) || parts.length > 2) return sendApiError(res, 404, 'not_found');
 
@@ -391,7 +391,7 @@ export function handleUpload(req: IncomingMessage, res: ServerResponse) {
   try {
     writeUploadMeta(
       path.join(dir, UPLOAD_META),
-      { roomId, name, createdAt: Date.now(), declaredSize: declared, ownerId: access.userId, closedAt: null }
+      { roomId, name, createdAt: Date.now(), declaredSize: declared, ownerId: baseUserId(access.userId!), closedAt: null }
     );
   } catch (err) {
     console.error('[Upload] Não foi possível gravar os metadados:', err);
@@ -441,7 +441,7 @@ export function handleUpload(req: IncomingMessage, res: ServerResponse) {
     console.log(`[Upload] ${name} (${(received / 1024 ** 2).toFixed(1)} MB) → ${id} (sala ${roomId})`);
     // Uma sala, um envio: o que a sala não está usando (e não é este) sai agora
     pruneRoomUploads(roomId, new Set([...roomManager.referencedUploadIds(roomId), id]));
-    sendJson(res, 200, { id, name, size: received, url: `/api/uploads/${id}/${encodeURIComponent(name)}`, claim: issueUploadClaim(id, access.userId) });
+    sendJson(res, 200, { id, name, size: received, url: `/api/uploads/${id}/${encodeURIComponent(name)}`, claim: issueUploadClaim(id, baseUserId(access.userId!)) });
   });
   req.pipe(out);
 }
@@ -509,12 +509,70 @@ export function handleUploadServe(req: IncomingMessage, res: ServerResponse) {
   fs.createReadStream(filePath).pipe(res);
 }
 
+/** Lê um corpo JSON pequeno. Devolve `null` se for grande demais, inválido ou se a conexão cair antes do fim. */
+async function readJsonBody(req: IncomingMessage, maxBytes = 64 * 1024): Promise<Record<string, unknown> | null> {
+  return new Promise((resolve) => {
+    let raw = '';
+    let tooBig = false;
+    let settled = false;
+    const finish = (value: Record<string, unknown> | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    req.on('data', (chunk: Buffer) => {
+      if (tooBig) return;
+      raw += chunk.toString();
+      if (raw.length > maxBytes) {
+        tooBig = true;
+        raw = '';
+      }
+    });
+    req.on('end', () => {
+      if (tooBig) return finish(null);
+      try {
+        const parsed = JSON.parse(raw || '{}');
+        finish(parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null);
+      } catch {
+        finish(null);
+      }
+    });
+    // Sem isto uma requisição abortada deixava o handler esperando um "end" que nunca vem
+    req.on('error', () => finish(null));
+    req.on('aborted', () => finish(null));
+    req.on('close', () => finish(null));
+  });
+}
+
+const UPLOAD_ID = /^[a-f0-9]{16}$/;
+
+/** O `.meta.json` de um envio completo, ou `null` se sumiu do disco ou ainda está chegando. */
+function readCompleteMeta(id: string): Record<string, unknown> | null {
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(UPLOAD_DIR, id, UPLOAD_META), 'utf-8')) as Record<string, unknown>;
+    return typeof meta.name === 'string' && meta.complete !== false ? meta : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Quando o envio sai na limpeza se ninguém o ler mais. Só se sabe com a sala fechada (`closedAt`): o prazo conta do
+ * fechamento ou da última leitura, o que for mais recente. Com a sala aberta o fim depende de quanto ainda se lê: `null`.
+ */
+async function uploadExpiresAt(id: string, meta: Record<string, unknown>): Promise<number | null> {
+  const closedAt = typeof meta.closedAt === 'number' ? meta.closedAt : 0;
+  if (!closedAt) return null;
+  const lastRead = (await uploadIndex.lastRead(id)) ?? 0;
+  return Math.max(closedAt, lastRead) + config.uploadTtlMs;
+}
+
 /**
  * POST /api/uploads/claim { id, claim } — reabrir um envio (ENVIOS-REDIS.md, 4.6).
- * O navegador guarda o `claim` assinado que recebeu no envio; quem o apresenta recupera o arquivo,
- * mesmo com a sala encerrada (disco confirmado e `complete`): `closedAt` volta a `null` e, quem
- * pedir com token de sala de Host ativa e sala diferente, leva o envio para essa sala (regra
- * "uma sala, um envio" aplicada na sala nova, como em um envio novo).
+ * O navegador guarda o `claim` assinado que recebeu no envio; quem o apresenta recupera o arquivo, mesmo com a sala
+ * encerrada (disco confirmado e `complete`). Quem pedir com token de sala de Host ativa leva o envio para essa sala
+ * ("uma sala, um envio" vale nela). Sem sala nova o arquivo fica solto e o prazo de 24 h recomeça agora: reabrir renova.
+ * A resposta traz um claim novo (o antigo pode estar perto de vencer) e quando o arquivo vence, se já se sabe.
  */
 export async function handleUploadClaim(req: IncomingMessage, res: ServerResponse) {
   if (req.method !== 'POST') {
@@ -522,48 +580,38 @@ export async function handleUploadClaim(req: IncomingMessage, res: ServerRespons
     return;
   }
   const access = getAccess(req); // token solo ou de sala de quem pede (habilitado no gate)
-  let raw = '';
-  let body: { id?: unknown; claim?: unknown } | null = null;
-  req.on('data', (c: Buffer) => {
-    raw += c.toString();
-    if (raw.length > 64 * 1024) raw = '';
-  });
-  const parse = new Promise<void>((resolve) => req.on('end', resolve));
-  await parse;
-  try {
-    body = JSON.parse(raw || '{}') as { id?: unknown; claim?: unknown };
-  } catch {
+  const body = await readJsonBody(req);
+  if (!body) {
     sendApiError(res, 400, 'bad_request');
     return;
   }
   const id = typeof body.id === 'string' ? body.id : '';
   const claim = typeof body.claim === 'string' ? body.claim : '';
   const payload = verifyToken(claim);
-  if (!id || !/^[a-f0-9]{16}$/.test(id) || !payload || payload.k !== 'upload' || payload.id !== id) {
+  if (!UPLOAD_ID.test(id) || !payload || payload.k !== 'upload' || payload.id !== id) {
     sendApiError(res, 403, 'claim_invalid');
     return;
   }
 
-  const dir = path.join(UPLOAD_DIR, id);
-  const metaPath = path.join(dir, UPLOAD_META);
-  let meta: Record<string, unknown> | null = null;
-  try {
-    meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as Record<string, unknown>;
-  } catch {
+  const meta = readCompleteMeta(id);
+  if (!meta) {
     // sumiu do disco (envio venceu e saiu na limpeza) ou nunca existiu: o claim não serve
-  }
-  if (!meta || typeof meta.name !== 'string' || meta.complete === false) {
     sendApiError(res, 404, 'claim_not_found');
     return;
   }
 
+  const metaPath = path.join(UPLOAD_DIR, id, UPLOAD_META);
   const fromRoomId = typeof meta.roomId === 'string' ? meta.roomId : undefined;
   let roomId = fromRoomId;
   if (access?.kind === 'room' && roomManager.isHostMember(access.roomId!, access.userId!)) {
     roomId = access.roomId; // reabriu estando numa sala nova: o envio passa a ser dela
   }
   meta.roomId = roomId;
-  meta.closedAt = null;
+  const attached = Boolean(roomId && roomManager.isRoomActive(roomId));
+  // Numa sala ativa o envio não está "fechado". Sem ela, o prazo recomeça agora (antes voltava a `null` e a limpeza passava
+  // a contar do início do processo, que num servidor no ar há dias já venceu)
+  const now = Date.now();
+  meta.closedAt = attached ? null : now;
   try {
     writeUploadMeta(metaPath, meta);
   } catch (err) {
@@ -571,11 +619,50 @@ export async function handleUploadClaim(req: IncomingMessage, res: ServerRespons
     sendApiError(res, 500, 'internal');
     return;
   }
+  uploadIndex.touch(id, now);
   if (roomId !== fromRoomId) uploadIndex.moveRoomUpload(id, fromRoomId, roomId!);
   // Uma sala, um envio: vale também no reabrir — a sala que ganha o arquivo não fica guardando os velhos
-  if (roomId && roomManager.isRoomActive(roomId)) {
-    pruneRoomUploads(roomId, new Set([...roomManager.referencedUploadIds(roomId), id]));
+  if (attached) {
+    pruneRoomUploads(roomId!, new Set([...roomManager.referencedUploadIds(roomId!), id]));
   }
   console.log(`[Upload] Reaberto: ${id} (de ${fromRoomId ?? 'salas perdidas'} → ${roomId})`);
-  jsonBody(res, 200, { id, name: meta.name, size: Number(meta.declaredSize) || 0, url: `/api/uploads/${id}/${encodeURIComponent(String(meta.name))}` });
+  const ownerId = typeof meta.ownerId === 'string' && meta.ownerId ? meta.ownerId : payload.u;
+  jsonBody(res, 200, {
+    id,
+    name: meta.name,
+    size: Number(meta.declaredSize) || 0,
+    url: `/api/uploads/${id}/${encodeURIComponent(String(meta.name))}`,
+    claim: issueUploadClaim(id, ownerId),
+    expiresAt: attached ? null : now + config.uploadTtlMs,
+  });
+}
+
+/**
+ * POST /api/uploads/status { items: [{ id, claim }] } — o que o navegador precisa para mostrar "Seus envios recentes"
+ * com a verdade do servidor: cada envio ainda existe? e quando vence? (`ok`, `gone` ou `invalid`, que é um claim que
+ * não confere: o navegador o deixa na lista, como no reabrir). No máximo 10 por pedido.
+ */
+export async function handleUploadStatus(req: IncomingMessage, res: ServerResponse) {
+  if (req.method !== 'POST') {
+    sendApiError(res, 405, 'method_not_allowed');
+    return;
+  }
+  const body = await readJsonBody(req);
+  if (!body || !Array.isArray(body.items)) {
+    sendApiError(res, 400, 'bad_request');
+    return;
+  }
+  const items: Array<{ id: string; state: 'ok' | 'gone' | 'invalid'; expiresAt: number | null }> = [];
+  for (const raw of body.items.slice(0, 10)) {
+    const item = (raw && typeof raw === 'object' ? raw : {}) as { id?: unknown; claim?: unknown };
+    const id = typeof item.id === 'string' ? item.id : '';
+    const payload = verifyToken(typeof item.claim === 'string' ? item.claim : '');
+    if (!UPLOAD_ID.test(id) || !payload || payload.k !== 'upload' || payload.id !== id) {
+      items.push({ id, state: 'invalid', expiresAt: null });
+      continue;
+    }
+    const meta = readCompleteMeta(id);
+    items.push(meta ? { id, state: 'ok', expiresAt: await uploadExpiresAt(id, meta) } : { id, state: 'gone', expiresAt: null });
+  }
+  jsonBody(res, 200, { items });
 }

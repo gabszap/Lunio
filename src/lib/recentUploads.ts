@@ -4,6 +4,8 @@
  * Limpar o navegador apaga a lista — o arquivo continua no servidor até o prazo, só não há claim para reabrir.
  */
 
+import { apiFetch } from './access';
+
 export interface RecentUpload {
   /** Id do envio no servidor (`/api/uploads/<id>/<name>`). */
   id: string;
@@ -13,20 +15,12 @@ export interface RecentUpload {
   claim: string;
   /** Quando o envio terminou (para a lista e para sumir o mais velho). */
   at: number;
-  /** Quando o claim (e o possível reabrir) vence, lido de dentro do claim. Ausente em registros antigos. */
-  exp?: number;
-}
-
-/** Lê o `exp` de dentro do claim assinado (base64url do payload antes do ponto). */
-export function claimExpiry(claim: string): number | undefined {
-  const body = claim.split('.')[0];
-  if (!body) return undefined;
-  try {
-    const payload = JSON.parse(atob(body.replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: unknown };
-    return typeof payload.exp === 'number' ? payload.exp : undefined;
-  } catch {
-    return undefined; // claim malformado: sem prazo à vista, o servidor recusa no reabrir
-  }
+  /**
+   * Quando o arquivo sai do servidor, como o servidor informou (reabrir e a verificação da lista). `null`: ainda não se
+   * sabe (a sala do envio está aberta); ausente: nunca perguntamos. O claim não serve de relógio: vale 7 dias e o arquivo
+   * tem prazo próprio, que conta do fechamento da sala.
+   */
+  expiresAt?: number | null;
 }
 
 const KEY = 'lunio.recentUploads';
@@ -50,6 +44,40 @@ export function rememberRecentUpload(rec: RecentUpload): void {
     localStorage.setItem(KEY, JSON.stringify(list.slice(0, MAX))); // a mais velha sai
   } catch {
     // sem espaço no localStorage (modo privado, cookies bloqueados): a lista vive menos, tudo bem
+  }
+}
+
+/** Atualiza um envio da lista (claim novo, prazo) sem mexer na ordem. */
+export function updateRecentUpload(id: string, patch: Partial<RecentUpload>): void {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(loadRecentUploads().map((r) => (r.id === id ? { ...r, ...patch } : r))));
+  } catch {
+    // sem onde guardar: a lista fica como estava
+  }
+}
+
+/**
+ * Pergunta ao servidor o que ainda existe e quando vence (uma só chamada para a lista toda): o que sumiu da lista sai,
+ * o prazo real fica guardado. Falha de rede deixa tudo como está. Claim que o servidor diz inválido também fica: quem
+ * decide é o reabrir, com a frase certa.
+ */
+export async function refreshRecentUploads(): Promise<void> {
+  const list = loadRecentUploads();
+  if (list.length === 0) return;
+  try {
+    const res = await apiFetch('/api/uploads/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: list.map((r) => ({ id: r.id, claim: r.claim })) }),
+    });
+    if (!res.ok) return;
+    const body = (await res.json()) as { items?: Array<{ id: string; state: string; expiresAt: number | null }> };
+    for (const item of body.items ?? []) {
+      if (item.state === 'gone') forgetRecentUpload(item.id);
+      else if (item.state === 'ok') updateRecentUpload(item.id, { expiresAt: item.expiresAt });
+    }
+  } catch {
+    // sem rede: a lista continua como estava
   }
 }
 

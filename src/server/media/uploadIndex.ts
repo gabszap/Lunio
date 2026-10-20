@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { UPLOAD_DIR, UPLOAD_META, writeUploadMeta } from './uploads';
-import { redisKeys, REDIS_TTL_S, withRedis } from './redis';
+import { newestMtime, UPLOAD_DIR, UPLOAD_META, writeUploadMeta } from './uploads';
+import { redisKeys, REDIS_TTL_S, waitRedisReady, withRedis } from './redis';
 import { config } from '../config';
 
 /**
@@ -90,9 +90,12 @@ export class RedisUploadIndex implements UploadIndex {
   closeRoom(roomId: string, closedAt: number, dir = UPLOAD_DIR): void {
     const ids = patchRoomUploadsClosedAt(roomId, dir, closedAt);
     void withRedis(undefined, async (r) => {
-      for (const id of ids) await r.sadd(redisKeys.roomUploads(roomId), id);
-      if (ids.length) await r.expire(redisKeys.roomUploads(roomId), REDIS_TTL_S);
-      await r.set(redisKeys.roomClosed(roomId), String(closedAt), 'PX', TTL_MS);
+      // Um pipeline só: um `await` por id estouraria o teto de 300 ms numa sala com muitos envios e gravaria pela metade
+      const pipeline = r.pipeline();
+      for (const id of ids) pipeline.sadd(redisKeys.roomUploads(roomId), id);
+      if (ids.length) pipeline.expire(redisKeys.roomUploads(roomId), REDIS_TTL_S);
+      pipeline.set(redisKeys.roomClosed(roomId), String(closedAt), 'PX', TTL_MS);
+      await pipeline.exec();
     });
   }
 
@@ -101,7 +104,10 @@ export class RedisUploadIndex implements UploadIndex {
     void withRedis(undefined, (r) => r.del(redisKeys.roomClosed(roomId)));
   }
 
-  /** Varre `.uploads/` e repõe no Redis o que fez sentido desde o último banho dele. */
+  /**
+   * Varre `.uploads/` e repõe no Redis o que o disco sabe. Espera a conexão ficar pronta (sem isso o pipeline falha) e
+   * grava o último uso como o mais recente dentro da pasta, e não o `mtime` da pasta (que só muda quando entra arquivo).
+   */
   async rebuild(dir = UPLOAD_DIR): Promise<void> {
     let entries: fs.Dirent[];
     try {
@@ -109,26 +115,32 @@ export class RedisUploadIndex implements UploadIndex {
     } catch {
       return;
     }
-    await withRedis(undefined, async (r) => {
-      const pipeline = r.pipeline();
-      for (const e of entries) {
-        if (!e.isDirectory() || !/^[a-f0-9]{16}$/.test(e.name)) continue;
-        const metaPath = path.join(dir, e.name, UPLOAD_META);
-        try {
-          const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-          if (typeof meta.roomId !== 'string') continue;
-          if (typeof meta.closedAt === 'number' && meta.closedAt) {
-            pipeline.set(redisKeys.roomClosed(meta.roomId), String(meta.closedAt), 'PX', TTL_MS);
-            pipeline.sadd(redisKeys.roomUploads(meta.roomId), e.name);
+    const ids = entries.filter((e) => e.isDirectory() && /^[a-f0-9]{16}$/.test(e.name)).map((e) => e.name);
+    if (ids.length === 0 || !(await waitRedisReady())) return;
+    for (let i = 0; i < ids.length; i += 100) {
+      const batch = ids.slice(i, i + 100);
+      await withRedis(
+        undefined,
+        async (r) => {
+          const pipeline = r.pipeline();
+          for (const id of batch) {
+            try {
+              const meta = JSON.parse(fs.readFileSync(path.join(dir, id, UPLOAD_META), 'utf-8'));
+              if (typeof meta.roomId !== 'string') continue;
+              if (typeof meta.closedAt === 'number' && meta.closedAt) {
+                pipeline.set(redisKeys.roomClosed(meta.roomId), String(meta.closedAt), 'PX', TTL_MS);
+                pipeline.sadd(redisKeys.roomUploads(meta.roomId), id);
+              }
+              pipeline.set(redisKeys.lastRead(id), String(Math.floor(newestMtime(path.join(dir, id)))), 'PX', TTL_MS);
+            } catch {
+              // sem metadados legíveis: o Redis só não sabe esse envio
+            }
           }
-          const mtimeMs = fs.statSync(path.join(dir, e.name)).mtimeMs; // último uso reconstruído do disco
-          pipeline.set(redisKeys.lastRead(e.name), String(Math.floor(mtimeMs)), 'PX', TTL_MS);
-        } catch {
-          // sem metadados legíveis: o Redis só não sabe esse envio
-        }
-      }
-      await pipeline.exec();
-    });
+          await pipeline.exec();
+        },
+        5000
+      );
+    }
   }
 
   moveRoomUpload(id: string, fromRoomId: string | undefined, toRoomId: string): void {

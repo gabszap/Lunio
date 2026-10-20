@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, Copy, FileVideo, FolderOpen, History, Link, Play, Upload, Users, X, Check } from 'lucide-react';
 import { formatRoomUrl } from '../../lib/roomCode';
 import { copyText, formatBytes } from '../../lib/recent';
-import { forgetRecentUpload, loadRecentUploads, rememberRecentUpload, claimExpiry, type RecentUpload } from '../../lib/recentUploads';
+import { forgetRecentUpload, loadRecentUploads, refreshRecentUploads, rememberRecentUpload, updateRecentUpload, type RecentUpload } from '../../lib/recentUploads';
 import { logger } from '../../lib/logger';
 import { getAccessToken, waitForRoomToken } from '../../lib/access';
 import { UploadError, uploadInChunks, type UploadSession } from '../../lib/chunkedUpload';
@@ -29,7 +29,8 @@ type Phase =
   | { kind: 'too_large'; file: File }
   | { kind: 'uploading'; file: File; loaded: number; speed: number; roomCode: string; retrying?: boolean }
   | { kind: 'reopening'; rec: RecentUpload }
-  | { kind: 'done'; file: File; url: string; roomCode: string }
+  /** `size`: o tamanho real do arquivo no servidor (um envio reaberto não tem o `File` de verdade, só o nome). */
+  | { kind: 'done'; file: File; url: string; roomCode: string; size: number }
   | { kind: 'error'; file: File; message: string }
   | { kind: 'reopen_error'; rec: RecentUpload; message: string };
 
@@ -55,7 +56,16 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
   );
 
   useEffect(() => {
-    if (phase.kind === 'pick') setRecent(loadRecentUploads());
+    if (phase.kind !== 'pick') return;
+    setRecent(loadRecentUploads());
+    // Confere com o servidor o que ainda existe e quando vence: o que já saiu da limpeza some da lista sozinho
+    let cancelled = false;
+    void refreshRecentUploads().then(() => {
+      if (!cancelled) setRecent(loadRecentUploads());
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [phase.kind]);
 
   const choose = (file: File | undefined) => {
@@ -121,9 +131,9 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
       sessionRef.current = null;
       logger.info(`[Mídia] Envio concluído: ${file.name}`);
       // A prova de dono vai pro localStorage: é o que permite "reabrir" este arquivo depois
-      rememberRecentUpload({ id: result.id, name: result.name, size: result.size, claim: result.claim, at: Date.now(), exp: claimExpiry(result.claim) });
+      rememberRecentUpload({ id: result.id, name: result.name, size: result.size, claim: result.claim, at: Date.now() });
       setRecent(loadRecentUploads());
-      setPhase({ kind: 'done', file, url: new URL(result.url, window.location.origin).toString(), roomCode });
+      setPhase({ kind: 'done', file, url: new URL(result.url, window.location.origin).toString(), roomCode, size: result.size ?? file.size });
     } catch (err) {
       abortRef.current = null;
       if ((err as Error)?.name === 'AbortError' || attemptRef.current !== attempt) return;
@@ -219,7 +229,9 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
     }
     logger.info(`[Mídia] Envio reaberto: ${body.name ?? rec.name}`);
     const stub = new File([], body.name ?? rec.name, { type: 'video/mp4', lastModified: rec.at }); // só nome/tipo; o conteúdo está no servidor
-    setPhase({ kind: 'done', file: stub, url: new URL(body.url, window.location.origin).toString(), roomCode });
+    // O claim novo e o prazo que o servidor devolveu substituem os antigos (e o envio sobe para o topo da lista)
+    rememberRecentUpload({ ...rec, name: body.name ?? rec.name, claim: body.claim ?? rec.claim, at: Date.now(), expiresAt: body.expiresAt ?? null });
+    setPhase({ kind: 'done', file: stub, url: new URL(body.url, window.location.origin).toString(), roomCode, size: Number(body.size) || rec.size });
   };
 
   const copyLink = async (code: string) => {
@@ -242,9 +254,9 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
 
   // ───── Enviando / enviado ─────
   if (phase.kind === 'uploading' || phase.kind === 'done') {
-    const total = phase.file.size;
+    const total = phase.kind === 'done' ? phase.size : phase.file.size;
     const loaded = phase.kind === 'done' ? total : phase.loaded;
-    const pct = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
+    const pct = phase.kind === 'done' ? 100 : total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
     const speed = phase.kind === 'uploading' ? phase.speed : 0;
     const eta = speed > 0 ? Math.max(0, (total - loaded) / speed) : 0;
     const etaText = eta < 60 ? t('Falta menos de 1 min') : t('Faltam cerca de {v1} min', { v1: Math.round(eta / 60) });
@@ -464,8 +476,8 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
         <div className="mt-4 flex flex-col gap-1.5">
           <span className="mt-1 text-[13px] font-semibold">{t('Seus envios recentes')}</span>
           {recent.map((rec) => {
-            // O prazo vem de dentro do claim (exp): o mesmo relógio que o servidor usa para recusar
-            const hours = rec.exp !== undefined ? Math.max(0, Math.floor((rec.exp - Date.now()) / 3600_000)) : null;
+            // O prazo é o que o servidor informou (conta do fechamento da sala); sem ele não inventamos um
+            const hours = typeof rec.expiresAt === 'number' ? Math.max(0, Math.floor((rec.expiresAt - Date.now()) / 3600_000)) : null;
             const expiry = hours === null ? null : hours >= 1 ? t('expira em {v1} h', { v1: hours }) : t('expira em menos de 1 h');
             return (
               <div key={rec.id} className="flex items-center gap-3 px-3.5 py-2.5 rounded-[12px] bg-lu-bg2 border border-lu-border">

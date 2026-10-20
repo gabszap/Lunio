@@ -6,6 +6,23 @@ import { issueInternalToken } from '../access';
 export const UPLOAD_DIR = path.resolve(config.rootDir, '.uploads');
 export const UPLOAD_META = '.meta.json';
 
+/** O `mtime` mais recente dentro de um arquivo ou pasta (a pasta sozinha só muda quando entra ou sai arquivo). */
+export function newestMtime(target: string): number {
+  let newest = 0;
+  const walk = (p: string) => {
+    let st: fs.Stats;
+    try {
+      st = fs.statSync(p);
+    } catch {
+      return;
+    }
+    newest = Math.max(newest, st.mtimeMs);
+    if (st.isDirectory()) for (const name of fs.readdirSync(p)) walk(path.join(p, name));
+  };
+  walk(target);
+  return newest;
+}
+
 /** Grava os metadados do envio formatados (2 espaços): o arquivo é inspecionado a olho com frequência. */
 export function writeUploadMeta(metaPath: string, meta: unknown): void {
   fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
