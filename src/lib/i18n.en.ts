@@ -334,7 +334,6 @@ export const EN: Record<string, string> = {
   "Positivo atrasa a legenda; negativo adianta. Atalhos: G e H.": "Positive delays the subtitle; negative advances it. Shortcuts: G and H.",
   "Pra arquivos grandes, tente:": "For large files, try:",
   "Pra assistir com amigos o arquivo sobe pro servidor. Sozinho, ele toca direto daqui, sem enviar nada.": "To watch with friends the file is uploaded to the server. Alone, it plays straight from here, nothing is uploaded.",
-  "Preset Sintel 1080p": "Sintel 1080p preset",
   "Procurar no computador": "Browse your computer",
   "Progresso do envio": "Upload progress",
   "Pronto pra assistir": "Ready to watch",

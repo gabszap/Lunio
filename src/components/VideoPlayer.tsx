@@ -59,7 +59,6 @@ interface VideoPlayerProps {
   subtitles?: SubtitleTrack[];
   audioTracks?: AudioTrackOption[];
   autoPlay?: boolean;
-  onResetToWorkingPreset?: () => void;
   onMediaChangeRequested?: (media: any) => void;
   onOpenRoomLobby?: () => void;
   isWatchPartyOpen?: boolean;
@@ -91,7 +90,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   subtitles: initialSubtitles = [],
   audioTracks: initialAudioTracks = [],
   autoPlay = false,
-  onResetToWorkingPreset,
   onMediaChangeRequested,
   onOpenRoomLobby,
   isWatchPartyOpen: propIsWatchPartyOpen,
@@ -528,14 +526,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               videoEl.load();
             }
           }}
-          onResetToWorkingPreset={
-            onResetToWorkingPreset
-              ? () => {
-                  setPlaybackError(null);
-                  onResetToWorkingPreset();
-                }
-              : undefined
-          }
         />
       )}
 

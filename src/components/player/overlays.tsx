@@ -1,4 +1,4 @@
-import { TriangleAlert, RefreshCw, Play, RotateCcw, X, FastForward, Film, Users, MessageSquare, Pause, Crown, Plus, ChevronLeft } from 'lucide-react';
+import { TriangleAlert, RefreshCw, RotateCcw, X, FastForward, Film, Users, MessageSquare, Pause, Crown, Plus, ChevronLeft } from 'lucide-react';
 import type { SubtitleTrack } from '../../types/media';
 import { formatTime } from '../../lib/chapters';
 import { Avatar, Dot, GhostButton, IconButton, Kbd, PrimaryButton, Spinner } from '../ui';
@@ -105,7 +105,7 @@ export function SubtitleFailurePrompt({ prompt, hasNext, onTryNext, onWatchWitho
   );
 }
 
-export function PlaybackErrorOverlay({ error, onBack, onReconnect, onResetToWorkingPreset }: { error: { title: string; message: string; hint: string; code?: number }; onBack?: () => void; onReconnect: () => void; onResetToWorkingPreset?: () => void }) {
+export function PlaybackErrorOverlay({ error, onBack, onReconnect }: { error: { title: string; message: string; hint: string; code?: number }; onBack?: () => void; onReconnect: () => void }) {
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-lu-video/92 backdrop-blur-md select-text">
       {onBack && (
@@ -130,12 +130,6 @@ export function PlaybackErrorOverlay({ error, onBack, onReconnect, onResetToWork
             <RefreshCw size={18} />
             <span>{t('Reconectar stream')}</span>
           </PrimaryButton>
-          {onResetToWorkingPreset && (
-            <GhostButton onClick={onResetToWorkingPreset}>
-              <Play size={18} />
-              <span>{t('Preset Sintel 1080p')}</span>
-            </GhostButton>
-          )}
         </div>
       </div>
     </div>
