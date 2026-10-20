@@ -5,6 +5,7 @@ import { config } from '../config';
 import { spawnLimited } from '../limits';
 import { ffmpegBin, getTools, killTree } from '../tools';
 import { FFMPEG_NET_ONLY } from './ffmpeg';
+import { ffmpegMbpsFor, recordFfmpegRead } from './ffmpegSpeed';
 import { getMediaFingerprint } from './fingerprint';
 import { SUB_CACHE_DIR } from './paths';
 import { resolveFinalCdnUrl } from './resolver';
@@ -16,6 +17,12 @@ const activeSubtitleProcesses = new Map<string, () => void>();
 /** Quem já está na fila do portão e pode ser promovido quando o usuário pede a mesma faixa que estava só em pré-extração. */
 const gateBumps = new Map<string, () => void>();
 const interactiveWanted = new Set<string>();
+
+/** `[TotalSize] 935568536` (o extrator informa o tamanho do arquivo quando prefere o FFmpeg). */
+function parseTotalSize(stderr: string): number | null {
+  const m = /\[TotalSize\] (\d+)/.exec(stderr);
+  return m ? Number(m[1]) : null;
+}
 
 /** `[HttpStatus] 429 retry-after=15` (linha que o mkv_extractor escreve quando o servidor respondeu com erro). */
 function parseHttpStatus(stderr: string): { status: number; retryAfter?: number } | null {
@@ -43,12 +50,15 @@ async function extractRemoteMkvSubtitle(
   streamUrl: string,
   track: string,
   outputFile: string,
-  extractionKey: string
+  extractionKey: string,
+  ffmpegMbps: number
 ): Promise<string> {
   const args = [
     '-u',
     '-m', 'mkv_extractor',
     streamUrl,
+    // Quanto o FFmpeg lê deste CDN (medido), para o extrator decidir se compensa
+    '--ffmpeg-mbps', ffmpegMbps.toFixed(1),
     // Índice de stream do FFmpeg (o mesmo do /api/tracks), não o TrackNumber do Matroska
     '--stream-index', String(track),
     '-o', outputFile,
@@ -106,7 +116,10 @@ async function extractRemoteMkvSubtitle(
         const errMsg = (stderr || stdout || '').trim();
         const err: any = new Error(`mkv_extractor finalizou com código ${code}: ${errMsg.slice(-300)}`);
         // O extrator avisa (código 4) quando a conta de requisições sai mais cara que ler o arquivo com o FFmpeg
-        if (code === 4 || /\[PreferFfmpeg\]/.test(errMsg)) err.preferFfmpeg = true;
+        if (code === 4 || /\[PreferFfmpeg\]/.test(errMsg)) {
+          err.preferFfmpeg = true;
+          err.totalSize = parseTotalSize(errMsg);
+        }
         const http = parseHttpStatus(errMsg);
         if (http) {
           err.httpStatus = http.status;
@@ -174,6 +187,8 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
                              subCodec.includes('ass') ||
                              subCodec.includes('ssa');
 
+      // Tamanho do arquivo quando o extrator preferiu o FFmpeg: serve para medir a velocidade dessa leitura
+      let fileSizeForSpeed: number | null = null;
       if (isCandidateMkv) {
         try {
           console.log(`[Subtitle] 🚀 Tentando extração remota ultrarrápida (HTTP Range / EBML) para faixa ${trackLabel}...`);
@@ -181,7 +196,7 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
           let content = '';
           for (let attempt = 1; ; attempt++) {
             try {
-              content = await extractRemoteMkvSubtitle(streamUrl, track, tmpFile, extractionKey);
+              content = await extractRemoteMkvSubtitle(streamUrl, track, tmpFile, extractionKey, ffmpegMbpsFor(host));
               break;
             } catch (attemptErr: any) {
               // Sem Python, servidor ocupado ou estouro de tempo não melhora tentando de novo: o retry é para falha de
@@ -218,7 +233,8 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
             throw rateLimitedError(Math.ceil(cooldownRemainingMs(host) / 1000));
           }
           if (mkvErr?.preferFfmpeg) {
-            console.log(`[Subtitle] ↪ CDN sem multi-range: ler o arquivo com o FFmpeg sai mais barato para a faixa ${trackLabel}.`);
+            fileSizeForSpeed = typeof mkvErr.totalSize === 'number' ? mkvErr.totalSize : null;
+            console.log(`[Subtitle] ↪ CDN sem multi-range: ler o arquivo com o FFmpeg sai mais barato para a faixa ${trackLabel} (estimativa de ${ffmpegMbpsFor(host).toFixed(0)} MB/s para ${host}).`);
           } else {
             console.warn(`[Subtitle] ⚠️ mkv_extractor não conseguiu processar faixa ${trackLabel} (${mkvErr.message?.slice(0, 150)}). Acionando fallback FFmpeg...`);
           }
@@ -263,6 +279,7 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
           reject(busy);
           return;
         }
+        const ffmpegStartedAt = Date.now();
         let stderr = '';
         proc.stderr?.on('data', (d) => stderr += d.toString());
         proc.on('error', (err) => reject(err));
@@ -290,6 +307,8 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
               fs.renameSync(tmpFile, cacheFile);
               const content = fs.readFileSync(cacheFile, 'utf-8');
               console.log(`[Subtitle] ✅ Legenda ${trackLabel} extraída com sucesso (${content.length} bytes).`);
+              // O FFmpeg leu o arquivo todo: guarda a velocidade real deste CDN para as próximas decisões
+              if (fileSizeForSpeed) recordFfmpegRead(host, fileSizeForSpeed, Date.now() - ffmpegStartedAt);
               resolve(content);
             } catch {
               resolve(fs.readFileSync(tmpFile, 'utf-8'));

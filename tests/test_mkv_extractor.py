@@ -335,6 +335,26 @@ class TestKeepAliveAndCost(unittest.TestCase):
         self.assertAlmostEqual(est_extractor, requests * 0.2)
         self.assertAlmostEqual(est_ffmpeg, 935_568_536 / extractor_module.FFMPEG_THROUGHPUT_BYTES_PER_S)
 
+    def test_estimate_costs_uses_the_ffmpeg_speed_it_is_given(self):
+        _, _, est_slow = extractor_module.estimate_costs(800_000_000, self._cues(10), 0.2, 10_000_000)
+        _, _, est_fast = extractor_module.estimate_costs(800_000_000, self._cues(10), 0.2, 80_000_000)
+        self.assertAlmostEqual(est_slow, 80.0)
+        self.assertAlmostEqual(est_fast, 10.0)
+
+    def test_a_slower_ffmpeg_makes_the_extractor_worth_it_and_a_faster_one_does_not(self):
+        with mock.patch.object(extractor_module, "supports_multirange", return_value=False),              mock.patch.object(extractor_module, "measure_rtt", return_value=0.2):
+            # ~1086 requisições x 0,2 s = ~217 s no extrator; o FFmpeg lendo 935 MB a 3 MB/s levaria ~312 s: o extrator compensa
+            extractor_module.check_extractor_is_worth_it("http://x/", 935_568_536, self._cues(362), 5, False, 3_000_000)
+            # a 40 MB/s (o padrão) ele leva ~23 s: melhor o FFmpeg
+            with self.assertRaises(PreferFfmpegError):
+                extractor_module.check_extractor_is_worth_it("http://x/", 935_568_536, self._cues(362), 5, False, 40_000_000)
+
+    def test_prefer_ffmpeg_error_carries_the_file_size_for_the_server_to_measure(self):
+        with mock.patch.object(extractor_module, "supports_multirange", return_value=False),              mock.patch.object(extractor_module, "measure_rtt", return_value=0.2):
+            with self.assertRaises(PreferFfmpegError) as ctx:
+                extractor_module.check_extractor_is_worth_it("http://x/", 935_568_536, self._cues(362), 5, False)
+            self.assertEqual(ctx.exception.total_size, 935_568_536)
+
     def test_prefers_ffmpeg_when_many_cues_and_no_multirange(self):
         with mock.patch.object(extractor_module, "supports_multirange", return_value=False),              mock.patch.object(extractor_module, "measure_rtt", return_value=0.2):
             with self.assertRaises(PreferFfmpegError):

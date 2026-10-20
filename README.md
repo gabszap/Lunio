@@ -71,6 +71,7 @@ Copy `.env.example` to `.env`. Locally nothing is required (only the Discord Act
 | `MIN_FREE_DISK_GB` | Free space to keep on the machine's disk; uploads are refused below it (default 5) |
 | `MAX_CACHE_GB` | Limit for `.cache/` (default 10, includes the HLS segments); the least recently used is deleted first |
 | `MAX_FFMPEG_PROCS` | FFmpeg/Python processes at once (default 8) |
+| `FFMPEG_THROUGHPUT_MBPS` | Starting guess (default 40) of how fast FFmpeg reads a CDN, used to choose between the subtitle extractor and reading the whole file. After real reads, the server uses the measured average per CDN host |
 | `ALLOW_PRIVATE_URLS` | Local tests only: lets the proxy reach private network addresses. Keep empty in production |
 | `DISABLE_HMR` | *(optional)* `true` disables Vite hot reload |
 
