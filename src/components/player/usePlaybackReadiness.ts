@@ -4,6 +4,7 @@ import type { PlaybackReadiness } from '../../types/media';
 import { formatTime } from '../../lib/chapters';
 import { logger } from '../../lib/logger';
 import { syncManager } from '../../lib/sync';
+import { clearStartTime, readStartTime } from '../../lib/startTime';
 import { getVideoElement } from './dom';
 
 /**
@@ -51,6 +52,22 @@ export function usePlaybackReadiness(args: {
         }
         setPaused(false);
         return;
+      }
+    }
+
+    // Link com `?t=`: quem tem o controle (sozinho ou Host) abre o vídeo naquele instante, uma vez. Vale mais que a
+    // retomada abaixo. Sala ainda sem estado (não sabemos se somos Host): espera, o espectador segue o Host.
+    const startAt = readStartTime();
+    if (startAt !== null && (!syncManager.getStatus().roomId || syncManager.getRoomState())) {
+      clearStartTime();
+      if (syncManager.isRoomHost()) {
+        const videoEl = getVideoElement(playerRef);
+        hostResumedSrcRef.current = source.src; // o link já decidiu a posição: não retoma a da sala por cima
+        if (videoEl && (videoEl.currentTime || 0) < 1) {
+          const duration = Number.isFinite(videoEl.duration) ? videoEl.duration : Infinity;
+          logger.info(`[Player] Abrindo em ${formatTime(startAt)} (link com ?t=)`);
+          handleSeekRef.current(Math.min(startAt, Math.max(0, duration - 1)));
+        }
       }
     }
 

@@ -4,6 +4,7 @@ import {
   MessageSquare,
   Crown,
   Share2,
+  Clock,
   Check,
   Send,
   X,
@@ -41,6 +42,7 @@ export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClos
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => [...syncManager.getChatHistory()]);
   const [chatInput, setChatInput] = useState<string>('');
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
+  const [copiedAtTime, setCopiedAtTime] = useState<boolean>(false);
   const [customRoomInput, setCustomRoomInput] = useState<string>('');
   const [isChangingRoom, setIsChangingRoom] = useState<boolean>(false);
   const [isEditingProfile, setIsEditingProfile] = useState<boolean>(false);
@@ -170,9 +172,20 @@ export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClos
   const handleCopyLink = () => {
     const url = new URL(window.location.href);
     url.searchParams.set('room', currentRoomId);
+    url.searchParams.delete('t'); // o link da sala não carrega o instante de quem copiou
     navigator.clipboard.writeText(url.toString()).catch(() => {});
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  // Link da sala que abre no instante de agora (`?t=`): vale para o Host ou quem assiste sozinho; espectador segue o Host
+  const handleCopyLinkAtTime = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('room', currentRoomId);
+    url.searchParams.set('t', String(Math.floor(syncManager.getPlayheadSeconds())));
+    navigator.clipboard.writeText(url.toString()).catch(() => {});
+    setCopiedAtTime(true);
+    setTimeout(() => setCopiedAtTime(false), 2000);
   };
 
   const handleSendMessage = (e?: React.FormEvent) => {
@@ -303,6 +316,10 @@ export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClos
               <TextButton tone="text" size="sm" onClick={handleCopyLink} className="!h-10">
                 {copiedLink ? <Check size={16} className="text-lu-success" /> : <Share2 size={16} />}
                 {copiedLink ? t('Link copiado') : 'Compartilhar'}
+              </TextButton>
+              <TextButton tone="text" size="sm" onClick={handleCopyLinkAtTime} className="!h-10" title={t('Copiar o link da sala abrindo neste instante do vídeo')}>
+                {copiedAtTime ? <Check size={16} className="text-lu-success" /> : <Clock size={16} />}
+                {copiedAtTime ? t('Link copiado') : t('Neste instante')}
               </TextButton>
               <TextButton
                 size="sm"
