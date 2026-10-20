@@ -2,10 +2,22 @@ import type { Server as HttpServer } from 'node:http';
 import { startCleanup } from './cleanup';
 import { config } from './config';
 import { installLogRedaction } from './logRedaction';
-import { setupWebSocketServer } from './roomServer';
+import { roomManager, setupWebSocketServer } from './roomServer';
 import { logToolStatus } from './tools';
 
 let started = false;
+let restoring: Promise<void> | null = null;
+
+/** Restaura as salas gravadas no Redis (uma vez). Falha nunca derruba a subida: o servidor segue com as salas vazias. */
+export function ensureRoomsRestored(): Promise<void> {
+  if (!restoring) {
+    restoring = roomManager
+      .restore()
+      .then(() => undefined)
+      .catch((err) => console.warn('[WatchParty] Falha ao restaurar as salas:', (err as Error)?.message));
+  }
+  return restoring;
+}
 
 /**
  * Tudo o que sobe junto com o servidor HTTP, seja `main.ts` ou o plugin do Vite:
@@ -26,4 +38,5 @@ export function startBackend(httpServer: HttpServer | null) {
   }
   logToolStatus();
   startCleanup();
+  void ensureRoomsRestored();
 }

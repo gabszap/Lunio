@@ -2,11 +2,13 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Server as HttpsServer } from 'node:https';
 import { issueRoomToken } from './access';
+import { config } from './config';
 import { isOriginAllowed } from './cors';
 import { PLAYLIST_MAX_ITEMS, playlistUrlKey } from '../types/sync';
 import { warmUpMedia } from './media/resolver';
 import { pruneRoomUploads, uploadIdFromUrl } from './media/uploads';
 import { uploadIndex } from './media/uploadIndex';
+import { roomStore, type PersistedRoom, type RoomStore } from './roomStore';
 import type {
   ClientMessage,
   ServerMessage,
@@ -50,6 +52,12 @@ interface RoomInternal {
   pendingLeaves: Map<string, { timer: NodeJS.Timeout; session: ClientSession }>;
   announcedJoins: Set<string>;
   bannedMembers: Map<string, BannedMember>;
+  /**
+   * Sala restaurada do Redis depois de um restart: até este instante só o Host antigo pode reassumir o controle
+   * (quem reconectar primeiro entra como espectador). Passado o prazo, vale a regra de sempre.
+   */
+  hostGraceUntil?: number;
+  hostGraceTimer?: NodeJS.Timeout;
 }
 
 /** O servidor dá `<id>_tab####` à segunda aba aberta pela mesma pessoa; o ban vale para o ID de verdade (todas as abas). */
@@ -58,10 +66,26 @@ export const baseUserId = (id: string) => id.replace(/_tab\d{4}$/, '');
 /** Quanto tempo uma sala sem ninguém continua existindo (dá tempo de recarregar a página e voltar). */
 const EMPTY_ROOM_TTL_MS = 30 * 1000;
 
+/** Mensagens que mudam o que o Redis guarda (Host, banidos, fila, vídeo e posição). */
+const PERSISTED_MESSAGES = new Set<string>([
+  'playlist:add', 'playlist:remove', 'playlist:move', 'playlist:take', 'media:set',
+  'room:transfer_host', 'room:ban', 'room:unban',
+  'playback:play', 'playback:pause', 'playback:seek', 'playback:rate', 'playback:timeline',
+]);
+/** O Host manda a posição a cada poucos segundos: gravar no máximo a cada 5 s por sala. */
+const TIMELINE_PERSIST_GAP_MS = 5000;
+/** Servidor parado por mais que isto: a sala volta pausada (não finge que o vídeo andou o tempo todo). */
+const RESTORE_MAX_PLAYING_GAP_MS = 120_000;
+
 export class RoomManager {
   private rooms = new Map<string, RoomInternal>();
   // Salas removidas por inatividade (para a Home distinguir "encerrada" de "código errado")
   private closedRooms = new Map<string, number>();
+  private persistTimers = new Map<string, NodeJS.Timeout>();
+  private lastPersisted = new Map<string, number>();
+  private pendingSaves = new Set<Promise<void>>();
+
+  constructor(private readonly store: RoomStore = roomStore) {}
 
   public getRoomInfo(roomId: string): { exists: boolean; closed: boolean; members: number; hasMedia: boolean } {
     const room = this.rooms.get(roomId);
@@ -153,6 +177,7 @@ export class RoomManager {
       this.closedRooms.delete(roomId);
       uploadIndex.reopenRoom(roomId); // a sala voltou: o envio dela volta a "não fechada"
       console.log(`[WatchParty] 🏠 Nova sala criada: "${roomId}"`);
+      this.schedulePersist(room);
     } else if (room.cleanupTimer) {
       clearTimeout(room.cleanupTimer);
       room.cleanupTimer = undefined;
@@ -242,9 +267,17 @@ export class RoomManager {
     }
 
     // Se a sala estava sem host ou com host inválido, atribui ao novo usuário
-    if (!room.hostId || !Array.from(room.clients.values()).some((c) => c.userId === room.hostId)) {
+    const hostBefore = room.hostId;
+    const hostConnected = Array.from(room.clients.values()).some((c) => c.userId === room.hostId);
+    if (room.hostId && user.id === room.hostId) {
+      // O Host antigo voltou (restart do servidor): a janela de prioridade acabou
+      if (room.hostGraceTimer) clearTimeout(room.hostGraceTimer);
+      room.hostGraceTimer = undefined;
+      room.hostGraceUntil = undefined;
+    } else if (!room.hostId || (!hostConnected && !(room.hostGraceUntil !== undefined && Date.now() < room.hostGraceUntil))) {
       room.hostId = user.id;
     }
+    if (room.hostId !== hostBefore) this.schedulePersist(room);
 
     const session: ClientSession = {
       ws,
@@ -368,6 +401,7 @@ export class RoomManager {
                 if (nextClient) {
                   room.hostId = nextClient.userId;
                   nextClient.isHost = true;
+                  this.schedulePersist(room);
                   console.log(`[WatchParty] 👑 Novo Host eleito para sala "${roomId}": "${nextClient.username}"`);
                   this.sendSystemChat(room, `👑 ${nextClient.username} é o novo Host da sala.`);
                 }
@@ -377,13 +411,7 @@ export class RoomManager {
 
               // Sala vazia: encerra após EMPTY_ROOM_TTL_MS (cancelado se alguém reentrar antes)
               if (room.clients.size === 0 && room.pendingLeaves.size === 0) {
-                room.cleanupTimer = setTimeout(() => {
-                  const closedAt = Date.now();
-                  this.rooms.delete(roomId);
-                  this.closedRooms.set(roomId, closedAt);
-                  uploadIndex.closeRoom(roomId, closedAt); // persiste nos metadados: o prazo sobrevive ao restart
-                  console.log(`[WatchParty] 🧹 Sala vazia "${roomId}" encerrada após ${EMPTY_ROOM_TTL_MS / 1000}s sem ninguém.`);
-                }, EMPTY_ROOM_TTL_MS);
+                room.cleanupTimer = setTimeout(() => this.closeEmptyRoom(room), EMPTY_ROOM_TTL_MS);
               }
             }
           }, 4000);
@@ -393,6 +421,131 @@ export class RoomManager {
         break;
       }
     }
+  }
+
+  /** Encerra uma sala que ficou sem ninguém: marca o fechamento (o prazo dos envios conta daqui) e apaga o estado do Redis. */
+  private closeEmptyRoom(room: RoomInternal) {
+    const roomId = room.roomId;
+    // Alguém voltou a tempo (ou a sala já foi trocada): não encerra
+    if (this.rooms.get(roomId) !== room || room.clients.size > 0 || room.pendingLeaves.size > 0) return;
+    if (room.hostGraceTimer) clearTimeout(room.hostGraceTimer);
+    const pending = this.persistTimers.get(roomId);
+    if (pending) clearTimeout(pending);
+    this.persistTimers.delete(roomId);
+    this.lastPersisted.delete(roomId);
+    const closedAt = Date.now();
+    this.rooms.delete(roomId);
+    this.closedRooms.set(roomId, closedAt);
+    uploadIndex.closeRoom(roomId, closedAt); // persiste nos metadados: o prazo sobrevive ao restart
+    this.track(this.store.remove(roomId)); // sala fechada não guarda nem a fila
+    console.log(`[WatchParty] 🧹 Sala vazia "${roomId}" encerrada após ${EMPTY_ROOM_TTL_MS / 1000}s sem ninguém.`);
+  }
+
+  /** O Host antigo não voltou dentro da janela: o primeiro conectado assume (a regra de quando o Host sai). */
+  private electHostIfMissing(room: RoomInternal) {
+    room.hostGraceUntil = undefined;
+    room.hostGraceTimer = undefined;
+    if (this.rooms.get(room.roomId) !== room || room.clients.size === 0) return;
+    if (Array.from(room.clients.values()).some((c) => c.userId === room.hostId)) return;
+    const next = room.clients.values().next().value;
+    if (!next) return;
+    room.hostId = next.userId;
+    next.isHost = true;
+    console.log(`[WatchParty] 👑 O Host antigo não voltou a tempo; novo Host da sala "${room.roomId}": "${next.username}"`);
+    this.sendSystemChat(room, `👑 ${next.username} é o novo Host da sala.`);
+    this.broadcastMembersUpdate(room);
+    this.schedulePersist(room);
+  }
+
+  // ───────────── estado das salas no Redis ─────────────
+
+  private track(save: Promise<void>) {
+    this.pendingSaves.add(save);
+    void save.finally(() => this.pendingSaves.delete(save));
+  }
+
+  /** O que o Redis guarda da sala (a posição é a de agora, com o tempo corrido se estiver tocando). */
+  private snapshot(room: RoomInternal): PersistedRoom {
+    return {
+      v: 1,
+      roomId: room.roomId,
+      hostId: room.hostId,
+      media: room.media,
+      playlist: room.playlist,
+      bans: Array.from(room.bannedMembers.values()),
+      playback: { playing: room.playback.playing, position: this.calculateCurrentPosition(room.playback), rate: room.playback.rate },
+      savedAt: Date.now(),
+    };
+  }
+
+  /** Agenda a gravação (debounce de 250 ms, ou o intervalo pedido): nada aqui espera o Redis. */
+  private schedulePersist(room: RoomInternal, minGapMs = 250) {
+    if (this.persistTimers.has(room.roomId)) return;
+    const wait = Math.max(250, (this.lastPersisted.get(room.roomId) ?? 0) + minGapMs - Date.now());
+    const timer = setTimeout(() => {
+      this.persistTimers.delete(room.roomId);
+      this.persistNow(room.roomId);
+    }, wait);
+    timer.unref?.();
+    this.persistTimers.set(room.roomId, timer);
+  }
+
+  private persistNow(roomId: string): Promise<void> {
+    const room = this.rooms.get(roomId);
+    if (!room) return Promise.resolve();
+    this.lastPersisted.set(roomId, Date.now());
+    const save = this.store.save(this.snapshot(room));
+    this.track(save);
+    return save;
+  }
+
+  /** No encerramento do servidor: grava o estado mais novo de todas as salas e espera o Redis confirmar. */
+  public async flushPersistence(): Promise<void> {
+    for (const timer of this.persistTimers.values()) clearTimeout(timer);
+    this.persistTimers.clear();
+    await Promise.all(Array.from(this.rooms.keys()).map((id) => this.persistNow(id)));
+    await Promise.all(Array.from(this.pendingSaves));
+  }
+
+  /**
+   * Na subida: recria as salas gravadas, sem ninguém conectado. O Host antigo tem `hostGraceMs` de prioridade; sala que
+   * ninguém reocupar encerra sozinha depois da janela mais o prazo de sala vazia. Devolve quantas voltaram.
+   */
+  public async restore(): Promise<number> {
+    const { rooms, closed } = await this.store.loadAll();
+    for (const c of closed) if (!this.closedRooms.has(c.roomId)) this.closedRooms.set(c.roomId, c.at);
+
+    const now = Date.now();
+    let restored = 0;
+    for (const p of rooms) {
+      const downtime = now - p.savedAt;
+      if (this.rooms.has(p.roomId) || downtime > config.roomStateTtlMs) continue;
+      const playing = p.playback.playing && downtime < RESTORE_MAX_PLAYING_GAP_MS;
+      const room: RoomInternal = {
+        roomId: p.roomId,
+        hostId: p.hostId,
+        media: p.media,
+        playlist: p.playlist,
+        playback: { playing, position: p.playback.position + (playing ? (downtime / 1000) * p.playback.rate : 0), rate: p.playback.rate, updatedAt: now },
+        clients: new Map(),
+        chatHistory: [],
+        pendingLeaves: new Map(),
+        announcedJoins: new Set(),
+        bannedMembers: new Map(p.bans.map((b) => [b.userId, b])),
+        hostGraceUntil: now + config.hostGraceMs,
+      };
+      this.rooms.set(p.roomId, room);
+      this.closedRooms.delete(p.roomId);
+      room.hostGraceTimer = setTimeout(() => this.electHostIfMissing(room), config.hostGraceMs);
+      room.cleanupTimer = setTimeout(() => this.closeEmptyRoom(room), config.hostGraceMs + EMPTY_ROOM_TTL_MS);
+      room.hostGraceTimer.unref?.();
+      room.cleanupTimer.unref?.();
+      restored++;
+    }
+    if (restored) {
+      console.log(`[WatchParty] ♻️ ${restored} sala(s) restaurada(s) do Redis; o Host antigo tem ${Math.round(config.hostGraceMs / 1000)} s para voltar.`);
+    }
+    return restored;
   }
 
   public broadcastMembersUpdate(room: RoomInternal) {
@@ -841,6 +994,10 @@ export class RoomManager {
         });
         break;
       }
+    }
+
+    if (PERSISTED_MESSAGES.has(msg.type)) {
+      this.schedulePersist(currentRoom, msg.type === 'playback:timeline' ? TIMELINE_PERSIST_GAP_MS : 250);
     }
   }
 }

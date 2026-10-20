@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { createApiRouter } from './app';
-import { startBackend } from './boot';
+import { ensureRoomsRestored, startBackend } from './boot';
 import { config } from './config';
 import { sendApiError } from './http';
+import { roomManager } from './roomServer';
 import { mountStatic } from './static';
 
 /**
@@ -33,12 +34,18 @@ mountStatic(app, dist);
 const server = http.createServer(app);
 startBackend(server);
 
-server.listen(config.port, config.host, () => {
-  console.log(`[Lunio] Servidor no ar em http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}`);
+// Só abre a porta depois de restaurar as salas do Redis (no máximo ~5 s, e só se o Redis estiver fora): quem reconecta
+// logo depois do restart já encontra a sala, com o Host, os banidos e a fila de antes
+void ensureRoomsRestored().then(() => {
+  server.listen(config.port, config.host, () => {
+    console.log(`[Lunio] Servidor no ar em http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}`);
+  });
 });
 
-const shutdown = (signal: string) => {
+const shutdown = async (signal: string) => {
   console.log(`[Lunio] ${signal} recebido: encerrando…`);
+  // Grava o estado mais novo das salas antes de sair (a posição, a fila e o Host de agora), com teto de 1,5 s
+  await Promise.race([roomManager.flushPersistence(), new Promise((resolve) => setTimeout(resolve, 1500))]).catch(() => undefined);
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 5000).unref();
 };
