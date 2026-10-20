@@ -17,6 +17,8 @@ export const redisKeys = {
   lastRead: (id: string) => `${PREFIX}up:${id}:read`,
   roomUploads: (roomId: string) => `${PREFIX}up:room:${roomId}`,
   roomClosed: (roomId: string) => `${PREFIX}room:closed:${roomId}`,
+  // Prefixo próprio (não `room:<id>:state`): com ids livres, `room:closed:<id>` e `room:<id>:state` podiam se confundir
+  roomState: (roomId: string) => `${PREFIX}roomstate:${roomId}`,
 };
 
 const TTL_MS = 48 * 60 * 60 * 1000;

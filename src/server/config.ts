@@ -56,6 +56,10 @@ export const config = {
    */
   uploadChunkBytes: Math.max(1024, Math.floor(num('UPLOAD_CHUNK_MB', 64) * 1024 * 1024)),
   uploadIdleMs: num('UPLOAD_IDLE_HOURS', 24) * 3600 * 1000,
+  /** Quanto tempo o estado de uma sala fica no Redis sem ser regravado (quem decide se ainda vale é o relógio). */
+  roomStateTtlMs: num('ROOM_STATE_TTL_HOURS', 24) * 3600 * 1000,
+  /** Depois de um restart, o Host antigo tem este tempo de prioridade para voltar antes de outro assumir. */
+  hostGraceMs: num('ROOM_HOST_GRACE_SECONDS', 60) * 1000,
   /** Redis do índice de envios, opcional (`redis://127.0.0.1:6379`): sem isso, só disco. */
   redisUrl: process.env.REDIS_URL?.trim() || undefined,
   /** Um envio só começa se, depois dele, ainda sobrarem tantos GB livres no disco da máquina. */

@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { config } from '../../config';
 import { closeRedis, getRedisStatus, redisKeys, redisRetryStrategy, waitRedisReady, withRedis } from '../redis';
 import { RedisUploadIndex } from '../uploadIndex';
+import { RedisRoomStore, type PersistedRoom } from '../../roomStore';
 
 /**
  * Contra um Redis DE VERDADE: roda só com `REDIS_TEST_URL` (no CI há um service container; localmente
@@ -134,6 +135,31 @@ describe.skipIf(!URL)('com um Redis de verdade', () => {
 
     index.reopenRoom(roomId, root);
     await expect.poll(() => admin.exists(redisKeys.roomClosed(roomId))).toBe(0);
+  });
+
+  it('RedisRoomStore: grava, lê de volta com validade, ignora lixo e remove', async () => {
+    const store = new RedisRoomStore();
+    const mk = (): PersistedRoom => ({
+      v: 1, roomId: `T${rand().slice(0, 10)}`, hostId: 'h', media: null, playlist: [], bans: [],
+      playback: { playing: false, position: 7, rate: 1 }, savedAt: Date.now(),
+    });
+    // Mais que o COUNT do SCAN (200) para provar que a varredura percorre o cursor inteiro
+    const rooms = Array.from({ length: 230 }, mk);
+    for (const r of rooms) keep(redisKeys.roomState(r.roomId));
+    await Promise.all(rooms.map((r) => store.save(r)));
+    const junk = `J${rand().slice(0, 10)}`;
+    keep(redisKeys.roomState(junk));
+    await admin.set(redisKeys.roomState(junk), '{nao e json');
+
+    expect(await admin.pttl(redisKeys.roomState(rooms[0].roomId))).toBeGreaterThan(config.roomStateTtlMs - 60_000);
+
+    const loaded = await store.loadAll();
+    const ids = new Set(loaded.rooms.map((r) => r.roomId));
+    expect(rooms.every((r) => ids.has(r.roomId))).toBe(true);
+    expect(ids.has(junk)).toBe(false);
+
+    await store.remove(rooms[0].roomId);
+    expect(await admin.exists(redisKeys.roomState(rooms[0].roomId))).toBe(0);
   });
 
   it.skipIf(!process.env.REDIS_TEST_ALLOW_KILL)('depois de uma queda da conexão o cliente volta sozinho (e os comandos voltam a funcionar)', async () => {
