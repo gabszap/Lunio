@@ -6,7 +6,8 @@ import { createRoom, newUser, state, waitReady } from './helpers';
 async function open(page: Page, path: string) {
   await page.goto(path);
   const dialog = page.getByRole('dialog');
-  if (await dialog.isVisible({ timeout: 4000 }).catch(() => false)) {
+  // `isVisible` não espera: o diálogo aparece um instante depois de carregar a página
+  if (await dialog.waitFor({ state: 'visible', timeout: 4000 }).then(() => true, () => false)) {
     await dialog.getByLabel('Seu apelido na sala').fill('Ana');
     await dialog.locator('form button[type="submit"]').click();
   }
@@ -39,6 +40,32 @@ test('link com ?t= inválido é ignorado', async ({ browser }) => {
   await open(host.page, `/?room=${code}&t=abc`);
   await waitReady(host.page);
   expect((await state(host.page)).t).toBeLessThan(5);
+
+  await host.context.close();
+});
+
+test('"Neste instante" copia o link da sala com o ?t= do ponto em que o vídeo está', async ({ browser }) => {
+  const host = await newUser(browser);
+  await host.context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const code = await createRoom(host.page, 'Ana');
+  await waitReady(host.page);
+
+  await host.page.evaluate(() => {
+    const v = document.querySelector('video')!;
+    v.muted = true;
+    v.currentTime = 50;
+  });
+  await expect.poll(async () => (await state(host.page)).t, { timeout: 20_000 }).toBeGreaterThan(49);
+
+  await host.page.keyboard.press('w'); // abre o painel da sala
+  await host.page.getByRole('button', { name: 'Neste instante' }).click();
+  await expect(host.page.getByRole('button', { name: 'Link copiado' })).toBeVisible();
+
+  const link = new URL(await host.page.evaluate(() => navigator.clipboard.readText()));
+  expect(link.searchParams.get('room')).toBe(code);
+  const t = Number(link.searchParams.get('t'));
+  expect(t).toBeGreaterThanOrEqual(49);
+  expect(t).toBeLessThan(60);
 
   await host.context.close();
 });

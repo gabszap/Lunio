@@ -258,6 +258,8 @@ export const EN: Record<string, string> = {
   "Limpar busca": "Clear search",
   "Limpar logs": "Clear logs",
   "Link copiado": "Link copied",
+  "Neste instante": "At this moment",
+  "Copiar o link da sala abrindo neste instante do vídeo": "Copy the room link opening at this moment of the video",
   "Link de stream": "Stream link",
   "Link do Drive": "Drive link",
   "Link do YouTube": "YouTube link",

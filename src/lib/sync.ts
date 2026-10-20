@@ -768,6 +768,12 @@ class SyncManager {
 
   // --- Linha do Tempo e Drift Correction (Seções 42 e 43) ---
 
+  /** Onde o vídeo está agora neste navegador (segundos); sem player registrado, a posição esperada da sala. */
+  public getPlayheadSeconds(): number {
+    const t = this.getCurrentTimeCallback ? this.getCurrentTimeCallback() : 0;
+    return Number.isFinite(t) && t > 0 ? t : this.getExpectedPosition();
+  }
+
   /**
    * Posição esperada pela linha do tempo autoritativa do servidor
    */
