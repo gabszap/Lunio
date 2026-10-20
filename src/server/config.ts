@@ -60,6 +60,8 @@ export const config = {
   roomStateTtlMs: num('ROOM_STATE_TTL_HOURS', 24) * 3600 * 1000,
   /** Depois de um restart, o Host antigo tem este tempo de prioridade para voltar antes de outro assumir. */
   hostGraceMs: num('ROOM_HOST_GRACE_SECONDS', 60) * 1000,
+  /** Ponto de partida (MB/s) da estimativa de quanto o FFmpeg lê de um CDN; depois de ler arquivos de verdade vale a média medida por host. */
+  ffmpegThroughputMbps: num('FFMPEG_THROUGHPUT_MBPS', 40),
   /** Redis do índice de envios, opcional (`redis://127.0.0.1:6379`): sem isso, só disco. */
   redisUrl: process.env.REDIS_URL?.trim() || undefined,
   /** Um envio só começa se, depois dele, ainda sobrarem tantos GB livres no disco da máquina. */

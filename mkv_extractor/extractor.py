@@ -44,19 +44,31 @@ HEAD_SCAN_SIZE = 1024 * 1024
 DEFAULT_BATCH_SIZE = 50
 
 # Quanto o FFmpeg lê do CDN por segundo (medido: ~935 MB em ~19 s na VPS) e quanto a conta do extrator pode passar disso
-# antes de valer mais a pena ler o arquivo inteiro.
+# antes de valer mais a pena ler o arquivo inteiro. É o valor padrão: o servidor passa o medido (`--ffmpeg-mbps`).
 FFMPEG_THROUGHPUT_BYTES_PER_S = 40_000_000
 PREFER_FFMPEG_RATIO = 1.3
 
 
-def estimate_costs(total_size: int, track_cues: list[dict[str, Any]], rtt_s: float) -> tuple[int, float, float]:
+def estimate_costs(
+    total_size: int,
+    track_cues: list[dict[str, Any]],
+    rtt_s: float,
+    ffmpeg_bytes_per_s: float = FFMPEG_THROUGHPUT_BYTES_PER_S,
+) -> tuple[int, float, float]:
     """(requisições, segundos do extrator, segundos do FFmpeg). Sem multi-range: cluster + cabeçalho do bloco + bloco."""
     clusters = len({c["cluster_position"] for c in track_cues if c.get("cluster_position") is not None})
     requests = clusters + 2 * len(track_cues)
-    return requests, requests * rtt_s, total_size / FFMPEG_THROUGHPUT_BYTES_PER_S
+    return requests, requests * rtt_s, total_size / ffmpeg_bytes_per_s
 
 
-def check_extractor_is_worth_it(final_url: str, total_size: int, track_cues: list[dict[str, Any]], timeout: int, verbose: bool) -> None:
+def check_extractor_is_worth_it(
+    final_url: str,
+    total_size: int,
+    track_cues: list[dict[str, Any]],
+    timeout: int,
+    verbose: bool,
+    ffmpeg_bytes_per_s: float = FFMPEG_THROUGHPUT_BYTES_PER_S,
+) -> None:
     """
     Sem multi-range, cada bloco de legenda custa idas e voltas sequenciais. Num arquivo com centenas de blocos
     (ex.: release da Netflix) isso passa dos 60 s, enquanto o FFmpeg lê o arquivo todo em ~20 s. Quando a conta
@@ -65,13 +77,19 @@ def check_extractor_is_worth_it(final_url: str, total_size: int, track_cues: lis
     if supports_multirange(final_url, timeout=timeout):
         return
     rtt = measure_rtt(final_url, timeout=timeout)
-    requests, est_extractor, est_ffmpeg = estimate_costs(total_size, track_cues, rtt)
+    requests, est_extractor, est_ffmpeg = estimate_costs(total_size, track_cues, rtt, ffmpeg_bytes_per_s)
     if verbose:
-        print(f"[Custo] {requests} requisições x {rtt * 1000:.0f} ms = ~{est_extractor:.0f} s no extrator; FFmpeg ~{est_ffmpeg:.0f} s")
+        print(
+            f"[Custo] {requests} requisições x {rtt * 1000:.0f} ms = ~{est_extractor:.0f} s no extrator; "
+            f"FFmpeg ~{est_ffmpeg:.0f} s ({ffmpeg_bytes_per_s / 1_000_000:.0f} MB/s)"
+        )
     if est_extractor > est_ffmpeg * PREFER_FFMPEG_RATIO:
-        raise PreferFfmpegError(
+        prefer = PreferFfmpegError(
             f"sem multi-range no CDN: ~{requests} requisições (~{est_extractor:.0f} s) contra ~{est_ffmpeg:.0f} s do FFmpeg"
         )
+        # O servidor usa o tamanho para medir a velocidade real do FFmpeg que vai ler o arquivo todo
+        prefer.total_size = total_size
+        raise prefer
 
 
 def _extract_single_track_data(
@@ -85,6 +103,7 @@ def _extract_single_track_data(
     timeout: int = 60,
     output_path: str | Path | None = None,
     verbose: bool = False,
+    ffmpeg_bytes_per_s: float = FFMPEG_THROUGHPUT_BYTES_PER_S,
 ) -> dict[str, Any]:
     """
     Extrai e reconstrói o arquivo ASS de uma faixa específica usando as Cues já indexadas.
@@ -105,7 +124,7 @@ def _extract_single_track_data(
             f"A faixa #{selected['track_number']} possui {missing_relative} Cues sem CueRelativePosition."
         )
 
-    check_extractor_is_worth_it(final_url, total_size, track_cues, timeout, verbose)
+    check_extractor_is_worth_it(final_url, total_size, track_cues, timeout, verbose, ffmpeg_bytes_per_s)
 
     cluster_headers = fetch_cluster_headers(
         final_url,
@@ -195,6 +214,7 @@ def extract_remote_subtitle(
     timeout: int = 60,
     output_path: str | Path | None = None,
     verbose: bool = False,
+    ffmpeg_bytes_per_s: float = FFMPEG_THROUGHPUT_BYTES_PER_S,
 ) -> dict[str, Any] | list[dict[str, Any]]:
     """
     Extrai legendas ASS embutidas em MKV remoto via HTTP Range sem transferir o vídeo.
@@ -280,6 +300,7 @@ def extract_remote_subtitle(
             timeout=timeout,
             output_path=track_output,
             verbose=verbose,
+            ffmpeg_bytes_per_s=ffmpeg_bytes_per_s,
         )
         results.append(res)
 
@@ -388,6 +409,7 @@ def main():
     parser.add_argument("--stream-index", type=int, default=None, help="Índice global do stream como o FFmpeg numera (0:N)")
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="Tamanho do lote multi-range")
     parser.add_argument("--timeout", type=int, default=60, help="Timeout HTTP em segundos")
+    parser.add_argument("--ffmpeg-mbps", type=float, default=None, help="Velocidade (MB/s) com que o FFmpeg lê este CDN, para decidir entre extrator e FFmpeg (padrão: 40)")
     parser.add_argument("--attachments", metavar="DIR", help="Em vez de legenda, gravar os anexos (fontes) do MKV em DIR e imprimir (JSON) a lista")
     parser.add_argument("--keyframes", action="store_true", help="Em vez de legenda, imprimir (JSON) os keyframes do vídeo lidos dos Cues")
     parser.add_argument("--json", action="store_true", help="Imprimir metadados como JSON")
@@ -417,6 +439,7 @@ def main():
             timeout=args.timeout,
             output_path=args.output,
             verbose=args.verbose,
+            ffmpeg_bytes_per_s=(args.ffmpeg_mbps * 1_000_000 if args.ffmpeg_mbps and args.ffmpeg_mbps > 0 else FFMPEG_THROUGHPUT_BYTES_PER_S),
         )
 
         if args.json:
@@ -446,6 +469,9 @@ def main():
 
     except PreferFfmpegError as prefer:
         sys.stderr.write(f"[PreferFfmpeg] {prefer}\n")
+        total_size = getattr(prefer, "total_size", None)
+        if total_size:
+            sys.stderr.write(f"[TotalSize] {total_size}\n")
         sys.exit(4)
     except RemoteMkvError as r_err:
         sys.stderr.write(f"[RemoteMkvError] {type(r_err).__name__}: {r_err}\n")
