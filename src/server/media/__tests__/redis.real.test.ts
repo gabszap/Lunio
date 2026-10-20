@@ -90,6 +90,17 @@ describe.skipIf(!URL)('com um Redis de verdade', () => {
     expect(await admin.smembers(redisKeys.roomUploads(roomId))).toEqual([id]);
   });
 
+  it('rebuild sem nenhum envio (pasta vazia ou inexistente) também conecta: o Status vê o Redis desde o arranque', async () => {
+    closeRedis(); // servidor recém-subido: nenhum cliente ainda
+    await new RedisUploadIndex().rebuild(path.join(os.tmpdir(), `lunio-nao-existe-${rand()}`));
+    expect((await getRedisStatus()).connected).toBe(true);
+
+    closeRedis();
+    const empty = makeUploadsDir();
+    await new RedisUploadIndex().rebuild(empty);
+    expect((await getRedisStatus()).connected).toBe(true);
+  });
+
   it('touch grava o último uso (com validade), lastRead devolve e forget apaga', async () => {
     const index = new RedisUploadIndex();
     const id = rand();

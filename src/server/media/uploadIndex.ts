@@ -109,6 +109,9 @@ export class RedisUploadIndex implements UploadIndex {
    * grava o último uso como o mais recente dentro da pasta, e não o `mtime` da pasta (que só muda quando entra arquivo).
    */
   async rebuild(dir = UPLOAD_DIR): Promise<void> {
+    // Conecta já, mesmo sem nenhum envio para repor: o Status mostra o estado real do Redis desde o arranque
+    // (o cliente só nasce na primeira chamada; sair antes disto deixava a 1ª consulta dizendo "não conectado")
+    const ready = await waitRedisReady();
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -116,7 +119,7 @@ export class RedisUploadIndex implements UploadIndex {
       return;
     }
     const ids = entries.filter((e) => e.isDirectory() && /^[a-f0-9]{16}$/.test(e.name)).map((e) => e.name);
-    if (ids.length === 0 || !(await waitRedisReady())) return;
+    if (!ready || ids.length === 0) return;
     for (let i = 0; i < ids.length; i += 100) {
       const batch = ids.slice(i, i + 100);
       await withRedis(
