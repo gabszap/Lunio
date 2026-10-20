@@ -21,7 +21,7 @@ Lunio is a web video player built for watching together. Paste a stream link, up
 - **Subtitles** — embedded ASS/SSA rendered with libass (JASSUB, WebAssembly) including embedded fonts; external `.ass`, `.srt` (converted to WebVTT) and `.vtt` by file or URL; sync offset and font size.
 - **Player** — chapter-segmented timeline, "Skip intro/outro" for detected chapters, playback speed, audio delay, volume boost, aspect modes, picture-in-picture, resume where you left off, keyboard shortcuts.
 - **Catalog** *(experimental)* — browse and search movies and series (metadata from Stremio's public Cinemeta addon), with seasons, episodes and a personal list. The catalog only provides metadata: to watch, you still pick a video source.
-- **Status page** *(early version)* — checks the local server, FFmpeg, Python, the catalog and your current room.
+- **Status page** — server health (FFmpeg, Python, Redis), rooms and people online, ping and speed to the server, uptime, version, cache, uploads and disk.
 - **Languages** — Portuguese and English; follows the browser language, switchable on the home screen.
 
 ## Screenshots
@@ -64,7 +64,11 @@ Copy `.env.example` to `.env`. Locally nothing is required (only the Discord Act
 | `FFMPEG_PATH` | *(optional)* FFmpeg executable. Otherwise `ffmpeg` on the `PATH`, then known Windows paths |
 | `PYTHON_PATH` | *(optional)* Python 3.10+ for the subtitle extractor. Otherwise `python3`, `python`, `py -3` |
 | `MAX_UPLOAD_DISK_GB` / `MAX_UPLOAD_FILE_GB` | Disk quota for uploads (default 20) and size limit per upload (default 50) |
-| `UPLOAD_TTL_HOURS` | Hours an upload is kept after its room closes (default 6) |
+| `UPLOAD_TTL_HOURS` | Hours an upload is kept after its room closes (default 24) |
+| `REDIS_URL` | *(optional)* A local Redis, e.g. `redis://127.0.0.1:6379`. Rooms then survive a restart and the upload index is kept in it. See [Redis](#optional-redis) |
+| `ROOM_STATE_TTL_HOURS` / `ROOM_HOST_GRACE_SECONDS` | With Redis: how long a room's saved state is valid (default 24) and how long the previous host has to come back after a restart before someone else takes over (default 60) |
+| `UPLOAD_IDLE_HOURS` | Hours an upload in an open room may go unread before it is removed (default 24) |
+| `MIN_FREE_DISK_GB` | Free space to keep on the machine's disk; uploads are refused below it (default 5) |
 | `MAX_CACHE_GB` | Limit for `.cache/` (default 10, includes the HLS segments); the least recently used is deleted first |
 | `MAX_FFMPEG_PROCS` | FFmpeg/Python processes at once (default 8) |
 | `ALLOW_PRIVATE_URLS` | Local tests only: lets the proxy reach private network addresses. Keep empty in production |
@@ -80,11 +84,11 @@ Copy `.env.example` to `.env`. Locally nothing is required (only the Discord Act
 | `npm run build` | Builds the frontend into `dist/` |
 | `npm run preview` | Vite's preview of an existing `dist/` with the API plugged in (handy for quick checks; production uses `serve`) |
 | `npm run lint` | Type-checks the project (`tsc --noEmit`) |
-| `npm test` | Vitest: room server (join/leave, Host authority, kick/ban, empty rooms) and API routes (SSRF, uploads/quota, Range, subtitle errors). Needs FFmpeg for the media routes |
+| `npm test` | Vitest: room server (join/leave, Host authority, kick/ban, empty rooms) and API routes (SSRF, uploads/quota, Range, subtitle errors). Needs FFmpeg for the media routes. Tests against a real Redis run only with `REDIS_TEST_URL` set |
 | `npm run test:e2e` | Builds, then Playwright E2E against the production server with a local FFmpeg-generated MKV (two users in one room, sync, kick/ban, alternate audio, Host reload). First time: `npx playwright install chromium` |
 | `python -m pytest tests` | Runs the `mkv_extractor` tests |
 
-> The backend lives in `src/server/` and is independent of Vite: `npm run serve` runs it as a plain Express app, and `npm run dev` / `npm run preview` just plug the same router into Vite. In development, editing a server file restarts the dev server (and drops open rooms); in production nothing watches the code, so rooms only drop on a restart or deploy.
+> The backend lives in `src/server/` and is independent of Vite: `npm run serve` runs it as a plain Express app, and `npm run dev` / `npm run preview` just plug the same router into Vite. In development, editing a server file restarts the dev server (and drops open rooms); in production nothing watches the code. With `REDIS_URL` set, rooms survive a restart or deploy (host, bans, queue, video and position are restored; the previous host has 60 s to come back before someone else takes over); without it, rooms drop on a restart.
 
 ## How it works
 
@@ -112,15 +116,16 @@ or plugged into the Vite dev/preview server (vite.config.ts)
 | `GET /api/font?url=&track=` | Extracts an embedded font |
 | `GET /api/resolve?url=` | Resolves Torrentio/debrid redirects to the final CDN URL |
 | `GET /api/room?id=` | Whether a room exists or was closed |
-| `POST /api/upload?name=` | Uploads a file (raw body, up to 50 GB) into `.uploads/` |
+| `POST /api/upload/start`, `PUT /api/upload/<id>?offset=`, `POST /api/upload/<id>/finish`, `DELETE /api/upload/<id>` | Chunked, resumable upload (up to 50 GB) into `.uploads/`. Chunks are 64 MB by default so each request stays under proxies that cap the body (Cloudflare's free plan allows 100 MB) |
+| `POST /api/uploads/claim`, `POST /api/uploads/status` | Reopen a recent upload in a new room, and check whether it is still on the server |
 | `GET /api/uploads/<id>/<name>` | Serves an uploaded file with Range support |
 | `GET /api/drive?url=` | Resolves a Google Drive share link to a playable URL |
 | `POST /api/session` | Session token for watching alone (room members get theirs over the WebSocket). The media routes require it |
-| `GET /api/status` | Whether FFmpeg and Python were found (versions only) |
+| `GET /api/status` | Whether FFmpeg and Python were found (versions only), rooms and people online, uptime, cache and Redis state |
 | `POST /api/token` | Discord OAuth2 code exchange |
 | `WS /api/ws` | Rooms: membership, playback sync, chat, moderation |
 
-Empty rooms are closed about 30 seconds after the last person leaves (`EMPTY_ROOM_TTL_MS` in `src/server/roomServer.ts`).
+Empty rooms are closed about 30 seconds after the last person leaves (`EMPTY_ROOM_TTL_MS` in `src/server/roomServer.ts`). A room restored from Redis that nobody comes back to closes after the host's 60 s grace plus those 30 seconds.
 
 ## Deploying to a Linux server (Ubuntu 24.04)
 
@@ -207,7 +212,22 @@ Caddy gets the certificate by itself and proxies WebSocket with no extra configu
 
 Open `https://lunio.example.com`, go to **Status**: Server, FFmpeg and Python should all be green. Then create a room, open it in a second browser, and switch an audio track.
 
-**Updating:** `cd /opt/lunio/app && sudo -u lunio git pull && sudo -u lunio npm ci && sudo -u lunio npm run build && sudo systemctl restart lunio`. Restarting closes open rooms.
+**Updating:** `cd /opt/lunio/app && sudo -u lunio git pull && sudo -u lunio npm ci && sudo -u lunio npm run build && sudo systemctl restart lunio`. Without `REDIS_URL`, restarting closes open rooms; with it, they come back.
+
+### Optional: Redis
+
+Lunio runs fine without Redis. With it, **rooms survive a restart or deploy**: the host, bans, queue, current video and position are saved and restored before the server accepts connections, and the previous host gets 60 s to come back (anyone reconnecting sooner joins as a viewer). Without it, a restart closes every open room. Chat and who is connected are never saved. Redis also keeps the upload index (last read, rooms, closed marks), which is rebuilt from disk on every start.
+
+Redis is never the source of truth and never blocks the server: each call has a 300 ms ceiling and falls back silently (one log warning per minute). It holds no secrets worth persisting, so run it **in RAM only and bound to localhost**:
+
+This uses Docker; without it, `sudo apt install redis-server` works too, as long as it listens only on `127.0.0.1` and you disable persistence (`save ""`, `appendonly no`).
+
+```bash
+docker run -d --name lunio-redis --restart unless-stopped -p 127.0.0.1:6379:6379 redis:8-alpine \
+  redis-server --save "" --appendonly no --maxmemory 128mb --maxmemory-policy volatile-ttl
+```
+
+Then add `REDIS_URL=redis://127.0.0.1:6379` to `/opt/lunio/app/.env` and `sudo systemctl restart lunio`. **Status** shows "Redis: connected" when it works. Never expose the port publicly.
 
 ## Development on Windows
 
@@ -228,7 +248,7 @@ src/
     ui.tsx                Shared UI primitives (design system)
   lib/                    Sync client, subtitles, media helpers, catalog, Discord
   server/                 Backend: app.ts (API router), main.ts (production entry), routes/ (one file per
-                          endpoint), media/ (FFmpeg remux, tracks, subtitles, cache), roomServer.ts, security
+                          endpoint), media/ (FFmpeg remux, tracks, subtitles, cache), roomServer.ts, roomStore.ts (rooms in Redis), security
 mkv_extractor/            Python extractor for subtitles inside remote MKV files (HTTP Range)
 public/                   Static files: JASSUB (libass), fallback fonts, Sintel sample
 assets/                   README images (readme/) and Discord art (discord/)
@@ -253,7 +273,7 @@ DESIGN.md                 Design system notes
 
 ## Known limitations
 
-- **Catalog** and **Status** are experimental: they work, but are an initial implementation and will change.
+- **Catalog** is experimental: it works, but is an initial implementation and will change.
 - Torrent links and screen sharing appear in the menu as "Coming soon". Torrent needs a torrent engine on the server. Screen sharing is planned on **MoQ/WebTransport** (not WebRTC): `getDisplayMedia()` → WebCodecs → MoQ/WebTransport → relay → viewers, which needs HTTP/3 and a relay on the server.
-- Uploaded files stay in `.uploads/` until you delete them.
+- Uploaded files stay in `.uploads/` until the cleanup removes them: `UPLOAD_TTL_HOURS` after the room closes, or after `UPLOAD_IDLE_HOURS` (24) without being read, and the oldest go first if the disk quota is hit.
 - A ban applies to the browser's identity (kept in `localStorage`): a new tab keeps it, but another browser, a private window or cleared site data gets a new identity. There are no accounts, so that is as far as it goes.

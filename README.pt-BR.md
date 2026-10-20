@@ -21,7 +21,7 @@ O Lunio é um player de vídeo web feito para assistir junto. Cole um link de st
 - **Legendas** — ASS/SSA embutidas renderizadas com libass (JASSUB, WebAssembly), incluindo fontes embutidas; `.ass`, `.srt` (convertida para WebVTT) e `.vtt` externas por arquivo ou URL; ajuste de sincronia e tamanho da fonte.
 - **Player** — timeline dividida por capítulos, "Pular abertura/encerramento" nos capítulos detectados, velocidade, atraso do áudio, volume boost, modos de ajuste de tela, picture-in-picture, continuar de onde parou, atalhos de teclado.
 - **Catálogo** *(experimental)* — navegue e busque filmes e séries (metadados do addon público Cinemeta, do Stremio), com temporadas, episódios e uma lista pessoal. O catálogo só fornece metadados: para assistir, você ainda escolhe uma fonte de vídeo.
-- **Página de status** *(versão inicial)* — verifica o servidor local, o FFmpeg, o Python, o catálogo e a sua sala atual.
+- **Página de status** — saúde do servidor (FFmpeg, Python, Redis), salas e pessoas online, ping e velocidade até o servidor, tempo no ar, versão, cache, envios e disco.
 - **Idiomas** — português e inglês; segue o idioma do navegador e dá para trocar na tela inicial.
 
 ## Capturas de tela
@@ -64,7 +64,11 @@ Copie `.env.example` para `.env`. Localmente nada é obrigatório (só a Ativida
 | `FFMPEG_PATH` | *(opcional)* Executável do FFmpeg. Senão, `ffmpeg` no `PATH` e depois caminhos conhecidos do Windows |
 | `PYTHON_PATH` | *(opcional)* Python 3.10+ do extrator de legendas. Senão, `python3`, `python`, `py -3` |
 | `MAX_UPLOAD_DISK_GB` / `MAX_UPLOAD_FILE_GB` | Cota de disco dos envios (padrão 20) e tamanho máximo de um envio (padrão 50) |
-| `UPLOAD_TTL_HOURS` | Horas que um envio fica depois que a sala fecha (padrão 6) |
+| `UPLOAD_TTL_HOURS` | Horas que um envio fica depois que a sala fecha (padrão 24) |
+| `UPLOAD_IDLE_HOURS` | Horas que um envio de sala aberta pode ficar sem ser lido antes de ser removido (padrão 24) |
+| `MIN_FREE_DISK_GB` | Espaço livre a manter no disco da máquina; abaixo disso os envios são recusados (padrão 5) |
+| `REDIS_URL` | *(opcional)* Um Redis local, ex.: `redis://127.0.0.1:6379`. Com ele as salas sobrevivem a um restart e o índice dos envios fica nele. Veja [Redis](#opcional-redis) |
+| `ROOM_STATE_TTL_HOURS` / `ROOM_HOST_GRACE_SECONDS` | Com Redis: por quanto tempo o estado salvo de uma sala vale (padrão 24) e quanto tempo o Host anterior tem para voltar depois de um restart antes de outra pessoa assumir (padrão 60) |
 | `MAX_CACHE_GB` | Limite de `.cache/` (padrão 10, inclui os segmentos HLS); apaga primeiro o menos usado |
 | `MAX_FFMPEG_PROCS` | Processos FFmpeg/Python ao mesmo tempo (padrão 8) |
 | `ALLOW_PRIVATE_URLS` | Só para testes locais: deixa o proxy alcançar endereços de rede privada. Mantenha vazio em produção |
@@ -80,11 +84,11 @@ Copie `.env.example` para `.env`. Localmente nada é obrigatório (só a Ativida
 | `npm run build` | Gera o frontend em `dist/` |
 | `npm run preview` | Preview do Vite sobre um `dist/` já gerado, com a API plugada (útil para checagens rápidas; produção usa `serve`) |
 | `npm run lint` | Checagem de tipos (`tsc --noEmit`) |
-| `npm test` | Vitest: servidor de salas (entrar/sair, autoridade do Host, kick/ban, sala vazia) e rotas da API (SSRF, envios/cota, Range, erros de legenda). As rotas de mídia precisam do FFmpeg |
+| `npm test` | Vitest: servidor de salas (entrar/sair, autoridade do Host, kick/ban, sala vazia) e rotas da API (SSRF, envios/cota, Range, erros de legenda). As rotas de mídia precisam do FFmpeg. Os testes com um Redis de verdade só rodam com `REDIS_TEST_URL` definida |
 | `npm run test:e2e` | Faz o build e roda o E2E (Playwright) contra o servidor de produção, com um MKV gerado pelo FFmpeg (dois usuários na sala, sincronia, kick/ban, áudio alternativo, reload do Host). Na primeira vez: `npx playwright install chromium` |
 | `python -m pytest tests` | Roda os testes do `mkv_extractor` |
 
-> O backend mora em `src/server/` e não depende do Vite: `npm run serve` roda como um app Express comum, e `npm run dev` / `npm run preview` só plugam o mesmo router no Vite. Em desenvolvimento, editar um arquivo do servidor reinicia o servidor de dev (e derruba as salas abertas); em produção nada observa o código, então as salas só caem num restart ou deploy.
+> O backend mora em `src/server/` e não depende do Vite: `npm run serve` roda como um app Express comum, e `npm run dev` / `npm run preview` só plugam o mesmo router no Vite. Em desenvolvimento, editar um arquivo do servidor reinicia o servidor de dev (e derruba as salas abertas); em produção nada observa o código. Com `REDIS_URL`, as salas sobrevivem a um restart ou deploy (Host, bans, fila, vídeo e posição são restaurados; o Host anterior tem 60 s para voltar antes de outra pessoa assumir); sem ele, as salas caem num restart.
 
 ## Como funciona
 
@@ -112,7 +116,8 @@ ou plugado no servidor de dev/preview do Vite (vite.config.ts)
 | `GET /api/font?url=&track=` | Extrai uma fonte embutida |
 | `GET /api/resolve?url=` | Resolve redirecionamentos do Torrentio/debrid até a URL final da CDN |
 | `GET /api/room?id=` | Se uma sala existe ou foi encerrada |
-| `POST /api/upload?name=` | Envia um arquivo (corpo cru, até 50 GB) para `.uploads/` |
+| `POST /api/upload/start`, `PUT /api/upload/<id>?offset=`, `POST /api/upload/<id>/finish`, `DELETE /api/upload/<id>` | Envio em pedaços e retomável (até 50 GB) para `.uploads/`. Os pedaços são de 64 MB por padrão para cada requisição passar por proxies que limitam o corpo (o plano grátis da Cloudflare aceita 100 MB) |
+| `POST /api/uploads/claim`, `POST /api/uploads/status` | Reabre um envio recente numa sala nova e confere se ele ainda está no servidor |
 | `GET /api/uploads/<id>/<nome>` | Serve um arquivo enviado com suporte a Range |
 | `GET /api/drive?url=` | Resolve um link de compartilhamento do Google Drive para uma URL reproduzível |
 | `POST /api/session` | Token de sessão de quem assiste sozinho (quem está em sala recebe o seu pelo WebSocket). As rotas de mídia exigem o token |
@@ -120,7 +125,7 @@ ou plugado no servidor de dev/preview do Vite (vite.config.ts)
 | `POST /api/token` | Troca do código OAuth2 do Discord |
 | `WS /api/ws` | Salas: participantes, sincronia de reprodução, chat, moderação |
 
-Salas vazias são encerradas cerca de 30 segundos depois que a última pessoa sai (`EMPTY_ROOM_TTL_MS` em `src/server/roomServer.ts`).
+Salas vazias são encerradas cerca de 30 segundos depois que a última pessoa sai (`EMPTY_ROOM_TTL_MS` em `src/server/roomServer.ts`). Uma sala restaurada do Redis a que ninguém volta encerra depois dos 60 s de prioridade do Host mais esses 30 segundos.
 
 ## Deploy em um servidor Linux (Ubuntu 24.04)
 
@@ -207,7 +212,20 @@ O Caddy obtém o certificado sozinho e faz proxy de WebSocket sem configuração
 
 Abra `https://lunio.exemplo.com` e vá em **Status**: Servidor, FFmpeg e Python devem estar verdes. Depois crie uma sala, entre por um segundo navegador e troque a faixa de áudio.
 
-**Atualizar:** `cd /opt/lunio/app && sudo -u lunio git pull && sudo -u lunio npm ci && sudo -u lunio npm run build && sudo systemctl restart lunio`. Reiniciar encerra as salas abertas.
+**Atualizar:** `cd /opt/lunio/app && sudo -u lunio git pull && sudo -u lunio npm ci && sudo -u lunio npm run build && sudo systemctl restart lunio`. Sem `REDIS_URL`, reiniciar encerra as salas abertas; com ele, elas voltam.
+
+### Opcional: Redis
+
+O Lunio funciona sem Redis. Com ele, **as salas sobrevivem a um restart ou deploy**: Host, bans, fila, vídeo atual e posição são salvos e restaurados antes de o servidor aceitar conexões, e o Host anterior tem 60 s para voltar (quem reconecta antes entra como espectador). Sem ele, um restart encerra todas as salas abertas. O chat e quem está conectado nunca são salvos. O Redis também guarda o índice dos envios (último uso, salas, marcas de sala fechada), reconstruído do disco a cada subida.
+
+O Redis nunca é a fonte da verdade e nunca trava o servidor: cada chamada tem teto de 300 ms e cai para o comportamento sem Redis em silêncio (um aviso no log por minuto). Rode-o **só em RAM e preso ao localhost**. Este exemplo usa Docker; sem ele, `sudo apt install redis-server` também serve, desde que escute só em `127.0.0.1` e com a persistência desligada (`save ""`, `appendonly no`):
+
+```bash
+docker run -d --name lunio-redis --restart unless-stopped -p 127.0.0.1:6379:6379 redis:8-alpine \
+  redis-server --save "" --appendonly no --maxmemory 128mb --maxmemory-policy volatile-ttl
+```
+
+Depois coloque `REDIS_URL=redis://127.0.0.1:6379` no `/opt/lunio/app/.env` e rode `sudo systemctl restart lunio`. A aba **Status** mostra "Redis: conectado" quando funciona. Nunca exponha a porta publicamente.
 
 ## Desenvolvimento no Windows
 
@@ -228,7 +246,7 @@ src/
     ui.tsx                Componentes visuais compartilhados (design system)
   lib/                    Cliente de sincronia, legendas, utilitários de mídia, catálogo, Discord
   server/                 Backend: app.ts (router da API), main.ts (entrada de produção), routes/ (um arquivo
-                          por endpoint), media/ (remux FFmpeg, faixas, legendas, cache), roomServer.ts, segurança
+                          por endpoint), media/ (remux FFmpeg, faixas, legendas, cache), roomServer.ts, roomStore.ts (salas no Redis), segurança
 mkv_extractor/            Extrator em Python de legendas de MKV remotos (HTTP Range)
 public/                   Arquivos estáticos: JASSUB (libass), fontes de fallback, exemplo Sintel
 assets/                   Imagens do README (readme/) e arte do Discord (discord/)
@@ -253,7 +271,7 @@ DESIGN.md                 Notas do design system
 
 ## Limitações conhecidas
 
-- **Catálogo** e **Status** são experimentais: funcionam, mas são uma implementação inicial e vão mudar.
+- O **Catálogo** é experimental: funciona, mas é uma implementação inicial e vai mudar.
 - Links de torrent e compartilhamento de tela aparecem no menu como "Em breve". Torrent precisa de um motor de torrent no servidor. O compartilhamento de tela está planejado sobre **MoQ/WebTransport** (não WebRTC): `getDisplayMedia()` → WebCodecs → MoQ/WebTransport → relay → espectadores, o que exige HTTP/3 e um relay no servidor.
-- Arquivos enviados ficam em `.uploads/` até você apagá-los.
+- Arquivos enviados ficam em `.uploads/` até a limpeza removê-los: `UPLOAD_TTL_HOURS` depois que a sala fecha, ou `UPLOAD_IDLE_HOURS` (24) sem leitura, e os mais antigos saem primeiro se a cota de disco for atingida.
 - O ban vale para a identidade do navegador (guardada no `localStorage`): uma aba nova mantém a identidade, mas outro navegador, janela anônima ou dados do site apagados geram uma identidade nova. Não há contas, então é até aí que vai.
