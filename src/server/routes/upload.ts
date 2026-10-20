@@ -250,6 +250,11 @@ export function handleUploadApi(req: IncomingMessage, res: ServerResponse) {
 
   const s = findSession(parts[0], roomId);
   if (!s) {
+    // O envio já concluiu (o finish tira a sessão do mapa): o DELETE apaga o arquivo via meta no disco
+    if (req.method === 'DELETE' && deleteFinishedUpload(parts[0], roomId)) {
+      res.statusCode = 204;
+      return void res.end();
+    }
     req.resume();
     return sendApiError(res, 404, 'not_found');
   }
@@ -302,6 +307,22 @@ function pendingTotal(): number {
   for (const v of pendingBytes.values()) sum += v;
   for (const s of sessions.values()) sum += Math.max(0, s.size - s.received);
   return sum;
+}
+
+/** Apaga um envio já concluído (sem sessão viva) pelo meta no disco. `false` quando não é dele ou sumiu. */
+function deleteFinishedUpload(id: string, roomId: string): boolean {
+  const dir = path.join(UPLOAD_DIR, id);
+  let meta: { roomId: string };
+  try {
+    meta = JSON.parse(fs.readFileSync(path.join(dir, UPLOAD_META), 'utf-8')) as { roomId: string };
+  } catch {
+    return false;
+  }
+  if (meta.roomId !== roomId) return false;
+  fs.rmSync(dir, { recursive: true, force: true });
+  uploadIndex.forget(id);
+  console.log(`[Upload] Envio concluído apagado: ${id} (sala ${roomId})`);
+  return true;
 }
 
 /** Espaço livre do disco da máquina depois de gravar `declared` bytes; os envios não podem deixá-lo abaixo do mínimo. */

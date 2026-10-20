@@ -10,6 +10,7 @@ process.env.ALLOW_PRIVATE_URLS = '';
 type Api = Awaited<ReturnType<typeof import('./helpers').startApi>>;
 let api: Api;
 let helpers: typeof import('./helpers');
+let manager: typeof import('../roomServer').roomManager;
 let host: { token: string };
 let guest: { token: string };
 let soloToken: string;
@@ -24,7 +25,7 @@ beforeAll(async () => {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   helpers = await import('./helpers');
   const { createApiRouter } = await import('../app');
-  const manager = (await import('../roomServer')).roomManager;
+  manager = (await import('../roomServer')).roomManager;
   api = await helpers.startApi(createApiRouter);
   soloToken = (await json(await fetch(`${api.base}/api/session`, { method: 'POST' }))).token;
   host = helpers.joinRoom(manager, 'PEDACOS', 'host1');
@@ -89,6 +90,26 @@ describe('envio em pedaços', () => {
     const meta = JSON.parse(fs.readFileSync(path.join(UPLOADS, body.id, '.meta.json'), 'utf-8'));
     expect(meta.ownerId).toBe('host1'); // o id do Host que fez o envio
     expect(meta.closedAt).toBeNull();   // sala de pé: não fechada
+  });
+
+  it('apagar um envio já concluído (sessão encerrada pelo finish) remove o arquivo via meta do disco', async () => {
+    const { body } = await start(100, 'pronto.mp4');
+    expect((await put(body.id, 0, bytes(100, 0))).status).toBe(200);
+    expect((await finish(body.id)).status).toBe(200);   // concluído: a sessão saiu do mapa
+    expect(fs.existsSync(path.join(UPLOADS, body.id))).toBe(true); // o arquivo segue no disco
+    expect((await cancel(body.id)).status).toBe(204);   // e o DELETE continua apagando
+    expect(fs.existsSync(path.join(UPLOADS, body.id))).toBe(false);
+    expect((await cancel(body.id)).status).toBe(404);   // já foi: 404
+  });
+
+  it('O Host de outra sala não apaga o envio concluído via meta', async () => {
+    const { body } = await start(100, 'alheio.mp4');
+    await put(body.id, 0, bytes(100, 0));
+    await finish(body.id);
+    const otherHost = helpers.joinRoom(manager, 'OUTRASALA', 'hostB');
+    expect((await cancel(body.id, otherHost.token)).status).toBe(404); // a sala não é a do meta
+    expect(fs.existsSync(path.join(UPLOADS, body.id))).toBe(true);    // o arquivo segue
+    expect((await cancel(body.id)).status).toBe(204);                 // o dono apaga; o afterEach cobre o resto
   });
 
   it('sobe em pedaços, confere a posição e entrega o arquivo inteiro e íntegro', async () => {
