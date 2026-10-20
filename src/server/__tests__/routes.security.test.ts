@@ -6,6 +6,12 @@ import { dirSize } from './helpers';
 // A config lê o ambiente ao ser importada: precisa estar pronto antes dos imports dinâmicos abaixo.
 // Cota de envio = o que já existe em .uploads + 150 KB; proxy SEM liberar rede privada (padrão de produção).
 const UPLOADS = path.resolve(process.cwd(), '.uploads');
+// Semente de uso ANTES da config ler a cota: com .uploads vazio, "file acima da cota" seria idêntico ao caso
+// "arquivo maior que a cota inteira" (413 file_over_quota); com uso real assegurado aqui, o teste de cota
+// exercita o 507 (cota ocupada) de verdade, em qualquer máquina.
+const FILLER_DIR = path.join(UPLOADS, 'routes-security-filler');
+fs.mkdirSync(FILLER_DIR, { recursive: true });
+fs.writeFileSync(path.join(FILLER_DIR, 'filler.bin'), Buffer.alloc(110_000, 1));
 const env = vi.hoisted(() => ({ headroom: 150_000 }));
 process.env.ALLOW_PRIVATE_URLS = '';
 process.env.MAX_UPLOAD_DISK_GB = String((dirSize(UPLOADS) + env.headroom) / 1024 ** 3);
@@ -40,6 +46,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await api.close();
   for (const dir of createdUploadDirs) fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(FILLER_DIR, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
 
