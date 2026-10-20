@@ -54,7 +54,7 @@ export const config = {
    * Tamanho de cada pedaço do envio. Precisa ficar abaixo do limite de corpo do proxy na frente do servidor (a
    * Cloudflare gratuita recusa mais de 100 MB por requisição), então um arquivo grande sobe em vários pedaços.
    */
-  uploadChunkBytes: Math.max(1024, Math.floor(num('UPLOAD_CHUNK_MB', 32) * 1024 * 1024)),
+  uploadChunkBytes: Math.max(1024, Math.floor(num('UPLOAD_CHUNK_MB', 64) * 1024 * 1024)),
   uploadIdleMs: num('UPLOAD_IDLE_HOURS', 24) * 3600 * 1000,
   /** Redis do índice de envios, opcional (`redis://127.0.0.1:6379`): sem isso, só disco. */
   redisUrl: process.env.REDIS_URL?.trim() || undefined,
