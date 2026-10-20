@@ -170,6 +170,7 @@ export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClos
   const handleCopyLink = () => {
     const url = new URL(window.location.href);
     url.searchParams.set('room', currentRoomId);
+    url.searchParams.delete('t'); // o link da sala não carrega o instante de quem copiou
     navigator.clipboard.writeText(url.toString()).catch(() => {});
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
