@@ -69,8 +69,11 @@ export function apiGate(req: IncomingMessage, res: ServerResponse, next: (err?: 
     // O token só vale enquanto a pessoa continua na sala (expulsão/banimento o invalida)
     if (!roomManager.isMember(payload.r, payload.u)) return sendApiError(res, 401, 'unauthorized');
     accessByRequest.set(req, { kind: 'room', roomId: payload.r, userId: payload.u });
-  } else {
+  } else if (payload.k === 'solo') {
     accessByRequest.set(req, { kind: 'solo' });
+  } else {
+    // Outros tokens assinados (o claim de reabrir envio) servem só para o fim a que se destinam, não como sessão
+    return sendApiError(res, 401, 'unauthorized');
   }
 
   if (route.auth === 'host') {

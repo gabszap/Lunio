@@ -141,6 +141,100 @@ describe('POST /api/uploads/claim (reabrir envio)', () => {
     expect(res.status).toBe(401);
   });
 
+  const post = (url: string, token: string, body: unknown) =>
+    fetch(`${api.base}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Lunio-Token': token }, body: JSON.stringify(body) });
+
+  it('reabrir sem sala que o receba renova o prazo (closedAt = agora), devolve claim novo e diz quando vence', async () => {
+    const fs = await import('node:fs');
+    const { verifyToken } = await import('../access');
+    const { config } = await import('../config');
+    const { start, finish } = await uploadViaChunks(hostB.token);
+    // A sala do envio já morreu (não está na memória) e fechou há 20 h
+    const metaPath = `${metaDir(start.id)}/.meta.json`;
+    fs.writeFileSync(metaPath, JSON.stringify({ roomId: 'SALAMORTA1', name: 'filme.mp4', createdAt: Date.now(), declaredSize: 2000, ownerId: 'hostB', closedAt: Date.now() - 20 * 3600_000, complete: true }));
+
+    const before = Date.now();
+    const res = await post('/api/uploads/claim', solo, { id: start.id, claim: finish.claim });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+
+    // Antes voltava a `null` e a limpeza passava a contar do início do processo; agora o prazo recomeça de agora
+    expect(meta.closedAt).toBeGreaterThanOrEqual(before);
+    expect(meta.roomId).toBe('SALAMORTA1');
+    expect(body.expiresAt).toBe(meta.closedAt + config.uploadTtlMs);
+    expect(body.claim).not.toBe(finish.claim);
+    expect(verifyToken(body.claim)).toMatchObject({ k: 'upload', id: start.id });
+  });
+
+  it('o claim vale 7 dias, não 24 h (o prazo de verdade é o do arquivo, que o servidor informa)', async () => {
+    const { verifyToken } = await import('../access');
+    const { finish } = await uploadViaChunks(hostB.token);
+    const payload = verifyToken(finish.claim) as { exp: number };
+    expect(payload.exp - Date.now()).toBeGreaterThan(6.9 * 24 * 3600_000);
+  });
+
+  it('POST /api/uploads/status diz o que existe, o que sumiu e o que tem claim inválido, com o prazo real', async () => {
+    const fs = await import('node:fs');
+    const { issueUploadClaim } = await import('../access');
+    const { config } = await import('../config');
+    const { start, finish } = await uploadViaChunks(hostB.token); // sala ativa: o prazo depende de quanto ainda se lê
+    const gone = '0123456789abcdef';
+
+    const first = await (
+      await post('/api/uploads/status', solo, {
+        items: [{ id: start.id, claim: finish.claim }, { id: gone, claim: issueUploadClaim(gone, 'x') }, { id: start.id, claim: 'lixo' }],
+      })
+    ).json();
+    expect(first.items.map((i: { state: string }) => i.state)).toEqual(['ok', 'gone', 'invalid']);
+    expect(first.items[0].expiresAt).toBeNull();
+
+    // Sala fechada há 2 h: vence 24 h depois do fechamento
+    const closedAt = Date.now() - 2 * 3600_000;
+    fs.writeFileSync(`${metaDir(start.id)}/.meta.json`, JSON.stringify({ roomId: 'SALAMORTA2', name: 'filme.mp4', createdAt: Date.now(), declaredSize: 2000, ownerId: 'hostB', closedAt, complete: true }));
+    const second = await (await post('/api/uploads/status', solo, { items: [{ id: start.id, claim: finish.claim }] })).json();
+    expect(second.items[0]).toMatchObject({ state: 'ok', expiresAt: closedAt + config.uploadTtlMs });
+
+    expect((await post('/api/uploads/status', solo, { items: 'nao-e-lista' })).status).toBe(400);
+    expect((await post('/api/uploads/status', solo, { items: Array.from({ length: 30 }, () => ({})) }).then((r) => r.json())).items).toHaveLength(10);
+  });
+
+  it('o claim não serve como token de sessão (antes o gate o tratava como sessão solo)', async () => {
+    const { finish } = await uploadViaChunks(hostB.token);
+    const res = await fetch(`${api.base}/api/uploads/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Lunio-Token': finish.claim },
+      body: JSON.stringify({ items: [] }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('o dono do envio é a pessoa, não a aba: o sufixo _tab#### sai do ownerId', async () => {
+    const fs = await import('node:fs');
+    const helpers = await import('./helpers');
+    const tabHost = helpers.joinRoom(roomManager, 'CLAIMC3', 'hostC_tab0001');
+    const { start } = await uploadViaChunks(tabHost.token);
+    const meta = JSON.parse(fs.readFileSync(`${metaDir(start.id)}/.meta.json`, 'utf-8'));
+    expect(meta.ownerId).toBe('hostC');
+  });
+
+  it('corpo do claim que a conexão corta no meio não deixa o handler pendurado', async () => {
+    const http = await import('node:http');
+    const u = new URL(api.base);
+    await new Promise<void>((resolve) => {
+      const req = http.request({ host: u.hostname, port: u.port, method: 'POST', path: '/api/uploads/claim', headers: { 'Content-Type': 'application/json', 'X-Lunio-Token': solo, 'Content-Length': '500' } });
+      req.on('error', () => {});
+      req.write('{"id":"');
+      setTimeout(() => {
+        req.destroy();
+        resolve();
+      }, 150);
+    });
+    // O servidor continua respondendo normalmente (um handler pendurado não derruba nada, mas vazava a requisição)
+    const ok = await post('/api/uploads/status', solo, { items: [] });
+    expect(ok.status).toBe(200);
+  });
+
   // Por último: deixa a sessão parada a meio na sala, que trava os próximos envios nela
   it('envio incompleto (parado a meio) não pode ser reaberto: 404', async () => {
     const auth = { 'X-Lunio-Token': hostA.token };

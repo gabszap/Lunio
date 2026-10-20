@@ -13,8 +13,11 @@ import { config } from './config';
  */
 
 const SOLO_TTL_MS = 12 * 3600 * 1000;
-/** O "claim" de reabrir um envio dura o mesmo que o próprio envio no disco (decisão ENVIOS-REDIS.md). */
-const UPLOAD_CLAIM_TTL_MS = 24 * 3600 * 1000;
+/**
+ * O "claim" de reabrir um envio vale 7 dias. Quem decide se o arquivo ainda existe é o servidor (o prazo do arquivo conta
+ * do fechamento da sala e muda quando alguém lê ou reabre), então o claim não pode vencer antes dele.
+ */
+const UPLOAD_CLAIM_TTL_MS = 7 * 24 * 3600 * 1000;
 
 export type TokenPayload =
   | { k: 'solo'; exp: number; n: string }

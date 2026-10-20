@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getCacheStats, sweepCache, sweepUploads } from '../cleanup';
 import { pruneRoomUploads, UPLOAD_META, uploadIdFromUrl, uploadsInProgress } from '../media/uploads';
 import { uploadIndex } from '../media/uploadIndex';
@@ -118,6 +118,34 @@ describe('sweepUploads: validade por último uso', () => {
     const next = getCacheStats(Date.now());
     expect(next.lastSweep).toMatchObject({ uploads: 0, freedBytes: 0 });
     expect(next.totals.items).toBe(before.items + 1);
+  });
+});
+
+describe('sweepUploads: Redis e disco juntos', () => {
+  it('um último uso velho no Redis não derruba um envio lido há pouco no disco (vale o maior dos dois)', async () => {
+    const root = makeUploads();
+    roomManager.getOrCreateRoom('MAIOR1');
+    put(root, id(1), 'MAIOR1', 1 * HOUR); // arquivo lido há 1 h, segundo o disco
+    // Redis zerado e repovoado a partir de uma data antiga (30 h): antes isso valia sozinho e o envio saía
+    const spy = vi.spyOn(uploadIndex, 'lastRead').mockResolvedValue(Date.now() - 30 * HOUR);
+    try {
+      expect(await sweepUploads(Date.now(), root, 6 * HOUR, 24 * HOUR)).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(fs.existsSync(path.join(root, id(1)))).toBe(true);
+  });
+
+  it('e o inverso: o Redis sabe de uma leitura mais nova que o disco, e ela vale', async () => {
+    const root = makeUploads();
+    roomManager.getOrCreateRoom('MAIOR2');
+    put(root, id(1), 'MAIOR2', 30 * HOUR); // disco diz 30 h sem leitura
+    const spy = vi.spyOn(uploadIndex, 'lastRead').mockResolvedValue(Date.now() - 5 * 60_000); // Redis: lido há 5 min
+    try {
+      expect(await sweepUploads(Date.now(), root, 6 * HOUR, 24 * HOUR)).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

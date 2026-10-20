@@ -21,15 +21,22 @@ export const redisKeys = {
 
 const TTL_MS = 48 * 60 * 60 * 1000;
 
+/**
+ * Reconecta para sempre, com espera crescente (0,5 s até 5 s). Antes desistia depois de 3 tentativas (~2 s): um
+ * `docker restart` do Redis deixava o Lunio no disco até reiniciar o Node. Sem fila offline, cada comando durante a
+ * queda falha na hora e cai no disco; reconectar não custa nada.
+ */
+export const redisRetryStrategy = (times: number): number => Math.min(times * 500, 5000);
+
 let client: Redis | null = null;
 
 function getClient(): Redis | null {
   if (!config.redisUrl) return null;
   if (!client) {
     client = new Redis(config.redisUrl, {
-      lazyConnect: true, // o servidor sobe mesmo sem Redis; conecta na 1ª chamada
+      lazyConnect: true, // o servidor sobe mesmo sem Redis; conecta no arranque (abaixo)
       maxRetriesPerRequest: 0, // sem fila infinita: quem chama já tem teto próprio
-      retryStrategy: (times) => (times > 3 ? null : Math.min(times * 300, 1000)),
+      retryStrategy: redisRetryStrategy,
       enableOfflineQueue: false,
       commandTimeout: CEILING_MS,
     });
@@ -48,12 +55,21 @@ function getClient(): Redis | null {
 
 let lastWarn = 0;
 
-/** Roda `fn` contra o Redis com teto de tempo; qualquer falha devolve `fallback` (e avisa, 1×/min). */
-export async function withRedis<T>(fallback: T, fn: (redis: Redis) => Promise<T>): Promise<T> {
+/** Desliga a conexão (fim dos testes, encerramento do servidor). A próxima chamada cria um cliente novo. */
+export function closeRedis(): void {
+  client?.disconnect();
+  client = null;
+}
+
+/**
+ * Roda `fn` contra o Redis com teto de tempo; qualquer falha devolve `fallback` (e avisa, 1×/min).
+ * `ceilingMs` só sobe para trabalhos que sabidamente levam mais (o `rebuild` da subida).
+ */
+export async function withRedis<T>(fallback: T, fn: (redis: Redis) => Promise<T>, ceilingMs = CEILING_MS): Promise<T> {
   const redis = getClient();
   if (!redis) return fallback;
   try {
-    return await Promise.race([fn(redis), timeout0(CEILING_MS, fallback)]);
+    return await Promise.race([fn(redis), timeout0(ceilingMs, fallback)]);
   } catch (err) {
     if (Date.now() - lastWarn > WARN_EVERY_MS) {
       lastWarn = Date.now();
@@ -67,6 +83,26 @@ function timeout0<T>(ms: number, value: T): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms));
 }
 
+/**
+ * Espera a conexão ficar pronta (até `ms`). Logo depois de `connect()` o cliente ainda está "connecting" e, sem fila
+ * offline, qualquer comando falha com "Stream isn't writeable": foi o que deixava o `rebuild` da subida sem efeito.
+ */
+export async function waitRedisReady(ms = 3000): Promise<boolean> {
+  const c = getClient();
+  if (!c) return false;
+  if (c.status === 'ready') return true;
+  return new Promise<boolean>((resolve) => {
+    const done = (ok: boolean) => {
+      clearTimeout(timer);
+      c.off('ready', onReady);
+      resolve(ok);
+    };
+    const onReady = () => done(true);
+    const timer = setTimeout(() => done(false), ms);
+    c.once('ready', onReady);
+  });
+}
+
 export interface RedisStatus {
   /** Há `REDIS_URL` configurado? Sem ele o sistema vive só do disco. */
   enabled: boolean;
@@ -76,10 +112,6 @@ export interface RedisStatus {
 
 export async function getRedisStatus(): Promise<RedisStatus> {
   const c = getClient();
-  if (c && c.status === 'end') {
-    // desistiu no arranque (retryStrategy) — tenta de novo a cada consulta de Status
-    void c.connect().catch(() => undefined);
-  }
   return { enabled: c !== null, connected: c !== null && c.status === 'ready' };
 }
 
