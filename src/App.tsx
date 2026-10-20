@@ -19,7 +19,6 @@ import { JoinError, JoinStep, checkRoom } from './components/home/RoomSteps';
 import { StatusTab } from './components/home/StatusTab';
 import type { WatchIntent } from './components/catalog/CatalogTab';
 import type { CommitMode, CommitOptions } from './components/home/types';
-import { PRESETS } from './lib/media';
 import { MediaPayload, SubtitleTrack } from './types/media';
 import type { PlaylistItem } from './types/sync';
 import { PlaylistPanel } from './components/PlaylistPanel';
@@ -364,15 +363,6 @@ export default function App() {
     emitCurrentMedia(payload);
   };
 
-  const handleSelectPreset = (presetId: string) => {
-    const found = PRESETS.find((p) => p.id === presetId);
-    if (!found) return;
-    setAutoPlayNext(false);
-    setCurrentPayload(found.payload);
-    if (syncManager.isRoomHost()) emitCurrentMedia({ ...found.payload, title: found.payload.title || found.name });
-    logger.info(`[Mídia] Abrindo o exemplo ${found.name}`);
-  };
-
   // Watch Party modal (aberto pelo painel quando você está sozinho)
   const handleCreateRoom = (code: string, username: string) => {
     if (username) syncManager.setUserProfile(username);
@@ -522,7 +512,6 @@ export default function App() {
               chapters={currentPayload.chapters}
               subtitles={currentPayload.subtitles}
               audioTracks={currentPayload.audioTracks}
-              onResetToWorkingPreset={() => handleSelectPreset('sintel-local')}
               onOpenRoomLobby={() => setShowRoomModal(true)}
               isWatchPartyOpen={isWatchPartyOpen}
               onToggleWatchParty={() => setIsWatchPartyOpen((prev) => !prev)}

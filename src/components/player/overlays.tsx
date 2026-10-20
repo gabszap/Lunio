@@ -1,4 +1,4 @@
-import { TriangleAlert, RefreshCw, Play, RotateCcw, X, FastForward, Film, Users, MessageSquare, Pause, Crown, Plus, ChevronLeft } from 'lucide-react';
+import { TriangleAlert, RefreshCw, RotateCcw, X, FastForward, Film, Users, MessageSquare, Pause, Crown, Plus, ChevronLeft } from 'lucide-react';
 import type { SubtitleTrack } from '../../types/media';
 import { formatTime } from '../../lib/chapters';
 import { Avatar, Dot, GhostButton, IconButton, Kbd, PrimaryButton, Spinner } from '../ui';
@@ -13,6 +13,7 @@ const floatingCard =
 export function StandbyScreen(props: {
   canChoose: boolean;
   isConnected: boolean;
+  reconnecting?: boolean;
   membersCount: number;
   isWatchPartyOpen: boolean;
   onChooseVideo?: () => void;
@@ -21,7 +22,7 @@ export function StandbyScreen(props: {
   onOpenRoomLobby?: () => void;
   onLeaveRoom?: () => void;
 }) {
-  const { canChoose, isConnected, membersCount, isWatchPartyOpen, onChooseVideo, onToggleWatchParty, onCloseWatchParty, onOpenRoomLobby, onLeaveRoom } = props;
+  const { canChoose, isConnected, reconnecting, membersCount, isWatchPartyOpen, onChooseVideo, onToggleWatchParty, onCloseWatchParty, onOpenRoomLobby, onLeaveRoom } = props;
   return (
     <div
       id="video-player-standby"
@@ -53,6 +54,7 @@ export function StandbyScreen(props: {
         </div>
       </div>
 
+      {reconnecting && <ReconnectingBanner />}
       <WatchPartyPanel isOpen={isWatchPartyOpen} onClose={onCloseWatchParty} onOpenRoomLobby={onOpenRoomLobby} onLeaveRoom={onLeaveRoom} />
     </div>
   );
@@ -103,7 +105,7 @@ export function SubtitleFailurePrompt({ prompt, hasNext, onTryNext, onWatchWitho
   );
 }
 
-export function PlaybackErrorOverlay({ error, onBack, onReconnect, onResetToWorkingPreset }: { error: { title: string; message: string; hint: string; code?: number }; onBack?: () => void; onReconnect: () => void; onResetToWorkingPreset?: () => void }) {
+export function PlaybackErrorOverlay({ error, onBack, onReconnect }: { error: { title: string; message: string; hint: string; code?: number }; onBack?: () => void; onReconnect: () => void }) {
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-lu-video/92 backdrop-blur-md select-text">
       {onBack && (
@@ -128,12 +130,6 @@ export function PlaybackErrorOverlay({ error, onBack, onReconnect, onResetToWork
             <RefreshCw size={18} />
             <span>{t('Reconectar stream')}</span>
           </PrimaryButton>
-          {onResetToWorkingPreset && (
-            <GhostButton onClick={onResetToWorkingPreset}>
-              <Play size={18} />
-              <span>{t('Preset Sintel 1080p')}</span>
-            </GhostButton>
-          )}
         </div>
       </div>
     </div>
@@ -151,6 +147,18 @@ export function BufferingOverlay({ bufferAheadNow }: { bufferAheadNow: number })
             {t('Buffer acumulado: +{n} s', { n: bufferAheadNow.toFixed(1).replace('.', ',') })}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** A conexão com a sala caiu (restart do servidor, rede): o player segue, mas o sync está parado até voltar. */
+export function ReconnectingBanner() {
+  return (
+    <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[45] pointer-events-none px-4 max-w-full">
+      <div role="status" className={`flex items-center gap-2.5 px-4 py-2.5 rounded-full text-[13px] font-medium ${floatingCard}`}>
+        <Spinner size={14} />
+        <span className="truncate">{t('Reconectando à sala…')}</span>
       </div>
     </div>
   );

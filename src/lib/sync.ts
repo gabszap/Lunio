@@ -179,10 +179,12 @@ class SyncManager {
     return this.roomState.hostId === this.user.id;
   }
 
-  public getStatus(): { isConnected: boolean; isConnecting: boolean; isHost: boolean; membersCount: number; roomId: string } {
+  public getStatus(): { isConnected: boolean; isConnecting: boolean; reconnecting: boolean; isHost: boolean; membersCount: number; roomId: string } {
     return {
       isConnected: this.isConnected,
       isConnecting: this.isConnecting,
+      // Estava na sala e a conexão caiu (restart do servidor, rede): tentando voltar. 999 = encerrada de propósito (kick/ban)
+      reconnecting: !this.isConnected && !!this.currentRoomId && this.reconnectAttempts > 0 && this.reconnectAttempts < 999,
       isHost: this.isRoomHost(),
       membersCount: this.roomState?.members?.length || 1,
       roomId: this.currentRoomId,
@@ -356,6 +358,7 @@ class SyncManager {
     // Reconexão com backoff exponencial (máx 15s)
     const delay = Math.min(15000, 1000 * Math.pow(1.5, this.reconnectAttempts));
     this.reconnectAttempts++;
+    this.notifyState(); // a UI mostra o aviso de reconexão
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
