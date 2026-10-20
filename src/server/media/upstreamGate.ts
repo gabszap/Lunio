@@ -62,7 +62,8 @@ export function noteRateLimited(host: string, retryAfterSec?: number) {
 }
 
 export function cooldownRemainingMs(host: string): number {
-  return Math.max(0, stateOf(host).cooldownUntil - Date.now());
+  // Só lê: perguntar por um host nunca visto não cria entrada (a rota /api/upstream recebe hosts de qualquer URL)
+  return Math.max(0, (hosts.get(host)?.cooldownUntil ?? 0) - Date.now());
 }
 
 /** Um stream de vídeo abriu uma conexão com o host; devolve a função que a libera (idempotente). */

@@ -5,6 +5,7 @@ import { handleFont } from './routes/font';
 import { handleHls } from './routes/hls';
 import { handleProxy } from './routes/proxy';
 import { handleResolve } from './routes/resolve';
+import { handleUpstreamStatus } from './routes/upstream';
 import { handleRoomInfo } from './routes/room';
 import { handleSession } from './routes/session';
 import { handleSpeed, handleStatus } from './routes/status';
@@ -42,6 +43,7 @@ export function createApiRouter(): Router {
   router.use('/api/token', (req, res) => void handleToken(req, res));
   router.use('/api/proxy', (req, res) => void handleProxy(req, res));
   router.use('/api/resolve', (req, res) => void handleResolve(req, res));
+  router.use('/api/upstream', handleUpstreamStatus);
   router.use('/api/tracks', (req, res) => void handleTracks(req, res));
   router.use('/api/subtitle', (req, res) => void handleSubtitle(req, res));
   router.use('/api/font', (req, res) => void handleFont(req, res));

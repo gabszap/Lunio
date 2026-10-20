@@ -115,6 +115,7 @@ ou plugado no servidor de dev/preview do Vite (vite.config.ts)
 | `GET /api/subtitle?url=&track=` | Extrai uma legenda embutida (cache em `.cache/subtitles`) |
 | `GET /api/font?url=&track=` | Extrai uma fonte embutida |
 | `GET /api/resolve?url=` | Resolve redirecionamentos do Torrentio/debrid até a URL final da CDN |
+| `GET /api/upstream?url=` | Se o provedor do vídeo (ou o CDN dele) limitou o servidor agora (429). O player pergunta quando a reprodução falha, para dizer "o provedor limitou os pedidos". Não faz pedido nenhum ao provedor |
 | `GET /api/room?id=` | Se uma sala existe ou foi encerrada |
 | `POST /api/upload/start`, `PUT /api/upload/<id>?offset=`, `POST /api/upload/<id>/finish`, `DELETE /api/upload/<id>` | Envio em pedaços e retomável (até 50 GB) para `.uploads/`. Os pedaços são de 64 MB por padrão para cada requisição passar por proxies que limitam o corpo (o plano grátis da Cloudflare aceita 100 MB) |
 | `POST /api/uploads/claim`, `POST /api/uploads/status` | Reabre um envio recente numa sala nova e confere se ele ainda está no servidor |

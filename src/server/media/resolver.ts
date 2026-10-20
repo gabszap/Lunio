@@ -100,7 +100,7 @@ export async function resolveFinalCdnUrl(url: string): Promise<string> {
  * novo (nunca resolvido) é justamente o caso mais pesado para ele. O 429 é espera, não erro: a sondagem repete a mesma
  * URL (respeitando Retry-After) enquanto as demais requisições do vídeo aguardam a mesma resposta (single-flight).
  */
-export const ORIGIN_RETRIES = 3;
+export const ORIGIN_RETRIES = 2;
 const ORIGIN_RETRY_BASE_MS = 1500;
 const ORIGIN_RETRY_MAX_MS = 8000;
 
@@ -121,6 +121,10 @@ async function probeFinalCdnUrl(url: string, state: CacheState): Promise<string>
       if (res.status === 429) noteRateLimited(hostOf(url), retryAfter > 0 ? retryAfter : undefined);
       await sleep(waitMs);
       res = await probeOnce(url);
+    }
+    if (res.status === 429) {
+      // Sem Retry-After e contínuo (o torrentsdb faz isso): não é bug do Lunio, é o limite do provedor
+      console.warn(`[Resolver] provedor ${hostLabel(url)} continua limitando (429) depois de ${ORIGIN_RETRIES} repetições; seguindo com a URL original`);
     }
     const finalUrl = res.url || url;
     const durationMs = performance.now() - startedAt;
