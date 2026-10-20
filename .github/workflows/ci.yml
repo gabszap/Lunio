@@ -51,6 +51,17 @@ jobs:
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
+    # O teste de "reiniciar o servidor no meio da sala" precisa de um Redis de verdade
+    services:
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -68,6 +79,7 @@ jobs:
       - run: npx playwright test
         env:
           CI: 'true'
+          REDIS_TEST_URL: redis://127.0.0.1:6379
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
