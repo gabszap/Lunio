@@ -27,6 +27,7 @@ export const EN: Record<string, string> = {
   "Pessoas assistindo": "People watching",
   "Ping": "Ping",
   "Reconectando…": "Reconnecting…",
+  "Reconectando à sala…": "Reconnecting to the room…",
   "Salas abertas": "Open rooms",
   "Servidor": "Server",
   "Servidor disponível": "Server available",

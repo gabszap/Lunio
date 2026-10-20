@@ -22,6 +22,7 @@ import { formatTime } from '../lib/chapters';
 import { syncManager } from '../lib/sync';
 import {
   BufferingOverlay,
+  ReconnectingBanner,
   ChatToasts,
   HostPausedOverlay,
   PlaybackErrorOverlay,
@@ -381,6 +382,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       <StandbyScreen
         canChoose={canChoose}
         isConnected={syncStatus.isConnected}
+        reconnecting={syncStatus.reconnecting}
         membersCount={syncStatus.membersCount}
         isWatchPartyOpen={isWatchPartyOpen}
         onChooseVideo={onChooseVideo}
@@ -536,6 +538,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           }
         />
       )}
+
+      {/* Conexão com a sala caiu */}
+      {syncStatus.reconnecting && <ReconnectingBanner />}
 
       {/* Buffering */}
       {isBuffering && !paused && !playbackError && <BufferingOverlay bufferAheadNow={bufferAheadNow} />}
