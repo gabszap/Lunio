@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, Copy, FileVideo, FolderOpen, History, Link, Play, Upload, Users, X, Check } from 'lucide-react';
 import { formatRoomUrl } from '../../lib/roomCode';
 import { copyText, formatBytes } from '../../lib/recent';
-import { forgetRecentUpload, loadRecentUploads, refreshRecentUploads, rememberRecentUpload, updateRecentUpload, type RecentUpload } from '../../lib/recentUploads';
+import { describeExpiry, forgetRecentUpload, loadRecentUploads, refreshRecentUploads, rememberRecentUpload, updateRecentUpload, type RecentUpload } from '../../lib/recentUploads';
 import { logger } from '../../lib/logger';
 import { getAccessToken, waitForRoomToken } from '../../lib/access';
 import { UploadError, uploadInChunks, type UploadSession } from '../../lib/chunkedUpload';
@@ -40,6 +40,8 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
   const [copied, setCopied] = useState(false);
   /** "Seus envios recentes": o que este navegador enviou e pode reabrir (localStorage). */
   const [recent, setRecent] = useState<RecentUpload[]>(() => loadRecentUploads());
+  /** Relógio da lista: sem ele o "expira em" ficava congelado no que foi desenhado ao abrir a tela. */
+  const [now, setNow] = useState(() => Date.now());
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   /** Sessão de envio no servidor: guardada para "Continuar o envio" retomar de onde parou. */
@@ -63,8 +65,20 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
     void refreshRecentUploads().then(() => {
       if (!cancelled) setRecent(loadRecentUploads());
     });
+    // O prazo anda sozinho (a cada 30 s) e é reconferido no servidor ao voltar para a aba: tocar o arquivo renova o prazo
+    const tick = setInterval(() => setNow(Date.now()), 30_000);
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      setNow(Date.now());
+      void refreshRecentUploads().then(() => {
+        if (!cancelled) setRecent(loadRecentUploads());
+      });
+    };
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       cancelled = true;
+      clearInterval(tick);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [phase.kind]);
 
@@ -477,8 +491,14 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
           <span className="mt-1 text-[13px] font-semibold">{t('Seus envios recentes')}</span>
           {recent.map((rec) => {
             // O prazo é o que o servidor informou (conta do fechamento da sala); sem ele não inventamos um
-            const hours = typeof rec.expiresAt === 'number' ? Math.max(0, Math.floor((rec.expiresAt - Date.now()) / 3600_000)) : null;
-            const expiry = hours === null ? null : hours >= 1 ? t('expira em {v1} h', { v1: hours }) : t('expira em menos de 1 h');
+            const left = describeExpiry(rec.expiresAt, now);
+            const expiry = !left
+              ? null
+              : left.unit === 'h'
+                ? t('expira em {v1} h', { v1: left.value })
+                : left.unit === 'min'
+                  ? t('expira em {v1} min', { v1: left.value })
+                  : t('expira em menos de 1 min');
             return (
               <div key={rec.id} className="flex items-center gap-3 px-3.5 py-2.5 rounded-[12px] bg-lu-bg2 border border-lu-border">
                 <span className="flex text-lu-accent flex-none">

@@ -81,6 +81,15 @@ export async function refreshRecentUploads(): Promise<void> {
   }
 }
 
+/** Quanto falta para o envio vencer, na unidade que cabe no texto (horas; abaixo de 1 h, minutos). Sem prazo conhecido: null. */
+export function describeExpiry(expiresAt: number | null | undefined, now: number): { unit: 'h' | 'min' | 'now'; value: number } | null {
+  if (typeof expiresAt !== 'number') return null;
+  const minutes = Math.floor((expiresAt - now) / 60_000);
+  if (minutes >= 60) return { unit: 'h', value: Math.floor(minutes / 60) };
+  if (minutes >= 1) return { unit: 'min', value: minutes };
+  return { unit: 'now', value: 0 };
+}
+
 export function forgetRecentUpload(id: string): void {
   try {
     localStorage.setItem(KEY, JSON.stringify(loadRecentUploads().filter((r) => r.id !== id)));
