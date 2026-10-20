@@ -158,6 +158,10 @@ describe('envio em pedaços', () => {
     expect(noSize.status).toBe(400);
     const huge = await fetch(`${api.base}/api/upload/start?name=a.mp4&size=${60 * 1024 ** 3}`, auth(host.token, { method: 'POST' }));
     expect(huge.status).toBe(413);
+    // Maior que a cota GLOBAL (20 GB), mas menor que o teto individual (50 GB): recusa com código próprio
+    const overQuota = await fetch(`${api.base}/api/upload/start?name=a.mp4&size=${30 * 1024 ** 3}`, auth(host.token, { method: 'POST' }));
+    expect(overQuota.status).toBe(413);
+    expect(await json(overQuota)).toMatchObject({ code: 'file_over_quota' });
     expect((await status('0123456789abcdef')).status).toBe(404);
     expect((await status('nao-e-um-id')).status).toBe(404);
   });

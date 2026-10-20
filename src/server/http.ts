@@ -31,6 +31,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   upstream_failed: 'Não foi possível acessar o vídeo de origem.',
   too_large: 'Arquivo grande demais.',
   quota_exceeded: 'O servidor não tem mais espaço para envios.',
+  file_over_quota: 'Esse arquivo é maior que o limite total de envios do servidor.',
   upload_in_progress: 'Já existe um envio em andamento nesta sala.',
   not_host: 'Só o Host da sala pode enviar arquivos.',
   claim_invalid: 'A prova de dono do envio é inválida ou expirou. Envie o arquivo de novo.',

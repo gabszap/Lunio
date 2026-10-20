@@ -107,7 +107,13 @@ function handleStart(req: IncomingMessage, res: ServerResponse, roomId: string, 
   }
   if (roomsUploading.has(roomId)) return sendApiError(res, 409, 'upload_in_progress'); // envio inteiro (antigo) em curso
 
-  if (uploadsDiskUsage() + pendingTotal() + size > config.maxUploadDiskBytes) {
+  const used = uploadsDiskUsage() + pendingTotal();
+  if (used + size > config.maxUploadDiskBytes) {
+    if (size > config.maxUploadDiskBytes) {
+      // O arquivo sozinho é maior que TODA a cota do servidor: nenhum espaço livre o acomodaria
+      console.warn(`[Upload] Arquivo maior que a cota de envios (${Math.round(config.maxUploadDiskBytes / 1024 ** 3)} GB); envio recusado.`);
+      return sendApiError(res, 413, 'file_over_quota');
+    }
     console.warn('[Upload] Cota de disco cheia; envio recusado.');
     return sendApiError(res, 507, 'quota_exceeded');
   }
@@ -339,6 +345,11 @@ export function handleUpload(req: IncomingMessage, res: ServerResponse) {
   }
   const usedAtStart = uploadsDiskUsage();
   if (usedAtStart + pendingTotal() + declared > config.maxUploadDiskBytes) {
+    if (declared > config.maxUploadDiskBytes) {
+      // O arquivo sozinho é maior que TODA a cota do servidor: nenhum espaço livre o acomodaria
+      console.warn(`[Upload] Arquivo maior que a cota de envios (${Math.round(config.maxUploadDiskBytes / 1024 ** 3)} GB); envio recusado.`);
+      return refuse(413, 'file_over_quota');
+    }
     console.warn(`[Upload] Cota de disco cheia (${(usedAtStart / 1024 ** 3).toFixed(2)} GB em uso); envio recusado.`);
     return refuse(507, 'quota_exceeded');
   }

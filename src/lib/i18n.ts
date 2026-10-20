@@ -87,6 +87,7 @@ const API_ERRORS: Record<string, string> = {
   upstream_failed: msg('Não foi possível acessar o vídeo de origem.'),
   too_large: msg('Arquivo grande demais.'),
   quota_exceeded: msg('O servidor não tem mais espaço para envios.'),
+  file_over_quota: msg('Esse arquivo é maior que o limite total de envios do servidor.'),
   upload_in_progress: msg('Já existe um envio em andamento nesta sala.'),
   not_host: msg('Só o Host da sala pode enviar arquivos.'),
   internal: msg('Erro inesperado no servidor.'),

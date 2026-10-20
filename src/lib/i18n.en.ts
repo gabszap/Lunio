@@ -313,6 +313,7 @@ export const EN: Record<string, string> = {
   "O servidor está ocupado. Tente de novo em instantes.": "The server is busy. Try again in a moment.",
   "O servidor de vídeo pediu para esperar um pouco. Tente a legenda de novo em instantes.": "The video server asked us to wait a moment. Try the subtitle again shortly.",
   "O servidor não tem mais espaço para envios.": "The server has no more space for uploads.",
+  "Esse arquivo é maior que o limite total de envios do servidor.": "This file is larger than the server's total upload limit.",
   "O stream está sendo roteado pelo backend local para streaming acelerado.": "The stream is being routed through the local backend for accelerated streaming.",
   "ou arraste o arquivo pra cá": "or drag the file here",
   "Ou olhe o catálogo": "Or browse the catalog",

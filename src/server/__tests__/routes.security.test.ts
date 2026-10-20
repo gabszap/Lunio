@@ -254,6 +254,19 @@ describe('envio de arquivos', () => {
     // o servidor responde 413 antes de ler o corpo (ou fecha a conexão); nunca aceita
     if (res instanceof Response) expect(res.status).toBe(413);
   });
+
+  it('arquivo maior que a cota inteira (não só a sobra): 413 file_over_quota', async () => {
+    // 30 GB passa do teto individual e não estoura a cota (padrão 20 GB, também pequena aqui): recusa honesta
+    const res = await fetch(`${api.base}/api/upload?name=x.mp4`, {
+      method: 'POST',
+      headers: { 'X-Lunio-Token': host.token, 'Content-Length': String(30 * 1024 ** 3) },
+      body: new Uint8Array(0),
+    }).catch((e) => e);
+    if (res instanceof Response) {
+      expect(res.status).toBe(413);
+      expect(await json(res)).toMatchObject({ code: 'file_over_quota' });
+    }
+  });
 });
 
 describe('status e velocidade (públicos, sem token)', () => {
