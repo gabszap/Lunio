@@ -116,6 +116,7 @@ or plugged into the Vite dev/preview server (vite.config.ts)
 | `GET /api/subtitle?url=&track=` | Extracts an embedded subtitle (cached in `.cache/subtitles`) |
 | `GET /api/font?url=&track=` | Extracts an embedded font |
 | `GET /api/resolve?url=` | Resolves Torrentio/debrid redirects to the final CDN URL |
+| `GET /api/upstream?url=` | Whether the video's provider (or its CDN) rate-limited the server just now (429). The player asks on a playback error to say "the provider limited the requests". Makes no request to the provider |
 | `GET /api/room?id=` | Whether a room exists or was closed |
 | `POST /api/upload/start`, `PUT /api/upload/<id>?offset=`, `POST /api/upload/<id>/finish`, `DELETE /api/upload/<id>` | Chunked, resumable upload (up to 50 GB) into `.uploads/`. Chunks are 64 MB by default so each request stays under proxies that cap the body (Cloudflare's free plan allows 100 MB) |
 | `POST /api/uploads/claim`, `POST /api/uploads/status` | Reopen a recent upload in a new room, and check whether it is still on the server |

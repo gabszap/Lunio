@@ -89,10 +89,12 @@ export function pipeMediaStreamDirect(
             }, waitMs);
             return;
           }
-          console.warn(`[MediaProxy] CDN continuou em 429 depois de ${rateRetries} repetições; devolvendo 503 ao player`);
+          console.warn(`[MediaProxy] ${hostOf(actualUrl)} continuou em 429 depois de ${rateRetries} repetições; devolvendo 503 ao player`);
           if (!res.headersSent) {
-            res.statusCode = 503;
             res.setHeader('Retry-After', '5');
+            // O <video> só vê o 503; o corpo identifica o motivo para quem olhar (o player pergunta em /api/upstream)
+            sendApiError(res, 503, 'upstream_rate_limited', 'O provedor do vídeo limitou os pedidos (429).');
+            return;
           }
           res.end();
           return;

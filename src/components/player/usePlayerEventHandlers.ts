@@ -2,6 +2,7 @@ import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'reac
 import type { MediaPlayerInstance } from '@vidstack/react';
 import type { PlaybackReadiness } from '../../types/media';
 import { formatTime } from '../../lib/chapters';
+import { apiFetch } from '../../lib/access';
 import { logger } from '../../lib/logger';
 import { sessionManager } from '../../lib/session';
 import { getVideoElement } from './dom';
@@ -204,6 +205,23 @@ export function usePlayerEventHandlers(args: {
     });
 
     logger.error(`[Player] Erro de reprodução: ${errMsg} (código ${errCode})`, { url: source.src });
+
+    // Link remoto: o provedor pode ter limitado os pedidos (429). O <video> só vê um erro de rede; o servidor sabe o motivo
+    if (/^https?:\/\//i.test(source.src)) {
+      void apiFetch(`/api/upstream?url=${encodeURIComponent(source.src)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((info: { limited?: boolean; host?: string } | null) => {
+          if (!info?.limited) return;
+          setPlaybackError((prev) =>
+            prev && {
+              ...prev,
+              title: t('O provedor limitou os pedidos'),
+              hint: t('{host} pediu para esperar. Aguarde alguns instantes e tente de novo, ou use outro provedor.', { host: info.host || t('O servidor de origem') }),
+            }
+          );
+        })
+        .catch(() => {});
+    }
   };
 
   return { onCanPlay, onTimeUpdate, onPlay, onPause, onDurationChange, onProgress, onWaiting, onError };

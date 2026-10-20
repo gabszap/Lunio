@@ -93,6 +93,8 @@ describe('429 do CDN no proxy de vídeo', () => {
     expect(res.status).toBe(503);
     expect(res.headers.get('retry-after')).toBe('5');
     expect(hits).toBe(4); // 1 + 3 repetições
+    // O corpo diz o motivo (o <video> só vê o 503; o player pergunta em /api/upstream)
+    expect(await res.json()).toMatchObject({ code: 'upstream_rate_limited' });
   }, 20_000);
 
   it('um 429 não derruba a URL guardada (não é token expirado)', async () => {

@@ -34,6 +34,7 @@ const ROUTES: Record<string, { auth: AuthMode; rate: RateRule }> = {
   speed: { auth: 'none', rate: { max: 6, windowMs: MIN } },
   proxy: { auth: 'any', rate: { max: 900, windowMs: MIN } },
   resolve: { auth: 'any', rate: { max: 60, windowMs: MIN } },
+  upstream: { auth: 'any', rate: { max: 60, windowMs: MIN } },
   tracks: { auth: 'any', rate: { max: 30, windowMs: MIN } },
   subtitle: { auth: 'any', rate: { max: 60, windowMs: MIN } },
   font: { auth: 'any', rate: { max: 300, windowMs: MIN } },
