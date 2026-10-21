@@ -36,11 +36,17 @@ export type MediaSyncListener = (
 ) => void;
 export type ChatListener = (message: ChatMessage) => void;
 export type ErrorListener = (message: string, code?: string) => void;
+export type SkipVoteListener = (skip: import('../types/sync').SkipVoteState | null) => void;
+export type SkipPassedListener = (start: number, target: number) => void;
 
 class SyncManager {
   private ws: WebSocket | null = null;
   private currentRoomId: string = '';
   private roomState: RoomState | null = null;
+  /** Votação para pular o capítulo atual (null = nenhuma). Vem do servidor. */
+  private skipVote: import('../types/sync').SkipVoteState | null = null;
+  private skipVoteListeners = new Set<SkipVoteListener>();
+  private skipPassedListeners = new Set<SkipPassedListener>();
   private isConnecting: boolean = false;
   private isConnected: boolean = false;
   private reconnectAttempts: number = 0;
@@ -416,6 +422,7 @@ class SyncManager {
     this.isConnecting = false;
     this.currentRoomId = '';
     this.roomState = null;
+    this.setSkipVote(null);
     this.chatHistory = [];
     clearRoomToken();
     this.stopHeartbeat();
@@ -563,6 +570,17 @@ class SyncManager {
           this.roomState.bannedMembers = msg.bannedMembers;
         }
         this.notifyState();
+        break;
+      }
+
+      case 'skip:votes': {
+        this.setSkipVote(msg.skip);
+        break;
+      }
+
+      case 'skip:passed': {
+        // Só o Host recebe: o player dele faz o seek e a sala inteira o segue
+        for (const listener of this.skipPassedListeners) listener(msg.start, msg.target);
         break;
       }
 
@@ -726,6 +744,18 @@ class SyncManager {
     this.send(typeof target === 'number' ? { type: 'playlist:move', itemId, toIndex: target } : { type: 'playlist:move', itemId, direction: target });
   }
 
+  /** Host: diz à sala quais são os capítulos do vídeo atual (o servidor só aceita votos para pular capítulos dessa lista). */
+  public emitChapters(url: string, chapters: Array<{ startTime: number; endTime?: number; title?: string }>) {
+    if (!this.isConnected || !this.isRoomHost()) return;
+    this.send({ type: 'media:chapters', url, chapters: chapters as any });
+  }
+
+  /** Espectador vota (ou retira o voto) para pular o capítulo que começa em `start`. O Host pula direto, sem votar. */
+  public emitSkipVote(start: number, target: number, vote: boolean) {
+    if (!this.isConnected || this.isRoomHost()) return;
+    this.send({ type: 'skip:vote', start, target, vote });
+  }
+
   public emitPlaylistTake(itemId: string) {
     if (!this.isConnected || !this.isRoomHost()) return;
     this.send({ type: 'playlist:take', itemId });
@@ -868,6 +898,30 @@ class SyncManager {
     this.mediaListeners.add(listener);
     return () => {
       this.mediaListeners.delete(listener);
+    };
+  }
+
+  private setSkipVote(skip: import('../types/sync').SkipVoteState | null) {
+    this.skipVote = skip;
+    for (const listener of this.skipVoteListeners) listener(skip);
+  }
+
+  public getSkipVote() {
+    return this.skipVote;
+  }
+
+  public subscribeSkipVote(listener: SkipVoteListener): () => void {
+    this.skipVoteListeners.add(listener);
+    listener(this.skipVote);
+    return () => {
+      this.skipVoteListeners.delete(listener);
+    };
+  }
+
+  public subscribeSkipPassed(listener: SkipPassedListener): () => void {
+    this.skipPassedListeners.add(listener);
+    return () => {
+      this.skipPassedListeners.delete(listener);
     };
   }
 

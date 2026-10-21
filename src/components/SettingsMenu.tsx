@@ -15,6 +15,9 @@ interface SettingsMenuProps {
   onSubtitleDelayChange?: (delay: number) => void;
   subtitleFontSize?: number; // 50 to 250 in percent
   onSubtitleFontSizeChange?: (size: number) => void;
+  /** Pular a abertura sozinho (Host/solo) ou votar sozinho (espectador). */
+  autoSkipIntro?: boolean;
+  onAutoSkipIntroChange?: (on: boolean) => void;
   /** Espectadores não mudam a velocidade da sala. */
   canChangeRate?: boolean;
   open: boolean;
@@ -45,6 +48,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onSubtitleDelayChange,
   subtitleFontSize = 100,
   onSubtitleFontSizeChange,
+  autoSkipIntro = false,
+  onAutoSkipIntroChange,
   canChangeRate = true,
   open,
   onOpenChange,
@@ -147,6 +152,25 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                           +{Math.round(d * 1000)} ms
                         </Chip>
                       ))}
+                    </ChipRow>
+                  </MenuSection>
+                </>
+              )}
+
+              {onAutoSkipIntroChange && (
+                <>
+                  <MenuDivider />
+                  <MenuSection
+                    title={t('Pular abertura e encerramento sozinho')}
+                    description={t('Quando o arquivo marca a abertura ou o encerramento, o player pula depois de 5 s (qualquer tecla cancela). Na sala, o Host pula e os demais votam.')}
+                  >
+                    <ChipRow gap="tight">
+                      <Chip selected={!autoSkipIntro} onClick={() => onAutoSkipIntroChange(false)}>
+                        {t('Desligado')}
+                      </Chip>
+                      <Chip selected={autoSkipIntro} onClick={() => onAutoSkipIntroChange(true)}>
+                        {t('Ligado')}
+                      </Chip>
                     </ChipRow>
                   </MenuSection>
                 </>

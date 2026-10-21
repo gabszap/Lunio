@@ -15,6 +15,14 @@ export function usePlayerPrefs() {
   const [subtitleDelay, setSubtitleDelay] = useState<number>(() => subtitleManager.getSubtitleDelay());
   const [subtitleFontSize, setSubtitleFontSize] = useState<number>(() => subtitleManager.getFontSize());
   const [osdToast, setOsdToast] = useState<{ text: string; icon?: string } | null>(null);
+  /** Pular a abertura/encerramento sozinho (quem tem o controle) ou votar sozinho (espectador). Preferência desta pessoa. */
+  const [autoSkipIntro, setAutoSkipIntroState] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('lunio_auto_skip_intro') === '1';
+    } catch {
+      return false;
+    }
+  });
   const osdToastTimerRef = useRef<number | null>(null);
 
   const triggerOsdToast = useCallback((text: string, icon?: string) => {
@@ -25,6 +33,16 @@ export function usePlayerPrefs() {
     osdToastTimerRef.current = window.setTimeout(() => {
       setOsdToast(null);
     }, 1600);
+  }, []);
+
+  const setAutoSkipIntro = useCallback((on: boolean) => {
+    setAutoSkipIntroState(on);
+    try {
+      localStorage.setItem('lunio_auto_skip_intro', on ? '1' : '0');
+    } catch {
+      // sem onde guardar: vale só nesta sessão
+    }
+    logger.setting('Pular abertura/encerramento sozinho', on ? 'ligado' : 'desligado');
   }, []);
 
   const handleAudioDelayChange = useCallback((delay: number) => {
@@ -74,6 +92,8 @@ export function usePlayerPrefs() {
   };
 
   return {
+    autoSkipIntro,
+    setAutoSkipIntro,
     aspectMode,
     aspectToast,
     handleToggleAspect,
@@ -83,6 +103,7 @@ export function usePlayerPrefs() {
     subtitleDelay,
     subtitleFontSize,
     osdToast,
+    triggerOsdToast,
     handleAudioDelayChange,
     handleSubtitleDelayChange,
     handleSubtitleFontSizeChange,

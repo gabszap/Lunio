@@ -226,13 +226,43 @@ export function CodecNotice({ notice, onDismiss }: { notice: { title: string; te
   );
 }
 
-export function SkipChapterButton({ chapter, showControls, skipProgress, onSkip }: { chapter: { targetTime: number; label: string }; showControls: boolean; skipProgress: number; onSkip: () => void }) {
+/**
+ * Botão de pular o capítulo (abertura, encerramento, resumo). `vote` = como está a votação da sala; `viewer` = quem não tem
+ * o controle: o clique é um voto (e vira "Voto enviado", que ao clicar de novo retira o voto).
+ */
+export function SkipChapterButton({
+  chapter,
+  showControls,
+  skipProgress,
+  onSkip,
+  viewer = false,
+  voted = false,
+  vote,
+  autoSkipIn = null,
+}: {
+  chapter: { targetTime: number; label: string };
+  showControls: boolean;
+  skipProgress: number;
+  onSkip: () => void;
+  viewer?: boolean;
+  voted?: boolean;
+  vote?: { votes: number; needed: number } | null;
+  /** Pulo automático em andamento: segundos que faltam (qualquer tecla cancela). */
+  autoSkipIn?: number | null;
+}) {
+  const counter = vote && (viewer || vote.votes > 0) ? ` · ${vote.votes}/${vote.needed}` : '';
+  const label = viewer ? (voted ? t('Voto enviado') : t('Votar: {label}', { label: chapter.label })) : chapter.label;
   return (
     <button
       id="skip-chapter-prompt"
       type="button"
-      aria-label={`${chapter.label} (N)`}
-      title={t('{label}: avançar para {v1}', { label: chapter.label, v1: formatTime(chapter.targetTime) })}
+      aria-label={`${label}${counter} (Tab)`}
+      aria-pressed={viewer ? voted : undefined}
+      title={
+        viewer
+          ? t('{label}: a sala pula quando mais da metade votar', { label: chapter.label })
+          : t('{label}: avançar para {v1}', { label: chapter.label, v1: formatTime(chapter.targetTime) })
+      }
       onClick={(e) => {
             e.stopPropagation();
             onSkip();
@@ -242,10 +272,14 @@ export function SkipChapterButton({ chapter, showControls, skipProgress, onSkip 
       }`}
     >
       <FastForward size={18} />
-      <span>{chapter.label}</span>
-      <span className="hidden sm:inline-flex">
-        <Kbd>N</Kbd>
-      </span>
+      <span>{label}{counter}</span>
+      {autoSkipIn !== null ? (
+        <span className="text-[12px] font-normal text-lu-muted tabular">{t('{n} s · qualquer tecla cancela', { n: autoSkipIn })}</span>
+      ) : (
+        <span className="hidden sm:inline-flex">
+          <Kbd>Tab</Kbd>
+        </span>
+      )}
       <span className="absolute left-0 bottom-0 h-0.5 bg-lu-accent" style={{ width: `${skipProgress}%` }} />
     </button>
   );

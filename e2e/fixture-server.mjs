@@ -95,6 +95,37 @@ Dialogue: 0,0:00:00.50,0:00:15.00,Default,,0,0,0,,${text}
   fs.writeFileSync(subsStamp, 'ok');
 }
 
+// Vídeo de 40 s com capítulos: cena inicial (0-5 s), "OP" (5-15 s), episódio (15-35 s) e "ED" (35-40 s), para testar pular abertura/encerramento.
+const chaptersFile = path.join(dir, 'capitulos.mkv');
+if (!fs.existsSync(chaptersFile)) {
+  const meta = path.join(dir, 'capitulos.ffmeta');
+  const chapter = (start, end, title) => `[CHAPTER]
+TIMEBASE=1/1000
+START=${start}
+END=${end}
+title=${title}
+`;
+  fs.writeFileSync(meta, `;FFMETADATA1
+${chapter(0, 5000, 'Cena inicial')}${chapter(5000, 15000, 'OP')}${chapter(15000, 35000, 'Episódio')}${chapter(35000, 40000, 'ED')}`);
+  const r = spawnSync(
+    process.env.FFMPEG_PATH || 'ffmpeg',
+    [
+      '-hide_banner', '-v', 'error', '-y',
+      '-f', 'lavfi', '-i', 'testsrc2=duration=40:size=320x180:rate=15',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=40',
+      '-f', 'ffmetadata', '-i', meta,
+      '-map', '0:v', '-map', '1:a', '-map_chapters', '2',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-g', '15', '-c:a', 'aac',
+      chaptersFile,
+    ],
+    { encoding: 'utf-8' }
+  );
+  if (r.status !== 0) {
+    console.error('Não consegui gerar capitulos.mkv:', r.stderr || r.error);
+    process.exit(1);
+  }
+}
+
 // Vídeos curtos em outros codecs, para testar o aviso de "o navegador não decodifica". Melhor esforço: se o FFmpeg não
 // tiver o encoder (libx265, libsvtav1), o arquivo não existe e o teste correspondente é pulado.
 const codecFiles = {
@@ -123,7 +154,7 @@ http
     const name = path.basename((req.url || '').split('?')[0]);
     const codecFile = codecFiles[name] ? path.join(dir, name) : null;
     if (codecFile && !fs.existsSync(codecFile)) return void res.writeHead(404).end();
-    const served = codecFile || (name === 'legendas.mkv' ? subsFile : file);
+    const served = codecFile || (name === 'legendas.mkv' ? subsFile : name === 'capitulos.mkv' ? chaptersFile : file);
     const st = fs.statSync(served);
     const m = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
     if (m) {

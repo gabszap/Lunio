@@ -43,6 +43,8 @@ export interface SkippableChapterInfo {
   canSkip: boolean;
   label: string;
   type: 'op' | 'ed' | 'recap' | 'preview';
+  /** Onde o capítulo começa (a votação para pular é por capítulo). */
+  startTime: number;
   targetTime: number;
 }
 
@@ -86,6 +88,7 @@ export function getSkippableChapter(currentTime: number, chapters: Chapter[]): S
       canSkip: true,
       label: t('Pular abertura'),
       type: 'op',
+      startTime: current.startTime,
       targetTime: current.endTime,
     };
   }
@@ -103,6 +106,7 @@ export function getSkippableChapter(currentTime: number, chapters: Chapter[]): S
       canSkip: true,
       label: t('Pular encerramento'),
       type: 'ed',
+      startTime: current.startTime,
       targetTime: current.endTime,
     };
   }
@@ -116,6 +120,7 @@ export function getSkippableChapter(currentTime: number, chapters: Chapter[]): S
       canSkip: true,
       label: t('Pular resumo'),
       type: 'recap',
+      startTime: current.startTime,
       targetTime: current.endTime,
     };
   }

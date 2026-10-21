@@ -15,6 +15,8 @@ export function usePlayerShortcuts(a: {
   isFullscreen: boolean;
   syncStatus: { isConnected: boolean; isHost: boolean };
   skippableChapter: { targetTime: number; label: string } | null;
+  /** Espectador: N vota para pular o capítulo de agora. */
+  onSkipVote?: () => void;
   subtitleDelay: number;
   audioDelay: number;
   lastKnownTimeRef: MutableRefObject<number>;
@@ -32,7 +34,7 @@ export function usePlayerShortcuts(a: {
   handleAudioDelayChange: (delay: number) => void;
 }) {
   const {
-    currentTime, duration, volume, muted, paused, activeSubtitle, detectedSubtitles, isFullscreen, syncStatus, skippableChapter,
+    currentTime, duration, volume, muted, paused, activeSubtitle, detectedSubtitles, isFullscreen, syncStatus, skippableChapter, onSkipVote,
     subtitleDelay, audioDelay, lastKnownTimeRef, setSyncToast, setActiveSubtitle, triggerFullscreenVisuals,
     handlePlayToggle, handleSeek, handleVolumeChange, handleMuteToggle, handleFullscreenToggle, handleToggleAspect,
     handleToggleWatchParty, handleSubtitleDelayChange, handleAudioDelayChange,
@@ -83,17 +85,22 @@ export function usePlayerShortcuts(a: {
           logger.action('[Teclado] Avançar 10 s');
           break;
         }
+        case 'Tab':
+          // Tab pula a abertura/encerramento detectado (espectador vota). Sem capítulo para pular, o Tab segue seu uso normal (foco)
+          if (!skippableChapter || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) break;
+          e.preventDefault();
+          if (isViewer) {
+            onSkipVote?.();
+            break;
+          }
+          handleSeek(skippableChapter.targetTime);
+          logger.action(`[Teclado] ${skippableChapter.label}`);
+          break;
         case 'KeyN':
         case 'KeyS':
         case 'KeyO':
           e.preventDefault();
           if (isViewer) break;
-          // Com abertura/encerramento detectado, N pula o capítulo inteiro (igual ao botão flutuante)
-          if (e.code === 'KeyN' && skippableChapter) {
-            handleSeek(skippableChapter.targetTime);
-            logger.action(`[Teclado] ${skippableChapter.label}`);
-            break;
-          }
           handleSeek(Math.min(duration || Infinity, currentTime + 90));
           logger.action('[Teclado] Pular 90 s');
           break;
@@ -161,6 +168,7 @@ export function usePlayerShortcuts(a: {
     isFullscreen,
     syncStatus,
     skippableChapter,
+    onSkipVote,
     handleToggleWatchParty,
     subtitleDelay,
     audioDelay,

@@ -10,7 +10,7 @@ Lunio is a web video player built for watching together. Paste a stream link, up
 
 ## Features
 
-- **Rooms (Watch Party)** — create a room from any source and share an 8-character code or link. The Host controls play, pause, seek and speed; everyone else follows with continuous drift correction. Chat, member list, Host transfer, kick and ban.
+- **Rooms (Watch Party)** — create a room from any source and share an 8-character code or link. The Host controls play, pause, seek and speed; everyone else follows with continuous drift correction. Chat, member list, Host transfer, kick and ban. Skipping the opening/ending: the Host skips right away and everyone else votes (the room skips when more than half vote); an optional setting skips openings and endings automatically after 5 s (any key cancels; viewers vote on their own).
 - **Queue (playlist)** — inside a room, anyone can add links to a queue; the Host reorders it, plays an item now, and the next one starts by itself when the video ends.
 - **Video sources**
   - Direct stream links: Stremio, TorBox, and other debrids, `.mkv`/`.mp4`/`.webm`/HLS, proxied through the local server (HTTP Range, CORS bypass).
@@ -264,7 +264,8 @@ DESIGN.md                 Design system notes
 |---|---|
 | `Space` / `K` | Play / pause |
 | `J` / `←` · `L` / `→` | Back / forward 10 s |
-| `N` / `O` | Skip intro (+90 s, or to the end of a detected intro/outro) |
+| `Tab` | Skip the detected opening/ending (viewers vote) |
+| `N` / `O` | Skip 90 s |
 | `↑` / `↓` | Volume ±5% |
 | `M` | Mute |
 | `C` | Toggle subtitles |

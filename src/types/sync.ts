@@ -202,7 +202,32 @@ export type ClientMessage =
       /** O Host tirou o item da fila para tocá-lo (o cliente do Host carrega a mídia em seguida). */
       type: 'playlist:take';
       itemId: string;
+    }
+  | {
+      /** O Host informa os capítulos do vídeo atual assim que o player os lê (no `media:set` ainda não se sabe). */
+      type: 'media:chapters';
+      /** URL do vídeo a que os capítulos pertencem (descarta o que chegar depois de uma troca de vídeo). */
+      url: string;
+      chapters: Chapter[];
+    }
+  | {
+      /** Voto (ou retirada do voto) para pular um capítulo (abertura, encerramento, resumo). Só quem não é Host vota. */
+      type: 'skip:vote';
+      /** Início e fim do capítulo, como o Host os informou em `media:set` (o servidor confere). */
+      start: number;
+      target: number;
+      vote: boolean;
     };
+
+/** Votação em andamento para pular um capítulo: passa quando `votes` chega a `needed` (mais da metade da sala). */
+export interface SkipVoteState {
+  start: number;
+  target: number;
+  votes: number;
+  needed: number;
+  /** IDs (sem o sufixo de aba) de quem já votou. */
+  voters: string[];
+}
 
 // Mensagens Servidor -> Cliente
 export type ServerMessage =
@@ -254,6 +279,17 @@ export type ServerMessage =
       position: number;
       rate?: number;
       updatedAt: number;
+    }
+  | {
+      /** Estado da votação para pular (null = nenhuma em andamento). */
+      type: 'skip:votes';
+      skip: SkipVoteState | null;
+    }
+  | {
+      /** A sala aprovou pular: só o Host recebe, e é o player dele que faz o seek. */
+      type: 'skip:passed';
+      start: number;
+      target: number;
     }
   | {
       type: 'error';

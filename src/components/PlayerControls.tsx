@@ -65,6 +65,8 @@ interface PlayerControlsProps {
   onMuteToggle: () => void;
   onPlaybackRateChange: (rate: number) => void;
   onVolumeBoostChange: (boost: number) => void;
+  autoSkipIntro?: boolean;
+  onAutoSkipIntroChange?: (on: boolean) => void;
   audioDelay?: number;
   onAudioDelayChange?: (delay: number) => void;
   subtitleDelay?: number;
@@ -213,6 +215,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   onMuteToggle,
   onPlaybackRateChange,
   onVolumeBoostChange,
+  autoSkipIntro,
+  onAutoSkipIntroChange,
   audioDelay = 0,
   onAudioDelayChange,
   subtitleDelay = 0,
@@ -562,6 +566,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               onPlaybackRateChange={onPlaybackRateChange}
               volumeBoost={volumeBoost}
               onVolumeBoostChange={onVolumeBoostChange}
+              autoSkipIntro={autoSkipIntro}
+              onAutoSkipIntroChange={onAutoSkipIntroChange}
               audioDelay={audioDelay}
               onAudioDelayChange={onAudioDelayChange}
               subtitleDelay={subtitleDelay}
