@@ -18,6 +18,7 @@ const ITEMS: Record<string, any[]> = {
 };
 const META = {
   id: 'mal:5114', type: 'anime', name: 'Anime Três', year: '2023', genres: ['Action'], description: 'Sinopse do anime.',
+  imdbId: 'tt5607616', imdbRating: '8.3', malId: '5114', malScore: 8.25, malRank: 400,
   episodes: [
     { id: 'e11', season: 1, episode: 1, title: 'Primeiro' },
     { id: 'e12', season: 1, episode: 2, title: 'Segundo' },
@@ -150,6 +151,50 @@ test.describe('Catálogo (fonte configurada no servidor)', () => {
 
     await page.getByRole('button', { name: 'Catálogo' }).last().click();
     await expect.poll(() => new URL(page.url()).searchParams.has('detail')).toBe(false);
+    await page.close();
+  });
+
+  test('o detalhe do anime mostra as marcas do IMDb e do MyAnimeList com a nota de cada um, como links', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await mockCatalog(page);
+    await openCatalog(page);
+    await page.getByRole('button', { name: /Anime Três/ }).click();
+
+    const imdb = page.getByRole('link', { name: /Nota do IMDb: 8\.3/ });
+    await expect(imdb).toHaveAttribute('href', 'https://www.imdb.com/title/tt5607616/');
+    await expect(imdb).toHaveAttribute('target', '_blank');
+    await expect(imdb).toHaveAttribute('rel', /noopener/);
+    await expect(imdb.locator('svg[aria-label="IMDb"]')).toBeVisible();
+
+    const mal = page.getByRole('link', { name: /Nota do MyAnimeList: 8\.25/ });
+    await expect(mal).toHaveAttribute('href', 'https://myanimelist.net/anime/5114');
+    await expect(mal).toContainText('8.25');
+    await expect(mal.locator('svg[aria-label="MyAnimeList"]')).toBeVisible();
+    await page.close();
+  });
+
+  test('dois modos de busca: por grupos (padrão) e unificada (tudo junto, sem repetidos, com filtro); a escolha fica guardada', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await mockCatalog(page);
+    await openCatalog(page);
+
+    await page.getByRole('searchbox').fill('re: zero');
+    await expect(page.locator('section[aria-label] h2')).toHaveText(['Series Search', 'Anime Series Search']);
+
+    await page.getByRole('tab', { name: 'Unificada' }).click();
+    await expect(page.locator('section[aria-label] h2')).toHaveCount(0); // sem fileiras: uma grade só
+    await expect(page.getByText('Resultado de re: zero')).toBeVisible();
+    await expect(page.getByText('Anime de re: zero')).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Séries · 2' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Filmes · 0' })).toBeVisible();
+    await page.getByRole('tab', { name: 'Filmes · 0' }).click();
+    await expect(page.getByText('Resultado de re: zero')).toHaveCount(0);
+
+    // A escolha do modo é lembrada ao recarregar
+    await page.reload();
+    await expect(page.getByRole('tab', { name: 'Unificada', selected: true })).toBeVisible();
+    await page.getByRole('tab', { name: 'Por grupos' }).click();
+    await expect(page.locator('section[aria-label] h2')).toHaveText(['Series Search', 'Anime Series Search']);
     await page.close();
   });
 });

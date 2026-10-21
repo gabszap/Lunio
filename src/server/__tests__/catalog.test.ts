@@ -47,6 +47,7 @@ let upstream: http.Server;
 let base: string;
 let hits: Record<string, number>;
 let failing: boolean;
+let jikanDown: boolean;
 let errorItem: boolean; // a fonte responde 200 com um item de erro no lugar da lista
 let emptyList: boolean;
 let concurrent = 0;
@@ -63,6 +64,8 @@ beforeAll(async () => {
   upstream = http.createServer((req, res) => {
     const path = decodeURIComponent(req.url || '');
     hits[path] = (hits[path] || 0) + 1;
+    // API do MyAnimeList (Jikan ou compatível): GET /anime/<id> com data.score
+    if (path.startsWith('/jikan/anime/')) return jikanDown ? respond(res, { error: { code: 'RATE_LIMITED' } }, 429) : respond(res, { data: { score: 8.25, scoredBy: 1607019, rank: 400 } });
     if (failing) return respond(res, { erro: 'fora' }, 503);
     // O caminho da fonte tem o UUID e a configuração da pessoa
     if (!path.startsWith('/stremio/UUID-SECRETO/CONFIG-SECRETA')) return respond(res, {}, 404);
@@ -96,6 +99,8 @@ beforeAll(async () => {
     }
     if (rest.startsWith('/catalog/movie/tmdb.popular')) return respond(res, { metas: [{ id: 'tt1', type: 'movie', name: 'Popular 1' }, { id: 'tt2', name: '' }, { type: 'movie' }] });
     if (rest.startsWith('/catalog/anime/mal.airing')) return respond(res, { metas: [{ id: 'mal:5114', type: 'anime', name: 'Anime A', poster: 'https://cdn.myanimelist.net/x.jpg' }] });
+    if (rest.startsWith('/meta/series/tt0000001')) return respond(res, { meta: { id: 'tt0000001', type: 'series', name: 'Link Click', _malId: '5114', videos: [] } });
+    if (rest.startsWith('/meta/movie/tt0000009')) return respond(res, { meta: { id: 'tt0000009', type: 'movie', name: 'Sem MAL', videos: [] } });
     if (rest.startsWith('/meta/anime/')) {
       return respond(res, { meta: {
         id: 'mal:5114', type: 'anime', name: 'Anime A', description: 'Sinopse', genres: ['Ação'], runtime: '24 min', background: 'https://x/bg.jpg',
@@ -174,10 +179,12 @@ describe('/api/catalog/*', () => {
   afterAll(async () => {
     await api?.close();
     config.catalogUrl = '';
+    config.jikanUrl = '';
   });
   beforeEach(() => {
     hits = {};
     failing = false;
+    jikanDown = false;
     errorItem = false;
     emptyList = false;
     concurrent = 0;
@@ -185,6 +192,7 @@ describe('/api/catalog/*', () => {
     fakeRedis.data.clear();
     resetCatalogCache();
     config.catalogUrl = `${base}/stremio/UUID-SECRETO/CONFIG-SECRETA/manifest.json`;
+    config.jikanUrl = `${base}/jikan`;
   });
 
   it('exige o token de sessão', async () => {
@@ -368,6 +376,38 @@ describe('/api/catalog/*', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('meta de anime traz a nota do MyAnimeList (API do MAL), votos e ranking junto com o id', async () => {
+    const body = await json(await get(`meta?type=anime&id=${encodeURIComponent('mal:5114')}`));
+    expect(body.meta).toMatchObject({ malId: '5114', malScore: 8.25, malScoredBy: 1607019, malRank: 400 });
+    expect(hits['/jikan/anime/5114']).toBe(1);
+  });
+
+  it('item do IMDb com _malId no detalhe também recebe a nota (pelo _malId)', async () => {
+    const body = await json(await get('meta?type=series&id=tt0000001'));
+    expect(body.meta).toMatchObject({ id: 'tt0000001', malId: '5114', malScore: 8.25 });
+  });
+
+  it('API do MAL fora do ar (ou limitando): o detalhe vem do mesmo jeito, só sem a nota', async () => {
+    jikanDown = true;
+    const res = await get(`meta?type=anime&id=${encodeURIComponent('mal:5114')}`);
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body.meta).toMatchObject({ name: 'Anime A', malId: '5114' });
+    expect(body.meta.malScore).toBeUndefined();
+  });
+
+  it('a nota fica guardada: abrir o mesmo anime de novo não volta à API do MAL; e quem não é do MAL nem pergunta', async () => {
+    await get(`meta?type=anime&id=${encodeURIComponent('mal:5114')}`);
+    resetCatalogCache(); // o detalhe em si não está guardado; a nota está (no Redis falso)
+    await get(`meta?type=anime&id=${encodeURIComponent('mal:5114')}`);
+    expect(hits['/jikan/anime/5114']).toBe(1);
+
+    const hitsBefore = Object.keys(hits).filter((p) => p.startsWith('/jikan')).length;
+    const plain = await json(await get('meta?type=movie&id=tt0000009'));
+    expect(plain.meta.malId).toBeUndefined();
+    expect(Object.keys(hits).filter((p) => p.startsWith('/jikan')).length).toBe(hitsBefore);
   });
 
   it('/api/status traz o estado do catálogo (ok, nome) e, fora do ar, ok false', async () => {

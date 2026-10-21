@@ -14,6 +14,7 @@ import {
   getMyList,
   isInMyList,
   isSeriesType,
+  mergeGroups,
   rowTitles,
   searchCatalog,
   seasonOrder,
@@ -22,6 +23,7 @@ import {
 import { GhostButton, IconButton, PillTabs, PrimaryButton, Spinner, TextButton, cx } from '../ui';
 import { t } from '../../lib/i18n';
 import { DetailRef, writeDetailToUrl, writeSearchToUrl } from '../../lib/searchUrl';
+import { ImdbIcon, MalIcon } from './BrandIcons';
 
 export interface WatchIntent {
   title: string;
@@ -189,6 +191,22 @@ const Row: React.FC<{
 
 // ───────────────────────── Detalhe ─────────────────────────
 
+/** Selo com a marca de uma fonte (IMDb, MyAnimeList): vira link para a página do título quando há endereço. */
+const BrandBadge: React.FC<{ href?: string; label: string; icon: React.ReactNode; children: React.ReactNode }> = ({ href, label, icon, children }) => {
+  const cls = 'inline-flex items-center gap-1.5 h-7 px-2 border border-white/18 rounded-md text-[12px] font-semibold text-lu-text no-underline';
+  return href ? (
+    <a href={href} target="_blank" rel="noopener noreferrer" title={label} aria-label={label} className={cx(cls, 'hover:bg-white/8')}>
+      {icon}
+      {children}
+    </a>
+  ) : (
+    <span title={label} className={cls}>
+      {icon}
+      {children}
+    </span>
+  );
+};
+
 const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent: WatchIntent) => void }> = ({ item, onBack, onWatch }) => {
   const [meta, setMeta] = useState<CatalogMeta | null>(null);
   const [error, setError] = useState(false);
@@ -266,11 +284,27 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
                       <span>{bit}</span>
                     </React.Fragment>
                   ))}
-                  {data.imdbRating && (
-                    <span title={t('Nota do IMDb')} className="inline-flex items-center gap-1 px-1.5 border border-white/18 rounded text-[12px] font-semibold">
-                      <Star size={12} />
-                      IMDb {data.imdbRating}
-                    </span>
+                  {(data.imdbRating || data.imdbId) && (
+                    <BrandBadge
+                      href={data.imdbId ? `https://www.imdb.com/title/${data.imdbId}/` : undefined}
+                      label={data.imdbRating ? `${t('Nota do IMDb')}: ${data.imdbRating}` : t('Abrir no IMDb')}
+                      icon={<ImdbIcon size={16} />}
+                    >
+                      {data.imdbRating ?? 'IMDb'}
+                    </BrandBadge>
+                  )}
+                  {data.malId && (
+                    <BrandBadge
+                      href={`https://myanimelist.net/anime/${data.malId}`}
+                      label={
+                        data.malScore !== undefined
+                          ? `${t('Nota do MyAnimeList')}: ${data.malScore.toFixed(2)}${data.malRank ? ` · ${t('ranking')} #${data.malRank}` : ''}`
+                          : t('Abrir no MyAnimeList')
+                      }
+                      icon={<MalIcon size={16} />}
+                    >
+                      {data.malScore !== undefined ? data.malScore.toFixed(2) : 'MyAnimeList'}
+                    </BrandBadge>
                   )}
                 </p>
               )}
@@ -417,12 +451,27 @@ const HomeRows: React.FC<{
 
 // ───────────────────────── Aba ─────────────────────────
 
+type SearchMode = 'groups' | 'unified';
+type Filter = 'all' | 'movie' | 'series';
+const SEARCH_MODE_KEY = 'lunio_search_mode';
+
+function readSearchMode(): SearchMode {
+  try {
+    return localStorage.getItem(SEARCH_MODE_KEY) === 'unified' ? 'unified' : 'groups';
+  } catch {
+    return 'groups';
+  }
+}
+
 export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initialDetail = null, onWatch, onCreateRoom }) => {
   const [query, setQuery] = useState(initialQuery);
   const [debounced, setDebounced] = useState(initialQuery.trim());
   /** Um grupo por catálogo de busca da fonte (como no Stremio). */
   const [results, setResults] = useState<SearchGroup[] | null>(null);
   const [searchError, setSearchError] = useState(false);
+  /** Por grupos (um por catálogo de busca, como no Stremio) ou unificada (tudo junto, sem repetidos, com filtro). */
+  const [mode, setMode] = useState<SearchMode>(readSearchMode);
+  const [filter, setFilter] = useState<Filter>('all');
   // Um link com `?detail=` abre o título direto; os dados completos vêm do detalhe
   const [selected, setSelected] = useState<CatalogItem | null>(() => (initialDetail ? { id: initialDetail.id, type: initialDetail.type, name: '' } : null));
   const [myList, setMyList] = useState<CatalogItem[]>(() => getMyList());
@@ -465,6 +514,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
     let cancelled = false;
     setResults(null);
     setSearchError(false);
+    setFilter('all');
     searchCatalog(debounced)
       .then((list) => !cancelled && setResults(list))
       .catch(() => !cancelled && setSearchError(true));
@@ -482,8 +532,21 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
     return <Detail item={selected} onBack={() => setSelected(null)} onWatch={onWatch} />;
   }
 
-  const total = results?.reduce((n, g) => n + g.metas.length, 0) ?? 0;
+  const groupsTotal = results?.reduce((n, g) => n + g.metas.length, 0) ?? 0;
   const groupTitles = results ? rowTitles(results) : [];
+  const unified = results ? mergeGroups(results) : [];
+  const movies = unified.filter((r) => !isSeriesType(r.type));
+  const series = unified.filter((r) => isSeriesType(r.type));
+  const shown = filter === 'all' ? unified : filter === 'movie' ? movies : series;
+  const total = mode === 'unified' ? unified.length : groupsTotal;
+  const chooseMode = (next: SearchMode) => {
+    setMode(next);
+    try {
+      localStorage.setItem(SEARCH_MODE_KEY, next);
+    } catch {
+      // vale só nesta sessão
+    }
+  };
 
   return (
     <div className="flex flex-col gap-8">
@@ -514,7 +577,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
             <Spinner size={18} className="text-lu-accent" />
             {t('Buscando…')}
           </div>
-        ) : searchError || (results && total === 0) ? (
+        ) : searchError || (results && groupsTotal === 0) ? (
           <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
             <span className="w-[72px] h-[72px] rounded-[20px] bg-lu-surface border border-lu-border text-lu-muted flex items-center justify-center">
               <SearchX size={32} />
@@ -547,10 +610,43 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
                 </strong>{' '}
                 pra “{debounced}”
               </p>
+              <div className="flex flex-wrap items-center gap-3">
+                {mode === 'unified' && (
+                  <PillTabs
+                    label={t('Filtrar')}
+                    size="sm"
+                    value={filter}
+                    onChange={setFilter}
+                    options={[
+                      { value: 'all' as Filter, label: t('Tudo') },
+                      { value: 'movie' as Filter, label: t('Filmes · {length}', { length: movies.length }) },
+                      { value: 'series' as Filter, label: t('Séries · {length}', { length: series.length }) },
+                    ]}
+                  />
+                )}
+                <PillTabs
+                  label={t('Modo de busca')}
+                  size="sm"
+                  value={mode}
+                  onChange={chooseMode}
+                  options={[
+                    { value: 'groups' as SearchMode, label: t('Por grupos') },
+                    { value: 'unified' as SearchMode, label: t('Unificada') },
+                  ]}
+                />
+              </div>
             </div>
-            {results!.map((group, i) => (
-              <Row key={`${group.type}:${group.id}`} title={groupTitles[i]} load={async () => group.metas} items={group.metas} onOpen={setSelected} />
-            ))}
+            {mode === 'groups' ? (
+              results!.map((group, i) => (
+                <Row key={`${group.type}:${group.id}`} title={groupTitles[i]} load={async () => group.metas} items={group.metas} onOpen={setSelected} />
+              ))
+            ) : (
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(152px,1fr))] gap-x-4 gap-y-6">
+                {shown.map((item) => (
+                  <PosterCard key={`${item.type}-${item.id}`} item={item} onOpen={setSelected} showType fluid />
+                ))}
+              </div>
+            )}
           </>
         )
       ) : (

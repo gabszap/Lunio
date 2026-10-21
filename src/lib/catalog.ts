@@ -37,6 +37,12 @@ export interface CatalogMeta extends CatalogItem {
   runtime?: string;
   background?: string;
   imdbRating?: string;
+  /** Id do anime no MyAnimeList (para o link da página dele). */
+  malId?: string;
+  /** Nota (0–10) no MyAnimeList, votos e posição no ranking (ausentes se a API do MAL não respondeu). */
+  malScore?: number;
+  malScoredBy?: number;
+  malRank?: number;
   /** A temporada 0 são os especiais. */
   episodes: CatalogEpisode[];
 }
@@ -103,6 +109,24 @@ export async function searchCatalog(query: string): Promise<SearchGroup[]> {
 export async function fetchMeta(type: CatalogType, id: string): Promise<CatalogMeta> {
   const data = await getJson<{ meta: CatalogMeta }>(`meta?${new URLSearchParams({ type, id })}`);
   return data.meta;
+}
+
+/**
+ * Busca unificada (a antiga): os grupos num só, na ordem dos catálogos, sem repetir o mesmo título (mesmo IMDb, ou mesmo
+ * nome e ano). O primeiro que aparece fica; as temporadas de um anime com o mesmo IMDb viram um item só.
+ */
+export function mergeGroups(groups: SearchGroup[]): CatalogItem[] {
+  const seen = new Set<string>();
+  const merged: CatalogItem[] = [];
+  for (const group of groups) {
+    for (const item of group.metas) {
+      const key = item.imdbId || `${item.name.toLowerCase()}|${item.year ?? ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+    }
+  }
+  return merged;
 }
 
 /** Fileiras com o mesmo nome (ex.: "Popular" de filmes e de séries) ganham o tipo no título para se distinguirem. */

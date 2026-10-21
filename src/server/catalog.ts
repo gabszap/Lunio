@@ -52,9 +52,9 @@ export class CatalogUnavailableError extends Error {
   }
 }
 
-type Kind = 'manifest' | 'rows' | 'search' | 'meta';
+type Kind = 'manifest' | 'rows' | 'search' | 'meta' | 'mal';
 /** Quanto uma resposta vale sem perguntar de novo à fonte. */
-const FRESH_MS: Record<Kind, number> = { manifest: 60 * 60_000, rows: 15 * 60_000, search: 10 * 60_000, meta: 15 * 60_000 };
+const FRESH_MS: Record<Kind, number> = { manifest: 60 * 60_000, rows: 15 * 60_000, search: 10 * 60_000, meta: 15 * 60_000, mal: 24 * 60 * 60_000 };
 /** Depois disso, mesmo com a fonte fora do ar, a resposta guardada não é mais servida. */
 const STALE_MS = 24 * 60 * 60_000;
 /** Catálogos de streaming (Netflix, HBO…) numa instância fria passam de 10 s. */
@@ -100,7 +100,7 @@ async function persistedGet(key: string): Promise<{ value: any; at: number } | u
 }
 
 /** No Redis (128 MB, compartilhado com salas e envios) buscas valem 1 h, que são as que não param de aparecer; o resto, 24 h. */
-const PERSIST_MS: Record<Kind, number> = { manifest: STALE_MS, rows: STALE_MS, meta: STALE_MS, search: 60 * 60_000 };
+const PERSIST_MS: Record<Kind, number> = { manifest: STALE_MS, rows: STALE_MS, meta: STALE_MS, mal: STALE_MS, search: 60 * 60_000 };
 /** Uma resposta enorme não vai para o Redis (fica só na memória do processo). */
 const PERSIST_MAX_BYTES = 512 * 1024;
 
@@ -110,12 +110,12 @@ function persistedSet(key: string, entry: { value: any; at: number }, kind: Kind
   void withRedis<void>(undefined, (r) => r.set(redisKeyOf(key), json, 'PX', PERSIST_MS[kind]).then(() => undefined));
 }
 
-async function requestJson(url: string): Promise<any> {
+async function requestJson(url: string, timeoutMs = UPSTREAM_TIMEOUT_MS): Promise<any> {
   let res: Response;
   try {
     res = await fetch(url, {
       headers: { Accept: 'application/json', 'User-Agent': 'Lunio/1.0 (+catalog)' },
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     throw new CatalogUnavailableError();
@@ -137,9 +137,9 @@ async function requestJson(url: string): Promise<any> {
  * GET JSON na fonte com cache. Pedidos iguais simultâneos viram um só; se a fonte falhar, serve a última resposta
  * guardada (até 24 h) marcada como `stale`; sem nenhuma guardada, lança `CatalogUnavailableError`.
  */
-export async function fetchCatalogJson(path: string, kind: Kind): Promise<{ data: any; stale: boolean }> {
-  const base = currentCatalogBase();
-  if (!announced) {
+export async function fetchCatalogJson(path: string, kind: Kind, opts: { base?: string; timeoutMs?: number } = {}): Promise<{ data: any; stale: boolean }> {
+  const base = opts.base ?? currentCatalogBase();
+  if (!announced && !opts.base) {
     announced = true;
     console.log(`[Catálogo] Fonte: ${hostLabel(base)} (${isDefaultCatalog() ? 'padrão' : 'configurada em CATALOG_URL'}).`);
   }
@@ -157,7 +157,7 @@ export async function fetchCatalogJson(path: string, kind: Kind): Promise<{ data
   let pending = inflight.get(key);
   if (!pending) {
     pending = limited(async () => {
-      const data = await requestJson(key);
+      const data = await requestJson(key, opts.timeoutMs);
       if (isErrorPayload(data)) throw new CatalogUnavailableError();
       return data;
     }).finally(() => inflight.delete(key));
@@ -372,11 +372,55 @@ export interface CatalogMeta extends CatalogItem {
   runtime?: string;
   background?: string;
   imdbRating?: string;
+  /** Id do anime no MyAnimeList (da própria fonte: `_malId` ou o `mal:<id>` do item), para o link da página dele. */
+  malId?: string;
+  /** Nota (0–10), quantas pessoas votaram e posição no ranking do MyAnimeList, da API do MAL (ausentes se ela não respondeu). */
+  malScore?: number;
+  malScoredBy?: number;
+  malRank?: number;
   /** Inclui a temporada 0 (especiais): quem exibe decide onde colocá-la. */
   episodes: CatalogEpisode[];
 }
 
+/** O id numérico do MyAnimeList: `_malId` do detalhe ou, num item `mal:<id>`, o próprio id. Só dígitos. */
+function malIdOf(m: any, id: string): string | undefined {
+  const raw = str(m?._malId ?? (id.startsWith('mal:') ? id.slice(4) : ''), 12);
+  return /^\d{1,10}$/.test(raw) ? raw : undefined;
+}
+
+// ───────────── nota do MyAnimeList ─────────────
+
+export const DEFAULT_JIKAN_URL = 'https://jikan.lucashdo.com/v1';
+
+export interface MalStats {
+  score: number;
+  scoredBy?: number;
+  rank?: number;
+}
+
+/**
+ * Nota do anime no MyAnimeList, pela API configurada em `JIKAN_URL` (Jikan ou compatível: `GET <base>/anime/<id>` com
+ * `data.score`). Guardada por 24 h (memória e Redis). Nunca atrapalha o detalhe: sem resposta em 6 s, ou com erro, é nada.
+ */
+export async function getMalStats(malId: string): Promise<MalStats | undefined> {
+  if (!/^\d{1,10}$/.test(malId)) return undefined;
+  try {
+    const base = normalizeCatalogBase(config.jikanUrl) || DEFAULT_JIKAN_URL;
+    const { data } = await fetchCatalogJson(`/anime/${malId}`, 'mal', { base, timeoutMs: 6000 });
+    const d = data?.data ?? data;
+    const score = Number(d?.score);
+    if (!Number.isFinite(score) || score <= 0 || score > 10) return undefined;
+    const scoredBy = Number(d?.scoredBy ?? d?.scored_by);
+    const rank = Number(d?.rank);
+    return { score, scoredBy: Number.isFinite(scoredBy) && scoredBy > 0 ? scoredBy : undefined, rank: Number.isFinite(rank) && rank > 0 ? rank : undefined };
+  } catch {
+    return undefined;
+  }
+}
+
 export async function getMeta(type: string, id: string): Promise<{ meta: CatalogMeta; stale: boolean }> {
+  // Em item do MAL o id já diz qual é: a nota é pedida junto, sem esperar o detalhe
+  const earlyMal = id.startsWith('mal:') ? getMalStats(id.slice(4)) : null;
   const { data, stale } = await fetchCatalogJson(`/meta/${type}/${encodeURIComponent(id)}.json`, 'meta');
   const m = data?.meta;
   const item = toItem({ ...m, id: m?.id ?? id }, type);
@@ -395,6 +439,8 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
     .filter((e: CatalogEpisode) => Number.isFinite(e.season) && e.season >= 0 && e.episode >= 0)
     .sort((a: CatalogEpisode, b: CatalogEpisode) => a.season - b.season || a.episode - b.episode);
 
+  const malId = malIdOf(m, item.id);
+  const stats = earlyMal ? await earlyMal : malId ? await getMalStats(malId) : undefined;
   const genres = (Array.isArray(m?.genres) ? m.genres : Array.isArray(m?.genre) ? m.genre : []).filter((g: unknown) => typeof g === 'string').slice(0, 30);
   return {
     meta: {
@@ -404,6 +450,10 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
       runtime: str(m?.runtime, 40) || undefined,
       background: httpUrl(m?.background),
       imdbRating: str(m?.imdbRating, 10) || undefined,
+      malId,
+      malScore: stats?.score,
+      malScoredBy: stats?.scoredBy,
+      malRank: stats?.rank,
       episodes,
     },
     stale,
