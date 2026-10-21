@@ -5,6 +5,7 @@ import { getCacheStats } from '../cleanup';
 import { roomManager } from '../roomServer';
 import { getTools } from '../tools';
 import { getRedisStatus } from '../media/redis';
+import { catalogStatus } from '../catalog';
 
 /** GET /api/status — FFmpeg e Python foram encontrados? Só versões: o caminho no disco não sai do servidor. Mais: salas, pessoas e tempo no ar. */
 export async function handleStatus(_req: IncomingMessage, res: ServerResponse) {
@@ -17,6 +18,7 @@ export async function handleStatus(_req: IncomingMessage, res: ServerResponse) {
     ffmpeg: { found: ffmpeg.found, version: ffmpeg.version },
     python: { found: python.found, version: python.version, tooOld: python.tooOld === true },
     redis: await getRedisStatus(),
+    catalog: await catalogStatus(),
   });
 }
 

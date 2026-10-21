@@ -60,6 +60,8 @@ export const config = {
   roomStateTtlMs: num('ROOM_STATE_TTL_HOURS', 24) * 3600 * 1000,
   /** Depois de um restart, o Host antigo tem este tempo de prioridade para voltar antes de outro assumir. */
   hostGraceMs: num('ROOM_HOST_GRACE_SECONDS', 60) * 1000,
+  /** Fonte do catálogo: URL de instalação ou base de um addon do Stremio (AIOMetadata, Cinemeta…). Vazia = Cinemeta. */
+  catalogUrl: process.env.CATALOG_URL?.trim() || '',
   /** Ponto de partida (MB/s) da estimativa de quanto o FFmpeg lê de um CDN; depois de ler arquivos de verdade vale a média medida por host. */
   ffmpegThroughputMbps: num('FFMPEG_THROUGHPUT_MBPS', 40),
   /** Redis do índice de envios, opcional (`redis://127.0.0.1:6379`): sem isso, só disco. */

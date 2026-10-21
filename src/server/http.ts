@@ -29,6 +29,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   upstream_rate_limited: 'O servidor de vídeo pediu para esperar um pouco. Tente a legenda de novo em instantes.',
   url_blocked: 'Esse endereço não pode ser acessado pelo servidor.',
   upstream_failed: 'Não foi possível acessar o vídeo de origem.',
+  catalog_unavailable: 'O catálogo está fora do ar no momento.',
   too_large: 'Arquivo grande demais.',
   quota_exceeded: 'O servidor não tem mais espaço para envios.',
   file_over_quota: 'Esse arquivo é maior que o limite total de envios do servidor.',

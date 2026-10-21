@@ -25,6 +25,8 @@ interface StatusReport {
   ffmpeg: { found: boolean; version?: string };
   python: { found: boolean; version?: string; tooOld: boolean };
   redis: { enabled: boolean; connected: boolean };
+  /** Fonte do catálogo: `ok` respondeu agora, `stale` está servindo a última resposta guardada, `name` vem do manifesto. */
+  catalog?: { ok: boolean; stale: boolean; name: string; isDefault: boolean };
 }
 
 type Tone = 'success' | 'warning' | 'error';
@@ -122,7 +124,6 @@ export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
   const [serverDown, setServerDown] = useState(false);
   const [ping, setPing] = useState<number | null>(null);
   const [speed, setSpeed] = useState<number | null | 'measuring'>('measuring');
-  const [catalogOk, setCatalogOk] = useState<boolean | null>(null);
   const [running, setRunning] = useState(false);
 
   const run = useCallback(async () => {
@@ -133,14 +134,10 @@ export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
     setServerDown(!pingResult.ok);
     setPing(pingResult.ok ? pingResult.ms : null);
 
-    const [status, catalog] = await Promise.all([
-      fetch('/api/status', { cache: 'no-store' })
-        .then((r) => (r.ok ? (r.json() as Promise<StatusReport>) : null))
-        .catch(() => null),
-      timed('https://v3-cinemeta.strem.io/manifest.json'),
-    ]);
+    const status = await fetch('/api/status', { cache: 'no-store' })
+      .then((r) => (r.ok ? (r.json() as Promise<StatusReport>) : null))
+      .catch(() => null);
     setReport(status);
-    setCatalogOk(catalog.ok);
     setRunning(false);
 
     setSpeed(pingResult.ok ? await measureSpeed() : null);
@@ -181,12 +178,17 @@ export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
       });
     }
   }
-  if (catalogOk !== null) {
+  if (report?.catalog) {
+    const c = report.catalog;
     components.push({
       id: 'catalog',
       label: t('Catálogo'),
-      tone: catalogOk ? 'success' : 'warning',
-      detail: catalogOk ? t('Cinemeta respondendo') : t('Cinemeta fora do ar. Links de stream continuam funcionando.'),
+      tone: c.ok ? 'success' : 'warning',
+      detail: c.ok
+        ? t('Catálogo respondendo ({name})', { name: c.name || (c.isDefault ? 'Cinemeta' : t('fonte configurada')) })
+        : c.stale
+          ? t('Catálogo fora do ar; mostrando o último conteúdo guardado. Links de stream continuam funcionando.')
+          : t('Catálogo fora do ar. Links de stream continuam funcionando.'),
     });
   }
 

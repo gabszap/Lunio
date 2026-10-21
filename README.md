@@ -20,7 +20,7 @@ Lunio is a web video player built for watching together. Paste a stream link, up
 - **MKV support** — audio and subtitle tracks are detected with FFmpeg. Switching to another audio track plays it through a **shared HLS stream**: the video is copied (not re-encoded) and the chosen audio becomes AAC in ~6 s segments cached on the server, so everyone in the room who picks the same audio shares one FFmpeg, and seeking takes a fraction of a second. Files without a Matroska index or without H.264 video fall back to an on-the-fly fMP4 remux.
 - **Subtitles** — embedded ASS/SSA rendered with libass (JASSUB, WebAssembly) including embedded fonts; external `.ass`, `.srt` (converted to WebVTT) and `.vtt` by file or URL; sync offset and font size.
 - **Player** — chapter-segmented timeline, "Skip intro/outro" for detected chapters, playback speed, audio delay, volume boost, aspect modes, picture-in-picture, resume where you left off, keyboard shortcuts, and a link that opens at a given moment (`?room=CODE&t=90`, `t=1m30s` or `t=1:30`; honored by the Host or when watching alone). The room panel's Share menu has a "Link at this moment" option that copies one for where the video is now.
-- **Catalog** *(experimental)* — browse and search movies and series (metadata from Stremio's public Cinemeta addon), with seasons, episodes and a personal list. The catalog only provides metadata: to watch, you still pick a video source.
+- **Catalog** *(experimental)* — browse and search movies and series (metadata from a Stremio addon: Cinemeta by default, or your own AIOMetadata via `CATALOG_URL`), with seasons, episodes and a personal list. The catalog only provides metadata: to watch, you still pick a video source.
 - **Status page** — server health (FFmpeg, Python, Redis), rooms and people online, ping and speed to the server, uptime, version, cache, uploads and disk.
 - **Languages** — Portuguese and English; follows the browser language, switchable on the home screen.
 
@@ -69,6 +69,7 @@ Copy `.env.example` to `.env`. Locally nothing is required (only the Discord Act
 | `ROOM_STATE_TTL_HOURS` / `ROOM_HOST_GRACE_SECONDS` | With Redis: how long a room's saved state is valid (default 24) and how long the previous host has to come back after a restart before someone else takes over (default 60) |
 | `UPLOAD_IDLE_HOURS` | Hours an upload in an open room may go unread before it is removed (default 24) |
 | `MIN_FREE_DISK_GB` | Free space to keep on the machine's disk; uploads are refused below it (default 5) |
+| `CATALOG_URL` | *(optional)* Stremio addon that feeds the catalog: the install URL or base of an [AIOMetadata](https://github.com/cedya77/aiometadata) (`https://…/stremio/<uuid>/<config>/manifest.json`, `stremio://…` also works), or any addon with catalogs. Empty = Cinemeta. Keep it only in the server `.env`: it carries your config and keys |
 | `MAX_CACHE_GB` | Limit for `.cache/` (default 10, includes the HLS segments); the least recently used is deleted first |
 | `MAX_FFMPEG_PROCS` | FFmpeg/Python processes at once (default 8) |
 | `FFMPEG_THROUGHPUT_MBPS` | Starting guess (default 40) of how fast FFmpeg reads a CDN, used to choose between the subtitle extractor and reading the whole file. After real reads, the server uses the measured average per CDN host |
@@ -118,6 +119,7 @@ or plugged into the Vite dev/preview server (vite.config.ts)
 | `GET /api/fontmap?url=` | The names each embedded font can be requested by (family, full, PostScript). The player loads only the fonts the subtitle uses instead of all ~24 attached to the MKV |
 | `GET /api/resolve?url=` | Resolves Torrentio/debrid redirects to the final CDN URL |
 | `GET /api/upstream?url=` | Whether the video's provider (or its CDN) rate-limited the server just now (429). The player asks on a playback error to say "the provider limited the requests". Makes no request to the provider |
+| `GET /api/catalog/manifest`, `/row`, `/search`, `/meta` | The catalog (rows, search, details) from the configured source (`CATALOG_URL`, default Cinemeta), cached on the server; if the source is down it serves the last saved answer (`stale: true`). The source URL never reaches the browser |
 | `GET /api/room?id=` | Whether a room exists or was closed |
 | `POST /api/upload/start`, `PUT /api/upload/<id>?offset=`, `POST /api/upload/<id>/finish`, `DELETE /api/upload/<id>` | Chunked, resumable upload (up to 50 GB) into `.uploads/`. Chunks are 64 MB by default so each request stays under proxies that cap the body (Cloudflare's free plan allows 100 MB) |
 | `POST /api/uploads/claim`, `POST /api/uploads/status` | Reopen a recent upload in a new room, and check whether it is still on the server |
@@ -219,7 +221,7 @@ Open `https://lunio.example.com`, go to **Status**: Server, FFmpeg and Python sh
 
 ### Optional: Redis
 
-Lunio runs fine without Redis. With it, **rooms survive a restart or deploy**: the host, bans, queue, current video and position are saved and restored before the server accepts connections, and the previous host gets 60 s to come back (anyone reconnecting sooner joins as a viewer). Without it, a restart closes every open room. Chat and who is connected are never saved. Redis also keeps the upload index (last read, rooms, closed marks), which is rebuilt from disk on every start.
+Lunio runs fine without Redis. With it, **rooms survive a restart or deploy**: the host, bans, queue, current video and position are saved and restored before the server accepts connections, and the previous host gets 60 s to come back (anyone reconnecting sooner joins as a viewer). Without it, a restart closes every open room. Chat and who is connected are never saved. Redis also keeps the upload index (last read, rooms, closed marks), which is rebuilt from disk on every start, and the catalog responses (so a restart does not start the catalog source from cold).
 
 Redis is never the source of truth and never blocks the server: each call has a 300 ms ceiling and falls back silently (one log warning per minute). It holds no secrets worth persisting, so run it **in RAM only and bound to localhost**:
 

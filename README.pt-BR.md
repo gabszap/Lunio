@@ -20,7 +20,7 @@ O Lunio é um player de vídeo web feito para assistir junto. Cole um link de st
 - **Suporte a MKV** — as faixas de áudio e legenda são detectadas com o FFmpeg. Trocar de faixa de áudio toca por um **HLS compartilhado**: o vídeo é copiado (sem recodificar) e o áudio escolhido vira AAC em segmentos de ~6 s guardados no servidor. Quem está na sala e escolhe o mesmo áudio divide um único FFmpeg, e o seek leva uma fração de segundo. Arquivos sem índice Matroska ou sem vídeo H.264 caem no remux fMP4 na hora.
 - **Legendas** — ASS/SSA embutidas renderizadas com libass (JASSUB, WebAssembly), incluindo fontes embutidas; `.ass`, `.srt` (convertida para WebVTT) e `.vtt` externas por arquivo ou URL; ajuste de sincronia e tamanho da fonte.
 - **Player** — timeline dividida por capítulos, "Pular abertura/encerramento" nos capítulos detectados, velocidade, atraso do áudio, volume boost, modos de ajuste de tela, picture-in-picture, continuar de onde parou, atalhos de teclado e um link que abre num instante (`?room=CODIGO&t=90`, `t=1m30s` ou `t=1:30`; vale para o Host ou para quem assiste sozinho). O menu Compartilhar do painel da sala tem a opção "Link neste instante", que copia um para o ponto em que o vídeo está.
-- **Catálogo** *(experimental)* — navegue e busque filmes e séries (metadados do addon público Cinemeta, do Stremio), com temporadas, episódios e uma lista pessoal. O catálogo só fornece metadados: para assistir, você ainda escolhe uma fonte de vídeo.
+- **Catálogo** *(experimental)* — navegue e busque filmes e séries (metadados de um addon do Stremio: o Cinemeta por padrão, ou o seu AIOMetadata via `CATALOG_URL`), com temporadas, episódios e uma lista pessoal. O catálogo só fornece metadados: para assistir, você ainda escolhe uma fonte de vídeo.
 - **Página de status** — saúde do servidor (FFmpeg, Python, Redis), salas e pessoas online, ping e velocidade até o servidor, tempo no ar, versão, cache, envios e disco.
 - **Idiomas** — português e inglês; segue o idioma do navegador e dá para trocar na tela inicial.
 
@@ -69,6 +69,7 @@ Copie `.env.example` para `.env`. Localmente nada é obrigatório (só a Ativida
 | `MIN_FREE_DISK_GB` | Espaço livre a manter no disco da máquina; abaixo disso os envios são recusados (padrão 5) |
 | `REDIS_URL` | *(opcional)* Um Redis local, ex.: `redis://127.0.0.1:6379`. Com ele as salas sobrevivem a um restart e o índice dos envios fica nele. Veja [Redis](#opcional-redis) |
 | `ROOM_STATE_TTL_HOURS` / `ROOM_HOST_GRACE_SECONDS` | Com Redis: por quanto tempo o estado salvo de uma sala vale (padrão 24) e quanto tempo o Host anterior tem para voltar depois de um restart antes de outra pessoa assumir (padrão 60) |
+| `CATALOG_URL` | *(opcional)* Addon do Stremio que alimenta o catálogo: a URL de instalação ou a base de um [AIOMetadata](https://github.com/cedya77/aiometadata) (`https://…/stremio/<uuid>/<config>/manifest.json`, `stremio://…` também vale), ou qualquer addon com catálogos. Vazio = Cinemeta. Deixe só no `.env` do servidor: ela leva a sua configuração e chaves |
 | `MAX_CACHE_GB` | Limite de `.cache/` (padrão 10, inclui os segmentos HLS); apaga primeiro o menos usado |
 | `MAX_FFMPEG_PROCS` | Processos FFmpeg/Python ao mesmo tempo (padrão 8) |
 | `FFMPEG_THROUGHPUT_MBPS` | Palpite inicial (padrão 40) de quão rápido o FFmpeg lê um CDN, usado para escolher entre o extrator de legendas e ler o arquivo todo. Depois de leituras reais, o servidor usa a média medida por host do CDN |
@@ -118,6 +119,7 @@ ou plugado no servidor de dev/preview do Vite (vite.config.ts)
 | `GET /api/fontmap?url=` | Os nomes pelos quais cada fonte embutida pode ser pedida (família, nome completo, PostScript). O player carrega só as fontes que a legenda usa, em vez das ~24 anexadas ao MKV |
 | `GET /api/resolve?url=` | Resolve redirecionamentos do Torrentio/debrid até a URL final da CDN |
 | `GET /api/upstream?url=` | Se o provedor do vídeo (ou o CDN dele) limitou o servidor agora (429). O player pergunta quando a reprodução falha, para dizer "o provedor limitou os pedidos". Não faz pedido nenhum ao provedor |
+| `GET /api/catalog/manifest`, `/row`, `/search`, `/meta` | O catálogo (fileiras, busca, detalhes) da fonte configurada (`CATALOG_URL`, padrão Cinemeta), com cache no servidor; se a fonte cair, serve a última resposta guardada (`stale: true`). A URL da fonte nunca chega ao navegador |
 | `GET /api/room?id=` | Se uma sala existe ou foi encerrada |
 | `POST /api/upload/start`, `PUT /api/upload/<id>?offset=`, `POST /api/upload/<id>/finish`, `DELETE /api/upload/<id>` | Envio em pedaços e retomável (até 50 GB) para `.uploads/`. Os pedaços são de 64 MB por padrão para cada requisição passar por proxies que limitam o corpo (o plano grátis da Cloudflare aceita 100 MB) |
 | `POST /api/uploads/claim`, `POST /api/uploads/status` | Reabre um envio recente numa sala nova e confere se ele ainda está no servidor |
@@ -219,7 +221,7 @@ Abra `https://lunio.exemplo.com` e vá em **Status**: Servidor, FFmpeg e Python 
 
 ### Opcional: Redis
 
-O Lunio funciona sem Redis. Com ele, **as salas sobrevivem a um restart ou deploy**: Host, bans, fila, vídeo atual e posição são salvos e restaurados antes de o servidor aceitar conexões, e o Host anterior tem 60 s para voltar (quem reconecta antes entra como espectador). Sem ele, um restart encerra todas as salas abertas. O chat e quem está conectado nunca são salvos. O Redis também guarda o índice dos envios (último uso, salas, marcas de sala fechada), reconstruído do disco a cada subida.
+O Lunio funciona sem Redis. Com ele, **as salas sobrevivem a um restart ou deploy**: Host, bans, fila, vídeo atual e posição são salvos e restaurados antes de o servidor aceitar conexões, e o Host anterior tem 60 s para voltar (quem reconecta antes entra como espectador). Sem ele, um restart encerra todas as salas abertas. O chat e quem está conectado nunca são salvos. O Redis também guarda o índice dos envios (último uso, salas, marcas de sala fechada), reconstruído do disco a cada subida, e as respostas do catálogo (para um restart não esfriar a fonte do catálogo).
 
 O Redis nunca é a fonte da verdade e nunca trava o servidor: cada chamada tem teto de 300 ms e cai para o comportamento sem Redis em silêncio (um aviso no log por minuto). Rode-o **só em RAM e preso ao localhost**. Este exemplo usa Docker; sem ele, `sudo apt install redis-server` também serve, desde que escute só em `127.0.0.1` e com a persistência desligada (`save ""`, `appendonly no`):
 
