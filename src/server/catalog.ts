@@ -99,8 +99,15 @@ async function persistedGet(key: string): Promise<{ value: any; at: number } | u
   });
 }
 
-function persistedSet(key: string, entry: { value: any; at: number }) {
-  void withRedis<void>(undefined, (r) => r.set(redisKeyOf(key), JSON.stringify(entry), 'PX', STALE_MS).then(() => undefined));
+/** No Redis (128 MB, compartilhado com salas e envios) buscas valem 1 h, que são as que não param de aparecer; o resto, 24 h. */
+const PERSIST_MS: Record<Kind, number> = { manifest: STALE_MS, rows: STALE_MS, meta: STALE_MS, search: 60 * 60_000 };
+/** Uma resposta enorme não vai para o Redis (fica só na memória do processo). */
+const PERSIST_MAX_BYTES = 512 * 1024;
+
+function persistedSet(key: string, entry: { value: any; at: number }, kind: Kind) {
+  const json = JSON.stringify(entry);
+  if (json.length > PERSIST_MAX_BYTES) return;
+  void withRedis<void>(undefined, (r) => r.set(redisKeyOf(key), json, 'PX', PERSIST_MS[kind]).then(() => undefined));
 }
 
 async function requestJson(url: string): Promise<any> {
@@ -160,7 +167,7 @@ export async function fetchCatalogJson(path: string, kind: Kind): Promise<{ data
     const data = await pending;
     const entry = { value: data, at: Date.now() };
     store.set(key, entry);
-    persistedSet(key, entry);
+    persistedSet(key, entry, kind);
     return { data, stale: false };
   } catch (err) {
     if (hit) {

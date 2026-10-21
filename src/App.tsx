@@ -10,6 +10,7 @@ import { RoomLobbyModal } from './components/RoomLobbyModal';
 import { UsernameModal, getLastUsername, shouldSkipNamePrompt } from './components/UsernameModal';
 import { SubtitleModal } from './components/SubtitleModal';
 import { Modal, PrimaryButton, Spinner } from './components/ui';
+import { readSearchFromUrl } from './lib/searchUrl';
 import { HomeLayout, HomeTab } from './components/home/HomeLayout';
 import { RoomMenu, SourceStep } from './components/home/RoomMenu';
 import { StreamStep } from './components/home/StreamStep';
@@ -58,7 +59,11 @@ export default function App() {
   // Trocar o idioma remonta a árvore inteira (a troca só existe na Home, sem vídeo tocando)
   const lang = useLang();
   const [view, setView] = useState<'home' | 'player'>('home');
-  const [homeTab, setHomeTab] = useState<HomeTab>('room');
+  // Link com `?search=` (sem sala) abre direto na busca do catálogo
+  const initialSearch = useRef(readSearchFromUrl());
+  const [homeTab, setHomeTab] = useState<HomeTab>(() =>
+    initialSearch.current && !new URLSearchParams(window.location.search).has('room') ? 'catalog' : 'room'
+  );
   const [homeStep, setHomeStep] = useState<HomeStep>('menu');
   const [joinPrefill, setJoinPrefill] = useState<{ code: string; error: JoinError | null }>({ code: '', error: null });
   const [watchIntent, setWatchIntent] = useState<WatchIntent | null>(null);
@@ -479,6 +484,7 @@ export default function App() {
           {homeTab === 'catalog' ? (
             <Suspense fallback={<PanelFallback />}>
               <CatalogTab
+                initialQuery={initialSearch.current}
                 onWatch={(intent) => {
                   setWatchIntent(intent);
                   setHomeTab('room');

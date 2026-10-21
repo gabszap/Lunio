@@ -20,6 +20,7 @@ import {
 } from '../../lib/catalog';
 import { GhostButton, IconButton, PillTabs, PrimaryButton, Spinner, TextButton, cx } from '../ui';
 import { t } from '../../lib/i18n';
+import { writeSearchToUrl } from '../../lib/searchUrl';
 
 export interface WatchIntent {
   title: string;
@@ -27,6 +28,8 @@ export interface WatchIntent {
 }
 
 interface CatalogTabProps {
+  /** Busca vinda do endereço (`?search=`). */
+  initialQuery?: string;
   onWatch: (intent: WatchIntent) => void;
   onCreateRoom: () => void;
 }
@@ -414,9 +417,9 @@ const HomeRows: React.FC<{
 
 type Filter = 'all' | 'movie' | 'series';
 
-export const CatalogTab: React.FC<CatalogTabProps> = ({ onWatch, onCreateRoom }) => {
-  const [query, setQuery] = useState('');
-  const [debounced, setDebounced] = useState('');
+export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', onWatch, onCreateRoom }) => {
+  const [query, setQuery] = useState(initialQuery);
+  const [debounced, setDebounced] = useState(initialQuery.trim());
   const [results, setResults] = useState<CatalogItem[] | null>(null);
   const [searchError, setSearchError] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
@@ -441,6 +444,12 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ onWatch, onCreateRoom })
     const t = window.setTimeout(() => setDebounced(query.trim()), 300);
     return () => window.clearTimeout(t);
   }, [query]);
+
+  // A busca vai para o endereço (e sai dele quando a aba fecha)
+  useEffect(() => {
+    writeSearchToUrl(debounced);
+  }, [debounced]);
+  useEffect(() => () => writeSearchToUrl(''), []);
 
   useEffect(() => {
     if (!debounced) {

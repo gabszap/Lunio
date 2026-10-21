@@ -38,6 +38,7 @@ async function mockCatalog(page: Page, opts: { manifestStatus?: number } = {}) {
       return json({ metas: ITEMS[id] ?? [], stale: false });
     }
     if (action === 'meta') return json({ meta: META, stale: false });
+    if (action === 'search') return json({ metas: [{ id: 'tt0000001', type: 'series', name: `Resultado de ${url.searchParams.get('q')}`, year: '2016' }], stale: false });
     return json({ metas: [], stale: false });
   });
   return rowRequests;
@@ -81,6 +82,32 @@ test.describe('Catálogo (fonte configurada no servidor)', () => {
     await expect(page.getByRole('heading', { name: 'O catálogo não respondeu' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Criar sala com um vídeo' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Tentar de novo' })).toBeVisible();
+    await page.close();
+  });
+
+  test('a busca vai para o endereço (?search=), um link com ela abre direto na busca e limpar a tira do endereço', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await mockCatalog(page);
+    await openCatalog(page);
+
+    await page.getByRole('searchbox').fill('re: zero');
+    await expect(page.getByText('Resultado de re: zero')).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('search')).toBe('re: zero');
+
+    // Recarregar (ou abrir o link) volta para a mesma busca, já na aba Catálogo
+    await page.reload();
+    await expect(page.getByRole('searchbox')).toHaveValue('re: zero');
+    await expect(page.getByText('Resultado de re: zero')).toBeVisible();
+
+    // Limpar a busca tira o parâmetro do endereço
+    await page.getByRole('button', { name: 'Limpar busca' }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.has('search')).toBe(false);
+
+    // Trocar de aba também (a busca não fica pendurada no endereço da sala ou do status)
+    await page.getByRole('searchbox').fill('naruto');
+    await expect.poll(() => new URL(page.url()).searchParams.get('search')).toBe('naruto');
+    await page.getByRole('tab', { name: /Status/ }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.has('search')).toBe(false);
     await page.close();
   });
 });
