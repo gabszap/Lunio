@@ -44,7 +44,7 @@ test('link com ?t= inválido é ignorado', async ({ browser }) => {
   await host.context.close();
 });
 
-test('"Neste instante" copia o link da sala com o ?t= do ponto em que o vídeo está', async ({ browser }) => {
+test('Compartilhar > "Link neste instante" copia o link da sala com o ?t= do ponto em que o vídeo está', async ({ browser }) => {
   const host = await newUser(browser);
   await host.context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const code = await createRoom(host.page, 'Ana');
@@ -58,7 +58,8 @@ test('"Neste instante" copia o link da sala com o ?t= do ponto em que o vídeo e
   await expect.poll(async () => (await state(host.page)).t, { timeout: 20_000 }).toBeGreaterThan(49);
 
   await host.page.keyboard.press('w'); // abre o painel da sala
-  await host.page.getByRole('button', { name: 'Neste instante' }).click();
+  await host.page.getByRole('button', { name: 'Compartilhar', expanded: false }).click();
+  await host.page.getByRole('menuitem', { name: /Link neste instante/ }).click();
   await expect(host.page.getByRole('button', { name: 'Link copiado' })).toBeVisible();
 
   const link = new URL(await host.page.evaluate(() => navigator.clipboard.readText()));
