@@ -59,11 +59,20 @@ export function extractCleanTitleFromUrl(urlStr: string): string {
       }
     });
 
+    const stripExt = (s: string) => s.replace(/\.[a-z0-9]+$/i, '').trim();
     const mediaPart = parts.slice().reverse().find((p) => /\.(mkv|mp4|avi|webm|mov|m4v|ts)$/i.test(p));
-    const raw = mediaPart || parts.filter(Boolean).pop() || '';
-    if (raw) {
-      return raw.replace(/\.[a-z0-9]+$/i, '').trim();
+    if (mediaPart) return stripExt(mediaPart);
+
+    // Links de playback (ex.: Comet) não têm o arquivo no caminho; o nome do release vem na query (`torrent_name`)
+    for (const key of ['torrent_name', 'filename', 'name']) {
+      const value = parsed.searchParams.get(key)?.trim();
+      // Só tira a extensão de vídeo: um release sem extensão ("Foo.S01E02.1080p") não pode perder o ".1080p"
+      if (value) return value.replace(/\.(mkv|mp4|avi|webm|mov|m4v|ts)$/i, '').trim();
     }
+
+    // Último trecho do caminho, a menos que seja só um número (índice de arquivo, "/0/0/2/1"): isso não é um título
+    const last = parts.filter(Boolean).pop() || '';
+    if (last && !/^\d+$/.test(last)) return stripExt(last);
   } catch {}
   return '';
 }
