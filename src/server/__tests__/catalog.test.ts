@@ -24,7 +24,7 @@ vi.mock('../media/redis', async (importOriginal) => {
 const { startApi } = await import('./helpers');
 const { createApiRouter } = await import('../app');
 const { config } = await import('../config');
-const { DEFAULT_CATALOG_URL, normalizeCatalogBase, resetCatalogCache, summarizeManifest } = await import('../catalog');
+const { DEFAULT_CATALOG_URL, malRetry, normalizeCatalogBase, resetCatalogCache, summarizeManifest } = await import('../catalog');
 
 /** Manifesto no formato do AIOMetadata/Stremio: fileiras, catálogos de busca (search obrigatório) e uma fileira que exige parâmetro. */
 const MANIFEST = {
@@ -48,6 +48,8 @@ let base: string;
 let hits: Record<string, number>;
 let failing: boolean;
 let jikanDown: boolean;
+let jikanFailures: number; // quantas respostas 429 antes de acertar
+let jikanNoScore: boolean;
 let errorItem: boolean; // a fonte responde 200 com um item de erro no lugar da lista
 let emptyList: boolean;
 let concurrent = 0;
@@ -65,7 +67,10 @@ beforeAll(async () => {
     const path = decodeURIComponent(req.url || '');
     hits[path] = (hits[path] || 0) + 1;
     // API do MyAnimeList (Jikan ou compatível): GET /anime/<id> com data.score
-    if (path.startsWith('/jikan/anime/')) return jikanDown ? respond(res, { error: { code: 'RATE_LIMITED' } }, 429) : respond(res, { data: { score: 8.25, scoredBy: 1607019, rank: 400 } });
+    if (path.startsWith('/jikan/anime/')) {
+      if (jikanDown || jikanFailures-- > 0) return respond(res, { error: { code: 'RATE_LIMITED' } }, 429);
+      return respond(res, { data: jikanNoScore ? { score: null } : { score: 8.25, scoredBy: 1607019, rank: 400 } });
+    }
     if (failing) return respond(res, { erro: 'fora' }, 503);
     // O caminho da fonte tem o UUID e a configuração da pessoa
     if (!path.startsWith('/stremio/UUID-SECRETO/CONFIG-SECRETA')) return respond(res, {}, 404);
@@ -87,6 +92,10 @@ beforeAll(async () => {
         { id: 'tmdb:2', type: 'movie', name: 'Outro Filme', poster: 'javascript:alert(1)', year: '2019' },
       ] });
     }
+    // Busca por nome de um anime que só se conhece pelo IMDb: o item do MAL vem com o imdb_id junto
+    if (rest.startsWith('/catalog/anime.series/search.anime_series/search=Anime IMDb')) {
+      return respond(res, { metas: [{ id: 'mal:99', type: 'series', imdb_id: 'tt0000003', name: 'Outro' }, { id: 'mal:777', type: 'series', imdb_id: 'tt0000002', name: 'Anime IMDb' }, { id: 'mal:778', type: 'series', imdb_id: 'tt0000002', name: 'Anime IMDb 2' }] });
+    }
     if (rest.startsWith('/catalog/anime.series/search.anime_series/search=')) {
       return respond(res, { metas: [{ id: 'mal:31240', imdb_id: 'tt5607616', type: 'series', name: 'Re:ZERO (anime)', releaseInfo: '2016', poster: 'https://cdn.myanimelist.net/x.jpg' }] });
     }
@@ -100,6 +109,8 @@ beforeAll(async () => {
     if (rest.startsWith('/catalog/movie/tmdb.popular')) return respond(res, { metas: [{ id: 'tt1', type: 'movie', name: 'Popular 1' }, { id: 'tt2', name: '' }, { type: 'movie' }] });
     if (rest.startsWith('/catalog/anime/mal.airing')) return respond(res, { metas: [{ id: 'mal:5114', type: 'anime', name: 'Anime A', poster: 'https://cdn.myanimelist.net/x.jpg' }] });
     if (rest.startsWith('/meta/series/tt0000001')) return respond(res, { meta: { id: 'tt0000001', type: 'series', name: 'Link Click', _malId: '5114', videos: [] } });
+    if (rest.startsWith('/meta/series/tt0000002')) return respond(res, { meta: { id: 'tt0000002', imdb_id: 'tt0000002', type: 'series', name: 'Anime IMDb', _originalLanguage: 'ja', videos: [] } });
+    if (rest.startsWith('/meta/series/tt0000004')) return respond(res, { meta: { id: 'tt0000004', imdb_id: 'tt0000004', type: 'series', name: 'Série Normal', _originalLanguage: 'en', genres: ['Drama'], videos: [] } });
     if (rest.startsWith('/meta/movie/tt0000009')) return respond(res, { meta: { id: 'tt0000009', type: 'movie', name: 'Sem MAL', videos: [] } });
     if (rest.startsWith('/meta/anime/')) {
       return respond(res, { meta: {
@@ -185,6 +196,9 @@ describe('/api/catalog/*', () => {
     hits = {};
     failing = false;
     jikanDown = false;
+    jikanFailures = 0;
+    jikanNoScore = false;
+    malRetry.delays = [0, 0]; // sem esperar de verdade entre as tentativas
     errorItem = false;
     emptyList = false;
     concurrent = 0;
@@ -378,36 +392,76 @@ describe('/api/catalog/*', () => {
     }
   });
 
-  it('meta de anime traz a nota do MyAnimeList (API do MAL), votos e ranking junto com o id', async () => {
-    const body = await json(await get(`meta?type=anime&id=${encodeURIComponent('mal:5114')}`));
-    expect(body.meta).toMatchObject({ malId: '5114', malScore: 8.25, malScoredBy: 1607019, malRank: 400 });
+  const malScore = async (id: string) => json(await get(`malscore?id=${id}`));
+
+  it('o detalhe do anime traz o id do MAL mas não espera a nota; a nota vem à parte (malscore) e depois já vem junto', async () => {
+    const first = await json(await get(`meta?type=anime&id=${encodeURIComponent('mal:5114')}`));
+    expect(first.meta).toMatchObject({ malId: '5114' });
+    expect(first.meta.malScore).toBeUndefined();
+    expect(hits['/jikan/anime/5114']).toBeUndefined(); // o detalhe não foi à API do MAL
+
+    expect(await malScore('5114')).toEqual({ score: 8.25, scoredBy: 1607019, rank: 400, failed: false });
+    expect(hits['/jikan/anime/5114']).toBe(1);
+
+    // guardada: o detalhe seguinte já traz a nota e a rota não volta à API
+    const again = await json(await get(`meta?type=anime&id=${encodeURIComponent('mal:5114')}`));
+    expect(again.meta).toMatchObject({ malScore: 8.25, malRank: 400, malScoredBy: 1607019 });
+    await malScore('5114');
     expect(hits['/jikan/anime/5114']).toBe(1);
   });
 
-  it('item do IMDb com _malId no detalhe também recebe a nota (pelo _malId)', async () => {
+  it('item do IMDb com _malId no detalhe também tem o id do MAL para a nota', async () => {
     const body = await json(await get('meta?type=series&id=tt0000001'));
-    expect(body.meta).toMatchObject({ id: 'tt0000001', malId: '5114', malScore: 8.25 });
+    expect(body.meta).toMatchObject({ id: 'tt0000001', malId: '5114' });
+    expect((await malScore('5114')).score).toBe(8.25);
   });
 
-  it('API do MAL fora do ar (ou limitando): o detalhe vem do mesmo jeito, só sem a nota', async () => {
+  it('título do IMDb que é anime (idioma original ja) acha o id do MAL pela busca de anime da fonte', async () => {
+    const body = await json(await get('meta?type=series&id=tt0000002'));
+    // o item com o mesmo IMDb e a 1ª temporada na ordem da fonte (mal:777, não o mal:99 de outro IMDb)
+    expect(body.meta).toMatchObject({ id: 'tt0000002', malId: '777' });
+    expect((await malScore('777')).score).toBe(8.25);
+  });
+
+  it('série que não é anime não gasta uma busca nem tem id do MAL', async () => {
+    const body = await json(await get('meta?type=series&id=tt0000004'));
+    expect(body.meta.malId).toBeUndefined();
+    expect(Object.keys(hits).filter((p) => p.includes('search=') || p.startsWith('/jikan'))).toEqual([]);
+  });
+
+  it('a API do MAL falha na 1ª tentativa (429) e a nota vem na 2ª', async () => {
+    jikanFailures = 1;
+    expect(await malScore('5114')).toMatchObject({ score: 8.25, failed: false });
+    expect(hits['/jikan/anime/5114']).toBe(2);
+  });
+
+  it('API do MAL fora do ar: 3 tentativas, `failed: true`, e por 1 min não insiste (o detalhe nunca esperou por isso)', async () => {
     jikanDown = true;
-    const res = await get(`meta?type=anime&id=${encodeURIComponent('mal:5114')}`);
-    expect(res.status).toBe(200);
-    const body = await json(res);
-    expect(body.meta).toMatchObject({ name: 'Anime A', malId: '5114' });
-    expect(body.meta.malScore).toBeUndefined();
+    const detail = await get(`meta?type=anime&id=${encodeURIComponent('mal:5114')}`);
+    expect(detail.status).toBe(200);
+    expect((await json(detail)).meta).toMatchObject({ name: 'Anime A', malId: '5114' });
+
+    expect(await malScore('5114')).toEqual({ score: null, failed: true });
+    expect(hits['/jikan/anime/5114']).toBe(3);
+    expect(await malScore('5114')).toEqual({ score: null, failed: true });
+    expect(hits['/jikan/anime/5114']).toBe(3); // dentro da janela: sem novas tentativas
+
+    // a API volta e, passada a janela, a nota aparece
+    jikanDown = false;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + 90_000);
+      expect(await malScore('5114')).toMatchObject({ score: 8.25, failed: false });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('a nota fica guardada: abrir o mesmo anime de novo não volta à API do MAL; e quem não é do MAL nem pergunta', async () => {
-    await get(`meta?type=anime&id=${encodeURIComponent('mal:5114')}`);
-    resetCatalogCache(); // o detalhe em si não está guardado; a nota está (no Redis falso)
-    await get(`meta?type=anime&id=${encodeURIComponent('mal:5114')}`);
-    expect(hits['/jikan/anime/5114']).toBe(1);
-
-    const hitsBefore = Object.keys(hits).filter((p) => p.startsWith('/jikan')).length;
-    const plain = await json(await get('meta?type=movie&id=tt0000009'));
-    expect(plain.meta.malId).toBeUndefined();
-    expect(Object.keys(hits).filter((p) => p.startsWith('/jikan')).length).toBe(hitsBefore);
+  it('id inválido na rota da nota: 400; anime sem nota (sem votos) não é falha', async () => {
+    expect((await get('malscore?id=abc')).status).toBe(400);
+    expect((await get('malscore?id=1;2')).status).toBe(400);
+    jikanNoScore = true;
+    expect(await malScore('42')).toEqual({ score: null, failed: false });
   });
 
   it('/api/status traz o estado do catálogo (ok, nome) e, fora do ar, ok false', async () => {

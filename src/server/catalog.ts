@@ -398,29 +398,94 @@ export interface MalStats {
   rank?: number;
 }
 
+/** Tentativas da nota (prazo de cada uma e espera antes da seguinte). Mutável só para os testes não esperarem de verdade. */
+export const malRetry = { timeouts: [7000, 10000, 12000], delays: [1000, 2000] };
+/** Depois de esgotar as tentativas, não tenta de novo o mesmo anime por este tempo. */
+const MAL_FAIL_WINDOW_MS = 60_000;
+const malFailedAt = new BoundedCache<number>(500, MAL_FAIL_WINDOW_MS, () => Date.now());
+
+export interface MalScoreResult {
+  /** Nota 0–10, ou null: sem nota (anime ainda sem votos) ou a API não respondeu (`failed`). */
+  score: number | null;
+  scoredBy?: number;
+  rank?: number;
+  /** A API não respondeu nas tentativas: vale tentar de novo daqui a pouco. */
+  failed: boolean;
+}
+
+const jikanBase = () => normalizeCatalogBase(config.jikanUrl) || DEFAULT_JIKAN_URL;
+
+function parseMal(data: any): MalStats | undefined {
+  const d = data?.data ?? data;
+  const score = Number(d?.score);
+  if (!Number.isFinite(score) || score <= 0 || score > 10) return undefined;
+  const scoredBy = Number(d?.scoredBy ?? d?.scored_by);
+  const rank = Number(d?.rank);
+  return { score, scoredBy: Number.isFinite(scoredBy) && scoredBy > 0 ? scoredBy : undefined, rank: Number.isFinite(rank) && rank > 0 ? rank : undefined };
+}
+
+/** Só o que já está guardado (memória ou Redis): não vai à rede. Serve para o detalhe já vir com a nota quando ela é conhecida. */
+async function cachedMalStats(malId: string): Promise<MalStats | undefined> {
+  const key = `${jikanBase()}/anime/${malId}`;
+  let hit = store.get(key);
+  if (!hit) hit = await persistedGet(key);
+  return hit && Date.now() - hit.at < FRESH_MS.mal ? parseMal(hit.value) : undefined;
+}
+
 /**
- * Nota do anime no MyAnimeList, pela API configurada em `JIKAN_URL` (Jikan ou compatível: `GET <base>/anime/<id>` com
- * `data.score`). Guardada por 24 h (memória e Redis). Nunca atrapalha o detalhe: sem resposta em 6 s, ou com erro, é nada.
+ * Nota do anime no MyAnimeList, pela API configurada em `JIKAN_URL` (instância compatível com o Jikan: `GET <base>/anime/<id>`
+ * com `data.score`). Até 3 tentativas com espera entre elas (a instância pode estar fria ou limitando); guardada por 24 h.
+ * É pedida à parte do detalhe: a página nunca espera por ela.
  */
-export async function getMalStats(malId: string): Promise<MalStats | undefined> {
-  if (!/^\d{1,10}$/.test(malId)) return undefined;
-  try {
-    const base = normalizeCatalogBase(config.jikanUrl) || DEFAULT_JIKAN_URL;
-    const { data } = await fetchCatalogJson(`/anime/${malId}`, 'mal', { base, timeoutMs: 6000 });
-    const d = data?.data ?? data;
-    const score = Number(d?.score);
-    if (!Number.isFinite(score) || score <= 0 || score > 10) return undefined;
-    const scoredBy = Number(d?.scoredBy ?? d?.scored_by);
-    const rank = Number(d?.rank);
-    return { score, scoredBy: Number.isFinite(scoredBy) && scoredBy > 0 ? scoredBy : undefined, rank: Number.isFinite(rank) && rank > 0 ? rank : undefined };
-  } catch {
-    return undefined;
+export async function fetchMalScore(malId: string): Promise<MalScoreResult> {
+  if (!/^\d{1,10}$/.test(malId)) return { score: null, failed: false };
+  const cached = await cachedMalStats(malId);
+  if (cached) return { ...cached, failed: false };
+  if (malFailedAt.get(malId)) return { score: null, failed: true };
+
+  const path = `/anime/${malId}`;
+  for (let attempt = 0; attempt < malRetry.timeouts.length; attempt++) {
+    try {
+      const { data } = await fetchCatalogJson(path, 'mal', { base: jikanBase(), timeoutMs: malRetry.timeouts[attempt] });
+      const stats = parseMal(data);
+      return stats ? { ...stats, failed: false } : { score: null, failed: false };
+    } catch {
+      if (attempt < malRetry.timeouts.length - 1) await new Promise((r) => setTimeout(r, malRetry.delays[attempt] ?? 0));
+    }
   }
+  malFailedAt.set(malId, Date.now());
+  console.warn(`[Catálogo] Sem a nota do MAL para ${malId} depois de ${malRetry.timeouts.length} tentativas.`);
+  return { score: null, failed: true };
+}
+
+/** Anime pelo que o detalhe diz: idioma original japonês ou gênero de animação. */
+function looksLikeAnime(m: any, genres: string[]): boolean {
+  return str(m?._originalLanguage, 10).toLowerCase() === 'ja' || genres.some((g) => /anim/i.test(g));
+}
+
+/**
+ * O IMDb não diz qual é o anime no MyAnimeList. Os itens do catálogo de busca de anime da fonte trazem os dois ids
+ * (`mal:<id>` com o `imdb_id` junto): procura pelo nome e fica com o que tem o mesmo IMDb (a 1ª temporada, na ordem da fonte).
+ */
+async function resolveMalId(type: string, name: string, imdbId: string): Promise<string | undefined> {
+  try {
+    const wanted = type === 'movie' ? 'movie' : 'series';
+    const manifest = await getManifest();
+    const catalogs = manifest.searchCatalogs.filter((c) => c.type.startsWith('anime') && (c.type === 'anime' || c.type.includes(wanted))).slice(0, 2);
+    for (const c of catalogs) {
+      const { data } = await fetchCatalogJson(`/catalog/${c.type}/${encodeURIComponent(c.id)}/search=${encodeURIComponent(name.slice(0, 100))}.json`, 'search');
+      for (const raw of Array.isArray(data?.metas) ? data.metas : []) {
+        const item = toItem(raw, c.type);
+        if (item?.imdbId === imdbId && item.id.startsWith('mal:') && /^\d{1,10}$/.test(item.id.slice(4))) return item.id.slice(4);
+      }
+    }
+  } catch {
+    // sem o id do MAL o detalhe só fica sem a nota
+  }
+  return undefined;
 }
 
 export async function getMeta(type: string, id: string): Promise<{ meta: CatalogMeta; stale: boolean }> {
-  // Em item do MAL o id já diz qual é: a nota é pedida junto, sem esperar o detalhe
-  const earlyMal = id.startsWith('mal:') ? getMalStats(id.slice(4)) : null;
   const { data, stale } = await fetchCatalogJson(`/meta/${type}/${encodeURIComponent(id)}.json`, 'meta');
   const m = data?.meta;
   const item = toItem({ ...m, id: m?.id ?? id }, type);
@@ -439,9 +504,12 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
     .filter((e: CatalogEpisode) => Number.isFinite(e.season) && e.season >= 0 && e.episode >= 0)
     .sort((a: CatalogEpisode, b: CatalogEpisode) => a.season - b.season || a.episode - b.episode);
 
-  const malId = malIdOf(m, item.id);
-  const stats = earlyMal ? await earlyMal : malId ? await getMalStats(malId) : undefined;
   const genres = (Array.isArray(m?.genres) ? m.genres : Array.isArray(m?.genre) ? m.genre : []).filter((g: unknown) => typeof g === 'string').slice(0, 30);
+  let malId = malIdOf(m, item.id);
+  // Título do IMDb (tt…) que é anime e não diz o id do MAL: acha pelo catálogo de busca de anime da própria fonte
+  if (!malId && item.imdbId && looksLikeAnime(m, genres)) malId = await resolveMalId(type, item.name, item.imdbId);
+  // A nota não atrasa o detalhe: vem junto só se já estiver guardada; senão o cliente a pede em /api/catalog/malscore
+  const stats = malId ? await cachedMalStats(malId) : undefined;
   return {
     meta: {
       ...item,

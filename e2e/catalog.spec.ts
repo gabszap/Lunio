@@ -18,7 +18,7 @@ const ITEMS: Record<string, any[]> = {
 };
 const META = {
   id: 'mal:5114', type: 'anime', name: 'Anime Três', year: '2023', genres: ['Action'], description: 'Sinopse do anime.',
-  imdbId: 'tt5607616', imdbRating: '8.3', malId: '5114', malScore: 8.25, malRank: 400,
+  imdbId: 'tt5607616', imdbRating: '8.3', malId: '5114',
   episodes: [
     { id: 'e11', season: 1, episode: 1, title: 'Primeiro' },
     { id: 'e12', season: 1, episode: 2, title: 'Segundo' },
@@ -26,7 +26,8 @@ const META = {
   ],
 };
 
-async function mockCatalog(page: Page, opts: { manifestStatus?: number } = {}) {
+async function mockCatalog(page: Page, opts: { manifestStatus?: number; malFailures?: number } = {}) {
+  let malFailures = opts.malFailures ?? 0;
   const rowRequests: string[] = [];
   await page.route('**/api/catalog/**', async (route) => {
     const url = new URL(route.request().url());
@@ -39,6 +40,8 @@ async function mockCatalog(page: Page, opts: { manifestStatus?: number } = {}) {
       return json({ metas: ITEMS[id] ?? [], stale: false });
     }
     if (action === 'meta') return json({ meta: META, stale: false });
+    // A nota do MyAnimeList vem à parte (o detalhe nunca espera por ela); `failed: true` simula a API do MAL sem responder
+    if (action === 'malscore') return malFailures-- > 0 ? json({ score: null, failed: true }) : json({ score: 8.25, scoredBy: 1607019, rank: 400, failed: false });
     if (action === 'search') {
       const q = url.searchParams.get('q');
       return json({
@@ -195,6 +198,44 @@ test.describe('Catálogo (fonte configurada no servidor)', () => {
     await expect(page.getByRole('tab', { name: 'Unificada', selected: true })).toBeVisible();
     await page.getByRole('tab', { name: 'Por grupos' }).click();
     await expect(page.locator('section[aria-label] h2')).toHaveText(['Series Search', 'Anime Series Search']);
+    await page.close();
+  });
+
+  test('a nota do MAL vem depois do detalhe e, se a API falhar, o navegador tenta de novo sozinho', async ({ browser }) => {
+    test.setTimeout(60_000);
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await mockCatalog(page, { malFailures: 1 }); // a 1ª resposta é "falhou"
+    await openCatalog(page);
+    await page.getByRole('button', { name: /Anime Três/ }).click();
+
+    // O detalhe já está na tela, com o selo do MAL sem nota (só o link)
+    await expect(page.getByRole('heading', { name: 'Anime Três', level: 1 })).toBeVisible();
+    const mal = page.getByRole('link', { name: /MyAnimeList/ });
+    await expect(mal).toHaveAttribute('href', 'https://myanimelist.net/anime/5114');
+    await expect(mal).not.toContainText('8.25');
+    // ...e ~5 s depois a nova tentativa traz a nota
+    await expect(mal).toContainText('8.25', { timeout: 15_000 });
+    await page.close();
+  });
+
+  test('a temporada aberta vai para o endereço (?season=), um link com ela abre nela e fechar o título a tira', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await mockCatalog(page);
+    await openCatalog(page);
+    await page.getByRole('button', { name: /Anime Três/ }).click();
+
+    await expect.poll(() => new URL(page.url()).searchParams.get('season')).toBe('1');
+    await page.getByRole('tab', { name: 'Especiais' }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('season')).toBe('0');
+    expect(page.url()).toContain('detail=anime/mal:5114'); // o detalhe continua legível ao lado
+
+    // Recarregar volta na mesma temporada
+    await page.reload();
+    await expect(page.getByRole('tab', { name: 'Especiais', selected: true })).toBeVisible();
+    await expect(page.getByText('1. Especial de verão')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Catálogo' }).last().click();
+    await expect.poll(() => new URL(page.url()).searchParams.has('season')).toBe(false);
     await page.close();
   });
 });

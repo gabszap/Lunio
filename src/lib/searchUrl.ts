@@ -52,3 +52,22 @@ export function writeDetailToUrl(ref: DetailRef | null) {
   const next = url.pathname + search + url.hash;
   if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.replaceState(null, '', next);
 }
+
+// ───────────── temporada aberta ─────────────
+
+const SEASON = 'season';
+
+/** `?season=2` (0 = especiais), como no Stremio; qualquer outra coisa é ignorada. */
+export function readSeasonFromUrl(search = typeof window === 'undefined' ? '' : window.location.search): number | null {
+  const raw = new URLSearchParams(search).get(SEASON) ?? '';
+  return /^\d{1,3}$/.test(raw) ? Number(raw) : null;
+}
+
+export function writeSeasonToUrl(season: number | null) {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  if (season === null) url.searchParams.delete(SEASON);
+  else url.searchParams.set(SEASON, String(season));
+  const next = url.pathname + url.search.replace(/(detail=)([^&]*)/, (_m, k: string, v: string) => k + v.replace(/%2F/gi, '/').replace(/%3A/gi, ':')) + url.hash;
+  if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.replaceState(null, '', next);
+}

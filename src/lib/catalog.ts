@@ -106,6 +106,27 @@ export async function searchCatalog(query: string): Promise<SearchGroup[]> {
   return data.groups || [];
 }
 
+export interface MalScore {
+  /** Nota 0–10 (null: sem nota ainda, ou a API do MAL não respondeu: ver `failed`). */
+  score: number | null;
+  scoredBy?: number;
+  rank?: number;
+  failed: boolean;
+}
+
+const malScores = new Map<string, MalScore>();
+
+/** Nota do anime no MyAnimeList. O servidor já tenta 3 vezes; só respostas boas ficam guardadas aqui. */
+export async function fetchMalScore(malId: string): Promise<MalScore> {
+  const cached = malScores.get(malId);
+  if (cached) return cached;
+  const res = await apiFetch(`/api/catalog/malscore?${new URLSearchParams({ id: malId })}`);
+  if (!res.ok) throw new Error(`Catálogo ${res.status}`);
+  const body = (await res.json()) as MalScore;
+  if (!body.failed) malScores.set(malId, body);
+  return body;
+}
+
 export async function fetchMeta(type: CatalogType, id: string): Promise<CatalogMeta> {
   const data = await getJson<{ meta: CatalogMeta }>(`meta?${new URLSearchParams({ type, id })}`);
   return data.meta;

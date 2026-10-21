@@ -8,6 +8,7 @@ import {
   GENRES_PT,
   SearchGroup,
   episodeTag,
+  fetchMalScore,
   fetchManifest,
   fetchMeta,
   fetchRow,
@@ -22,7 +23,7 @@ import {
 } from '../../lib/catalog';
 import { GhostButton, IconButton, PillTabs, PrimaryButton, Spinner, TextButton, cx } from '../ui';
 import { t } from '../../lib/i18n';
-import { DetailRef, writeDetailToUrl, writeSearchToUrl } from '../../lib/searchUrl';
+import { DetailRef, writeDetailToUrl, writeSearchToUrl, writeSeasonToUrl } from '../../lib/searchUrl';
 import { ImdbIcon, MalIcon } from './BrandIcons';
 
 export interface WatchIntent {
@@ -34,6 +35,8 @@ interface CatalogTabProps {
   /** Busca e título vindos do endereço (`?search=`, `?detail=`). */
   initialQuery?: string;
   initialDetail?: DetailRef | null;
+  /** Temporada do título aberto pelo endereço (`?season=`). */
+  initialSeason?: number | null;
   onWatch: (intent: WatchIntent) => void;
   onCreateRoom: () => void;
 }
@@ -193,7 +196,7 @@ const Row: React.FC<{
 
 /** Selo com a marca de uma fonte (IMDb, MyAnimeList): vira link para a página do título quando há endereço. */
 const BrandBadge: React.FC<{ href?: string; label: string; icon: React.ReactNode; children: React.ReactNode }> = ({ href, label, icon, children }) => {
-  const cls = 'inline-flex items-center gap-1.5 h-7 px-2 border border-white/18 rounded-md text-[12px] font-semibold text-lu-text no-underline';
+  const cls = 'inline-flex items-center gap-2 h-10 px-3 border border-white/18 rounded-lg text-[15px] font-semibold text-lu-text no-underline';
   return href ? (
     <a href={href} target="_blank" rel="noopener noreferrer" title={label} aria-label={label} className={cx(cls, 'hover:bg-white/8')}>
       {icon}
@@ -207,10 +210,11 @@ const BrandBadge: React.FC<{ href?: string; label: string; icon: React.ReactNode
   );
 };
 
-const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent: WatchIntent) => void }> = ({ item, onBack, onWatch }) => {
+const Detail: React.FC<{ item: CatalogItem; initialSeason?: number | null; onBack: () => void; onWatch: (intent: WatchIntent) => void }> = ({ item, initialSeason = null, onBack, onWatch }) => {
   const [meta, setMeta] = useState<CatalogMeta | null>(null);
   const [error, setError] = useState(false);
-  const [season, setSeason] = useState<number>(1);
+  const [season, setSeason] = useState<number>(initialSeason ?? 1);
+  const [malStats, setMalStats] = useState<{ score: number; rank?: number } | null>(null);
   const [saved, setSaved] = useState(() => isInMyList(item.id));
 
   useEffect(() => {
@@ -219,17 +223,53 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
     fetchMeta(item.type, item.id)
       .then((m) => {
         setMeta(m);
-        const first = seasonOrder(m.episodes.map((e) => e.season))[0];
-        if (first !== undefined) setSeason(first);
+        const order = seasonOrder(m.episodes.map((e) => e.season));
+        // A temporada do endereço vale se o título a tem; senão, a primeira
+        if (initialSeason !== null && order.includes(initialSeason)) setSeason(initialSeason);
+        else if (order[0] !== undefined) setSeason(order[0]);
       })
       .catch(() => setError(true));
   }, [item]);
+
+  // A nota do MyAnimeList vem à parte, com novas tentativas (a API pode estar fria ou limitando): o detalhe nunca espera por ela
+  useEffect(() => {
+    setMalStats(null);
+    const malId = meta?.malId;
+    if (!malId) return;
+    if (meta.malScore !== undefined) {
+      setMalStats({ score: meta.malScore, rank: meta.malRank });
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      for (const wait of [0, 5000, 15000]) {
+        if (wait) await new Promise((r) => setTimeout(r, wait));
+        if (cancelled) return;
+        try {
+          const r = await fetchMalScore(malId);
+          if (cancelled) return;
+          if (r.score !== null) return void setMalStats({ score: r.score, rank: r.rank });
+          if (!r.failed) return; // sem nota (ainda sem votos): não adianta insistir
+        } catch {
+          // tenta de novo
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [meta?.malId, meta?.malScore, meta?.malRank]);
 
   const data = meta ?? { ...item, genres: [], episodes: [] as CatalogMeta['episodes'], description: undefined, runtime: undefined, imdbRating: undefined, background: undefined };
   // 1, 2, 3… e os especiais (temporada 0) no fim
   const seasons = useMemo(() => seasonOrder(data.episodes.map((e) => e.season)), [data.episodes]);
   const episodes = data.episodes.filter((e) => e.season === season);
   const isSeries = isSeriesType(item.type);
+  // A temporada aberta vai para o endereço (`?season=`) e sai dele ao fechar o título
+  useEffect(() => {
+    writeSeasonToUrl(isSeries && seasons.length > 0 ? season : null);
+  }, [season, isSeries, seasons.length]);
+  useEffect(() => () => writeSeasonToUrl(null), []);
   const firstEpisode = data.episodes.find((e) => e.season >= 1) ?? data.episodes[0];
 
   const watchTitle = (preferSolo: boolean) => {
@@ -288,7 +328,7 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
                     <BrandBadge
                       href={data.imdbId ? `https://www.imdb.com/title/${data.imdbId}/` : undefined}
                       label={data.imdbRating ? `${t('Nota do IMDb')}: ${data.imdbRating}` : t('Abrir no IMDb')}
-                      icon={<ImdbIcon size={16} />}
+                      icon={<ImdbIcon />}
                     >
                       {data.imdbRating ?? 'IMDb'}
                     </BrandBadge>
@@ -297,13 +337,13 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
                     <BrandBadge
                       href={`https://myanimelist.net/anime/${data.malId}`}
                       label={
-                        data.malScore !== undefined
-                          ? `${t('Nota do MyAnimeList')}: ${data.malScore.toFixed(2)}${data.malRank ? ` · ${t('ranking')} #${data.malRank}` : ''}`
+                        malStats
+                          ? `${t('Nota do MyAnimeList')}: ${malStats.score.toFixed(2)}${malStats.rank ? ` · ${t('ranking')} #${malStats.rank}` : ''}`
                           : t('Abrir no MyAnimeList')
                       }
-                      icon={<MalIcon size={16} />}
+                      icon={<MalIcon />}
                     >
-                      {data.malScore !== undefined ? data.malScore.toFixed(2) : 'MyAnimeList'}
+                      {malStats ? malStats.score.toFixed(2) : 'MyAnimeList'}
                     </BrandBadge>
                   )}
                 </p>
@@ -463,7 +503,7 @@ function readSearchMode(): SearchMode {
   }
 }
 
-export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initialDetail = null, onWatch, onCreateRoom }) => {
+export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initialDetail = null, initialSeason = null, onWatch, onCreateRoom }) => {
   const [query, setQuery] = useState(initialQuery);
   const [debounced, setDebounced] = useState(initialQuery.trim());
   /** Um grupo por catálogo de busca da fonte (como no Stremio). */
@@ -529,7 +569,8 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   }, [selected]);
 
   if (selected) {
-    return <Detail item={selected} onBack={() => setSelected(null)} onWatch={onWatch} />;
+    const fromUrl = initialDetail && initialDetail.id === selected.id && initialDetail.type === selected.type;
+    return <Detail key={`${selected.type}/${selected.id}`} item={selected} initialSeason={fromUrl ? initialSeason : null} onBack={() => setSelected(null)} onWatch={onWatch} />;
   }
 
   const groupsTotal = results?.reduce((n, g) => n + g.metas.length, 0) ?? 0;

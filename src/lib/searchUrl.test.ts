@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readDetailFromUrl, readSearchFromUrl, writeDetailToUrl, writeSearchToUrl } from './searchUrl';
+import { readDetailFromUrl, readSearchFromUrl, readSeasonFromUrl, writeDetailToUrl, writeSearchToUrl, writeSeasonToUrl } from './searchUrl';
 
 describe('readSearchFromUrl', () => {
   it('lê a busca (com acento, dois-pontos e espaço, nas duas formas de codificar)', () => {
@@ -80,6 +80,38 @@ describe('título aberto (?detail=)', () => {
       expect(current).toBe('/?search=re%3A+zero&detail=series/mal:31240');
       writeDetailToUrl(null);
       expect(current).toBe('/?search=re%3A+zero');
+    });
+  });
+});
+
+describe('temporada aberta (?season=)', () => {
+  it('lê o número (0 = especiais) e ignora o resto', () => {
+    expect(readSeasonFromUrl('?season=2')).toBe(2);
+    expect(readSeasonFromUrl('?season=0')).toBe(0);
+    for (const bad of ['', '?season=', '?season=-1', '?season=a', '?season=1.5', '?season=9999']) expect(readSeasonFromUrl(bad), bad).toBeNull();
+  });
+
+  describe('writeSeasonToUrl', () => {
+    let current = '/?search=re&detail=series/mal:31240';
+    beforeEach(() => {
+      current = '/?search=re&detail=series/mal:31240';
+      vi.stubGlobal('window', {
+        get location() {
+          const u = new URL(current, 'https://lunio.test');
+          return { href: u.href, pathname: u.pathname, search: u.search, hash: u.hash };
+        },
+        history: { replaceState: (_s: unknown, _t: string, url: string) => (current = url) },
+      });
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('grava a temporada mantendo o resto (o detalhe continua legível) e a remove ao fechar', () => {
+      writeSeasonToUrl(2);
+      expect(current).toBe('/?search=re&detail=series/mal:31240&season=2');
+      writeSeasonToUrl(0);
+      expect(current).toBe('/?search=re&detail=series/mal:31240&season=0');
+      writeSeasonToUrl(null);
+      expect(current).toBe('/?search=re&detail=series/mal:31240');
     });
   });
 });

@@ -10,7 +10,7 @@ import { RoomLobbyModal } from './components/RoomLobbyModal';
 import { UsernameModal, getLastUsername, shouldSkipNamePrompt } from './components/UsernameModal';
 import { SubtitleModal } from './components/SubtitleModal';
 import { Modal, PrimaryButton, Spinner } from './components/ui';
-import { readDetailFromUrl, readSearchFromUrl } from './lib/searchUrl';
+import { readDetailFromUrl, readSearchFromUrl, readSeasonFromUrl } from './lib/searchUrl';
 import { HomeLayout, HomeTab } from './components/home/HomeLayout';
 import { RoomMenu, SourceStep } from './components/home/RoomMenu';
 import { StreamStep } from './components/home/StreamStep';
@@ -62,6 +62,7 @@ export default function App() {
   // Link com `?search=` ou `?detail=` (sem sala) abre direto no catálogo
   const initialSearch = useRef(readSearchFromUrl());
   const initialDetail = useRef(readDetailFromUrl());
+  const initialSeason = useRef(readSeasonFromUrl());
   const [homeTab, setHomeTab] = useState<HomeTab>(() =>
     (initialSearch.current || initialDetail.current) && !new URLSearchParams(window.location.search).has('room') ? 'catalog' : 'room'
   );
@@ -487,6 +488,7 @@ export default function App() {
               <CatalogTab
                 initialQuery={initialSearch.current}
                 initialDetail={initialDetail.current}
+                initialSeason={initialSeason.current}
                 onWatch={(intent) => {
                   setWatchIntent(intent);
                   setHomeTab('room');
