@@ -2,15 +2,20 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Film, Play, Search, SearchX, Star, Tv, Users, X, RefreshCw } from 'lucide-react';
 import {
   CatalogItem,
+  CatalogManifest,
   CatalogMeta,
-  CatalogType,
+  CatalogRow,
   GENRES_PT,
   episodeTag,
+  fetchManifest,
   fetchMeta,
-  fetchTop,
+  fetchRow,
   getMyList,
   isInMyList,
+  isSeriesType,
+  rowTitles,
   searchCatalog,
+  seasonOrder,
   toggleMyList,
 } from '../../lib/catalog';
 import { GhostButton, IconButton, PillTabs, PrimaryButton, Spinner, TextButton, cx } from '../ui';
@@ -74,7 +79,7 @@ const PosterCard: React.FC<{ item: CatalogItem; onOpen: (item: CatalogItem) => v
     <span className="flex flex-col min-w-0 w-full">
       <span className="text-[13px] font-semibold text-lu-text truncate">{item.name}</span>
       <span className="text-[12px] text-lu-muted">
-        {showType ? `${item.type === 'series' ? t('Série') : t('Filme')}${item.year ? ` · ${item.year}` : ''}` : item.year || ' '}
+        {showType ? `${isSeriesType(item.type) ? t('Série') : t('Filme')}${item.year ? ` · ${item.year}` : ''}` : item.year || ' '}
       </span>
     </span>
   </button>
@@ -82,15 +87,39 @@ const PosterCard: React.FC<{ item: CatalogItem; onOpen: (item: CatalogItem) => v
 
 // ───────────────────────── Fileira com rolagem ─────────────────────────
 
-const Row: React.FC<{ title: string; load: () => Promise<CatalogItem[]>; onOpen: (item: CatalogItem) => void; items?: CatalogItem[] }> = ({
-  title,
-  load,
-  onOpen,
-  items: fixedItems,
-}) => {
+const Row: React.FC<{
+  title: string;
+  load: () => Promise<CatalogItem[]>;
+  onOpen: (item: CatalogItem) => void;
+  items?: CatalogItem[];
+  /** Só pede os itens quando a fileira chega perto da tela (uma fonte pode ter dezenas de fileiras). */
+  lazy?: boolean;
+}> = ({ title, load, onOpen, items: fixedItems, lazy = false }) => {
   const [items, setItems] = useState<CatalogItem[] | null>(fixedItems ?? null);
   const [error, setError] = useState(false);
+  const [visible, setVisible] = useState(!lazy);
   const scroller = useRef<HTMLDivElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (visible) return;
+    const el = sectionRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      setVisible(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: '400px' }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visible]);
 
   const fetchItems = () => {
     setError(false);
@@ -104,8 +133,8 @@ const Row: React.FC<{ title: string; load: () => Promise<CatalogItem[]>; onOpen:
       setItems(fixedItems);
       return;
     }
-    fetchItems();
-  }, [fixedItems]);
+    if (visible) fetchItems();
+  }, [fixedItems, visible]);
 
   const scrollBy = (dir: 1 | -1) => {
     const el = scroller.current;
@@ -113,7 +142,7 @@ const Row: React.FC<{ title: string; load: () => Promise<CatalogItem[]>; onOpen:
   };
 
   return (
-    <section aria-label={title} className="flex flex-col gap-2">
+    <section ref={sectionRef} aria-label={title} className="flex flex-col gap-2">
       <div className="flex items-center justify-between h-11">
         <h2 className="m-0 text-[18px] font-semibold tracking-[-0.01em]">{title}</h2>
         <div className="hidden sm:flex">
@@ -167,17 +196,18 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
     fetchMeta(item.type, item.id)
       .then((m) => {
         setMeta(m);
-        const first = m.episodes.find((e) => e.season >= 1)?.season;
-        if (first) setSeason(first);
+        const first = seasonOrder(m.episodes.map((e) => e.season))[0];
+        if (first !== undefined) setSeason(first);
       })
       .catch(() => setError(true));
   }, [item]);
 
   const data = meta ?? { ...item, genres: [], episodes: [] as CatalogMeta['episodes'], description: undefined, runtime: undefined, imdbRating: undefined, background: undefined };
-  const seasons = useMemo(() => Array.from(new Set(data.episodes.map((e) => e.season))).sort((a, b) => a - b), [data.episodes]);
+  // 1, 2, 3… e os especiais (temporada 0) no fim
+  const seasons = useMemo(() => seasonOrder(data.episodes.map((e) => e.season)), [data.episodes]);
   const episodes = data.episodes.filter((e) => e.season === season);
-  const isSeries = item.type === 'series';
-  const firstEpisode = data.episodes[0];
+  const isSeries = isSeriesType(item.type);
+  const firstEpisode = data.episodes.find((e) => e.season >= 1) ?? data.episodes[0];
 
   const watchTitle = (preferSolo: boolean) => {
     const title = isSeries && firstEpisode ? `${data.name} · ${episodeTag(firstEpisode.season, firstEpisode.episode)}` : data.name;
@@ -186,7 +216,9 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
 
   const metaLine = [
     data.year,
-    isSeries && seasons.length ? `${seasons.length} ${seasons.length === 1 ? t('temporada') : t('temporadas')}` : data.runtime,
+    isSeries && seasons.length
+      ? `${seasons.filter((s) => s >= 1).length || seasons.length} ${(seasons.filter((s) => s >= 1).length || seasons.length) === 1 ? t('temporada') : t('temporadas')}`
+      : data.runtime,
     data.genres.slice(0, 3).map((g) => t(GENRES_PT[g] || g)).join(', '),
   ].filter(Boolean);
 
@@ -281,7 +313,7 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
                 size="sm"
                 value={String(season)}
                 onChange={(v) => setSeason(Number(v))}
-                options={seasons.map((s) => ({ value: String(s), label: t('Temporada {s}', { s }) }))}
+                options={seasons.map((s) => ({ value: String(s), label: s === 0 ? t('Especiais') : t('Temporada {s}', { s }) }))}
               />
             </div>
           </div>
@@ -306,7 +338,7 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
                 </span>
                 <span className="flex flex-col gap-1 min-w-0">
                   <span className="text-[14px] font-semibold">
-                    {ep.episode}. {ep.title}
+                    {ep.episode}. {ep.title || t('Episódio {v1}', { v1: ep.episode })}
                   </span>
                   <span className="text-[12px] text-lu-muted">
                     {[episodeTag(ep.season, ep.episode), ep.released ? new Date(ep.released).toLocaleDateString('pt-BR') : null].filter(Boolean).join(' · ')}
@@ -322,9 +354,65 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
   );
 };
 
+// ───────────────────────── Fileiras da Home (do manifesto da fonte) ─────────────────────────
+
+const HomeRows: React.FC<{
+  manifest: CatalogManifest | null | 'error';
+  onOpen: (item: CatalogItem) => void;
+  onRetry: () => void;
+  onCreateRoom: () => void;
+}> = ({ manifest, onOpen, onRetry, onCreateRoom }) => {
+  if (manifest === null) {
+    return (
+      <>
+        {[0, 1].map((i) => (
+          <Row key={i} title=" " load={async () => []} onOpen={onOpen} lazy />
+        ))}
+      </>
+    );
+  }
+  if (manifest === 'error') {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+        <span className="w-[72px] h-[72px] rounded-[20px] bg-lu-surface border border-lu-border text-lu-muted flex items-center justify-center">
+          <SearchX size={32} />
+        </span>
+        <h1 className="mt-2 mb-0 text-[22px] font-semibold tracking-[-0.02em]">{t('O catálogo não respondeu')}</h1>
+        <p className="m-0 max-w-[440px] text-[14px] text-lu-muted">
+          {t('O catálogo está fora do ar agora. Se você já tem o vídeo, dá pra criar a sala direto.')}
+        </p>
+        <div className="flex flex-wrap justify-center gap-3 mt-3">
+          <GhostButton onClick={onRetry}>
+            <RefreshCw size={16} />
+            <span>{t('Tentar de novo')}</span>
+          </GhostButton>
+          <PrimaryButton onClick={onCreateRoom}>
+            <Users size={18} />
+            <span>{t('Criar sala com um vídeo')}</span>
+          </PrimaryButton>
+        </div>
+      </div>
+    );
+  }
+  if (manifest.rows.length === 0) {
+    return <p className="m-0 text-center text-[14px] text-lu-muted py-10">{t('Esta fonte não tem listas para mostrar. Use a busca.')}</p>;
+  }
+  const titles = rowTitles(manifest.rows);
+  return (
+    <>
+      {manifest.stale && (
+        <p className="m-0 text-[13px] text-lu-muted text-center">{t('O catálogo está fora do ar; mostrando o último conteúdo guardado.')}</p>
+      )}
+      {manifest.rows.map((row: CatalogRow, i) => (
+        <Row key={`${row.type}:${row.id}`} title={titles[i]} load={() => fetchRow(row)} onOpen={onOpen} lazy />
+      ))}
+    </>
+  );
+};
+
 // ───────────────────────── Aba ─────────────────────────
 
-type Filter = 'all' | CatalogType;
+type Filter = 'all' | 'movie' | 'series';
 
 export const CatalogTab: React.FC<CatalogTabProps> = ({ onWatch, onCreateRoom }) => {
   const [query, setQuery] = useState('');
@@ -334,6 +422,20 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ onWatch, onCreateRoom })
   const [filter, setFilter] = useState<Filter>('all');
   const [selected, setSelected] = useState<CatalogItem | null>(null);
   const [myList, setMyList] = useState<CatalogItem[]>(() => getMyList());
+  /** As fileiras vêm do manifesto da fonte configurada no servidor (na ordem dela). */
+  const [manifest, setManifest] = useState<CatalogManifest | null | 'error'>(null);
+  const [manifestTry, setManifestTry] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setManifest(null);
+    fetchManifest()
+      .then((m) => !cancelled && setManifest(m))
+      .catch(() => !cancelled && setManifest('error'));
+    return () => {
+      cancelled = true;
+    };
+  }, [manifestTry]);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebounced(query.trim()), 300);
@@ -366,8 +468,8 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ onWatch, onCreateRoom })
     return <Detail item={selected} onBack={() => setSelected(null)} onWatch={onWatch} />;
   }
 
-  const movies = results?.filter((r) => r.type === 'movie') ?? [];
-  const series = results?.filter((r) => r.type === 'series') ?? [];
+  const movies = results?.filter((r) => !isSeriesType(r.type)) ?? [];
+  const series = results?.filter((r) => isSeriesType(r.type)) ?? [];
   const shown = filter === 'all' ? results ?? [] : filter === 'movie' ? movies : series;
 
   return (
@@ -454,9 +556,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ onWatch, onCreateRoom })
       ) : (
         <>
           {myList.length > 0 && <Row title={t('Minha lista')} load={async () => myList} items={myList} onOpen={setSelected} />}
-          <Row title={t('Filmes populares')} load={() => fetchTop('movie')} onOpen={setSelected} />
-          <Row title={t('Séries populares')} load={() => fetchTop('series')} onOpen={setSelected} />
-          <Row title={t('Ação')} load={() => fetchTop('movie', 'Action')} onOpen={setSelected} />
+          <HomeRows manifest={manifest} onOpen={setSelected} onRetry={() => setManifestTry((n) => n + 1)} onCreateRoom={onCreateRoom} />
         </>
       )}
     </div>
