@@ -172,9 +172,11 @@ describe.skipIf(!ffmpegOk)('rotas de mídia (FFmpeg)', () => {
       const base = `ih:def|f:%d|n:teste.mkv|s:-${Date.now()}`;
       const get = (i: number) => fetch(`${api.base}/api/subtitle?url=${encodeURIComponent(mediaUrl)}&track=3&fingerprint=${encodeURIComponent(base.replace('%d', String(i)))}`, h());
       expect((await get(0)).status).toBe(200);
-      const n0 = listCache().length;
+      // Só as legendas: a extração de uma legenda também começa a ler as fontes do arquivo (pasta em `fonts/`)
+      const subtitleFiles = () => listCache().filter((f) => f.includes(`${path.sep}subtitles${path.sep}`)).length;
+      const n0 = subtitleFiles();
       expect((await get(1)).status).toBe(200);
-      expect(listCache().length).toBe(n0 + 1);
+      expect(subtitleFiles()).toBe(n0 + 1);
     });
 
     it('faixa que não existe: 422 EXTRACTION_FAILED, sem arquivo ASS falso e sem vazar detalhes', async () => {

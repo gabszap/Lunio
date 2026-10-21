@@ -19,7 +19,7 @@ Lunio is a web video player built for watching together. Paste a stream link, up
   - Google Drive files shared as "Anyone with the link".
 - **MKV support** — audio and subtitle tracks are detected with FFmpeg. Switching to another audio track plays it through a **shared HLS stream**: the video is copied (not re-encoded) and the chosen audio becomes AAC in ~6 s segments cached on the server, so everyone in the room who picks the same audio shares one FFmpeg, and seeking takes a fraction of a second. Files without a Matroska index or without H.264 video fall back to an on-the-fly fMP4 remux.
 - **Subtitles** — embedded ASS/SSA rendered with libass (JASSUB, WebAssembly) including embedded fonts; external `.ass`, `.srt` (converted to WebVTT) and `.vtt` by file or URL; sync offset and font size.
-- **Player** — chapter-segmented timeline, "Skip intro/outro" for detected chapters, playback speed, audio delay, volume boost, aspect modes, picture-in-picture, resume where you left off, keyboard shortcuts, and a link that opens at a given moment (`?room=CODE&t=90`, `t=1m30s` or `t=1:30`; honored by the Host or when watching alone). The room panel's "At this moment" button copies one for where the video is now.
+- **Player** — chapter-segmented timeline, "Skip intro/outro" for detected chapters, playback speed, audio delay, volume boost, aspect modes, picture-in-picture, resume where you left off, keyboard shortcuts, and a link that opens at a given moment (`?room=CODE&t=90`, `t=1m30s` or `t=1:30`; honored by the Host or when watching alone). The room panel's Share menu has a "Link at this moment" option that copies one for where the video is now.
 - **Catalog** *(experimental)* — browse and search movies and series (metadata from Stremio's public Cinemeta addon), with seasons, episodes and a personal list. The catalog only provides metadata: to watch, you still pick a video source.
 - **Status page** — server health (FFmpeg, Python, Redis), rooms and people online, ping and speed to the server, uptime, version, cache, uploads and disk.
 - **Languages** — Portuguese and English; follows the browser language, switchable on the home screen.
@@ -114,7 +114,8 @@ or plugged into the Vite dev/preview server (vite.config.ts)
 | `POST /api/hls/start`, `GET /api/hls/<id>/<audio>/index.m3u8`, `GET /api/hls/<id>/<audio>/<n>.ts` | Shared HLS for an alternate audio track: playlist and ~6 s segments generated on demand and cached (MKV with Cues + H.264 only; otherwise `start` answers 501 and the player uses the remux) |
 | `GET /api/tracks?url=` | Audio, subtitle, chapter and font tracks of a file |
 | `GET /api/subtitle?url=&track=` | Extracts an embedded subtitle (cached in `.cache/subtitles`) |
-| `GET /api/font?url=&track=` | Extracts an embedded font |
+| `GET /api/font?url=&track=` | Extracts an embedded font. Fonts are stored once per content (hardlinks in `.cache/fonts/_shared`), so episodes of the same group share them |
+| `GET /api/fontmap?url=` | The names each embedded font can be requested by (family, full, PostScript). The player loads only the fonts the subtitle uses instead of all ~24 attached to the MKV |
 | `GET /api/resolve?url=` | Resolves Torrentio/debrid redirects to the final CDN URL |
 | `GET /api/upstream?url=` | Whether the video's provider (or its CDN) rate-limited the server just now (429). The player asks on a playback error to say "the provider limited the requests". Makes no request to the provider |
 | `GET /api/room?id=` | Whether a room exists or was closed |

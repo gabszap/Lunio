@@ -4,7 +4,9 @@ import {
   MessageSquare,
   Crown,
   Share2,
+  Link2,
   Clock,
+  ChevronDown,
   Check,
   Send,
   X,
@@ -23,7 +25,8 @@ import { discordManager } from '../lib/discord';
 import { roomCodeFrom } from '../lib/roomCode';
 import type { RoomState, ChatMessage } from '../types/sync';
 import { setSkipNamePrompt, shouldSkipNamePrompt } from './UsernameModal';
-import { Avatar, Dot, IconButton, PrimaryButton, TextButton, TextInput, cx } from './ui';
+import { Avatar, Dot, IconButton, PrimaryButton, TextButton, TextInput, cx, useDismiss } from './ui';
+import { formatTime } from '../lib/chapters';
 import { t } from '../lib/i18n';
 
 interface WatchPartyPanelProps {
@@ -42,7 +45,11 @@ export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClos
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => [...syncManager.getChatHistory()]);
   const [chatInput, setChatInput] = useState<string>('');
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
-  const [copiedAtTime, setCopiedAtTime] = useState<boolean>(false);
+  /** Menu "Compartilhar": link da sala ou link neste instante. `shareAt` é o ponto do vídeo quando o menu abriu. */
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareAt, setShareAt] = useState(0);
+  const shareRef = useRef<HTMLDivElement>(null);
+  useDismiss(shareOpen, () => setShareOpen(false), shareRef);
   const [customRoomInput, setCustomRoomInput] = useState<string>('');
   const [isChangingRoom, setIsChangingRoom] = useState<boolean>(false);
   const [isEditingProfile, setIsEditingProfile] = useState<boolean>(false);
@@ -169,23 +176,21 @@ export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClos
     setIsEditingProfile(false);
   };
 
-  const handleCopyLink = () => {
+  /** Copia o link da sala; com `atSeconds`, ele abre o vídeo naquele instante (`?t=`: vale para o Host ou quem assiste sozinho). */
+  const copyRoomLink = (atSeconds?: number) => {
     const url = new URL(window.location.href);
     url.searchParams.set('room', currentRoomId);
-    url.searchParams.delete('t'); // o link da sala não carrega o instante de quem copiou
+    if (atSeconds === undefined) url.searchParams.delete('t'); // o link da sala não carrega o instante de quem copiou
+    else url.searchParams.set('t', String(Math.floor(atSeconds)));
     navigator.clipboard.writeText(url.toString()).catch(() => {});
+    setShareOpen(false);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
-  // Link da sala que abre no instante de agora (`?t=`): vale para o Host ou quem assiste sozinho; espectador segue o Host
-  const handleCopyLinkAtTime = () => {
-    const url = new URL(window.location.href);
-    url.searchParams.set('room', currentRoomId);
-    url.searchParams.set('t', String(Math.floor(syncManager.getPlayheadSeconds())));
-    navigator.clipboard.writeText(url.toString()).catch(() => {});
-    setCopiedAtTime(true);
-    setTimeout(() => setCopiedAtTime(false), 2000);
+  const toggleShareMenu = () => {
+    if (!shareOpen) setShareAt(syncManager.getPlayheadSeconds());
+    setShareOpen((open) => !open);
   };
 
   const handleSendMessage = (e?: React.FormEvent) => {
@@ -313,14 +318,38 @@ export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClos
               {isHost ? t('Você é o Host') : t('Você é espectador')}
             </span>
             <div className="flex gap-1">
-              <TextButton tone="text" size="sm" onClick={handleCopyLink} className="!h-10">
-                {copiedLink ? <Check size={16} className="text-lu-success" /> : <Share2 size={16} />}
-                {copiedLink ? t('Link copiado') : 'Compartilhar'}
-              </TextButton>
-              <TextButton tone="text" size="sm" onClick={handleCopyLinkAtTime} className="!h-10" title={t('Copiar o link da sala abrindo neste instante do vídeo')}>
-                {copiedAtTime ? <Check size={16} className="text-lu-success" /> : <Clock size={16} />}
-                {copiedAtTime ? t('Link copiado') : t('Neste instante')}
-              </TextButton>
+              <div ref={shareRef} className="relative">
+                <TextButton tone="text" size="sm" onClick={toggleShareMenu} className="!h-10" aria-haspopup="menu" aria-expanded={shareOpen}>
+                  {copiedLink ? <Check size={16} className="text-lu-success" /> : <Share2 size={16} />}
+                  {copiedLink ? t('Link copiado') : 'Compartilhar'}
+                  {!copiedLink && <ChevronDown size={14} className={cx('transition-transform', shareOpen && 'rotate-180')} />}
+                </TextButton>
+                {shareOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-full mt-1 z-30 w-[250px] p-1.5 rounded-[12px] bg-lu-elevated border border-lu-border shadow-[0_16px_40px_rgba(0,0,0,0.5)]"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => copyRoomLink()}
+                      className="w-full h-10 px-2.5 rounded-[10px] flex items-center gap-3 text-[14px] text-left text-lu-text bg-transparent hover:bg-white/6 border-0 cursor-pointer"
+                    >
+                      <Link2 size={16} className="flex-none text-lu-muted" />
+                      <span className="truncate">{t('Link da sala')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => copyRoomLink(shareAt)}
+                      className="w-full h-10 px-2.5 rounded-[10px] flex items-center gap-3 text-[14px] text-left text-lu-text bg-transparent hover:bg-white/6 border-0 cursor-pointer"
+                    >
+                      <Clock size={16} className="flex-none text-lu-muted" />
+                      <span className="truncate">{t('Link neste instante ({time})', { time: formatTime(shareAt) })}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
               <TextButton
                 size="sm"
                 className="!h-10"

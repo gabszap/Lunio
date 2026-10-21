@@ -19,7 +19,7 @@ O Lunio é um player de vídeo web feito para assistir junto. Cole um link de st
   - Arquivos do Google Drive compartilhados como "Qualquer pessoa com o link".
 - **Suporte a MKV** — as faixas de áudio e legenda são detectadas com o FFmpeg. Trocar de faixa de áudio toca por um **HLS compartilhado**: o vídeo é copiado (sem recodificar) e o áudio escolhido vira AAC em segmentos de ~6 s guardados no servidor. Quem está na sala e escolhe o mesmo áudio divide um único FFmpeg, e o seek leva uma fração de segundo. Arquivos sem índice Matroska ou sem vídeo H.264 caem no remux fMP4 na hora.
 - **Legendas** — ASS/SSA embutidas renderizadas com libass (JASSUB, WebAssembly), incluindo fontes embutidas; `.ass`, `.srt` (convertida para WebVTT) e `.vtt` externas por arquivo ou URL; ajuste de sincronia e tamanho da fonte.
-- **Player** — timeline dividida por capítulos, "Pular abertura/encerramento" nos capítulos detectados, velocidade, atraso do áudio, volume boost, modos de ajuste de tela, picture-in-picture, continuar de onde parou, atalhos de teclado e um link que abre num instante (`?room=CODIGO&t=90`, `t=1m30s` ou `t=1:30`; vale para o Host ou para quem assiste sozinho). O botão "Neste instante" do painel da sala copia um para o ponto em que o vídeo está.
+- **Player** — timeline dividida por capítulos, "Pular abertura/encerramento" nos capítulos detectados, velocidade, atraso do áudio, volume boost, modos de ajuste de tela, picture-in-picture, continuar de onde parou, atalhos de teclado e um link que abre num instante (`?room=CODIGO&t=90`, `t=1m30s` ou `t=1:30`; vale para o Host ou para quem assiste sozinho). O menu Compartilhar do painel da sala tem a opção "Link neste instante", que copia um para o ponto em que o vídeo está.
 - **Catálogo** *(experimental)* — navegue e busque filmes e séries (metadados do addon público Cinemeta, do Stremio), com temporadas, episódios e uma lista pessoal. O catálogo só fornece metadados: para assistir, você ainda escolhe uma fonte de vídeo.
 - **Página de status** — saúde do servidor (FFmpeg, Python, Redis), salas e pessoas online, ping e velocidade até o servidor, tempo no ar, versão, cache, envios e disco.
 - **Idiomas** — português e inglês; segue o idioma do navegador e dá para trocar na tela inicial.
@@ -114,7 +114,8 @@ ou plugado no servidor de dev/preview do Vite (vite.config.ts)
 | `POST /api/hls/start`, `GET /api/hls/<id>/<áudio>/index.m3u8`, `GET /api/hls/<id>/<áudio>/<n>.ts` | HLS compartilhado de uma faixa de áudio alternativa: playlist e segmentos de ~6 s gerados sob demanda e guardados em cache (só MKV com Cues + vídeo H.264; senão o `start` responde 501 e o player usa o remux) |
 | `GET /api/tracks?url=` | Faixas de áudio, legenda, capítulos e fontes de um arquivo |
 | `GET /api/subtitle?url=&track=` | Extrai uma legenda embutida (cache em `.cache/subtitles`) |
-| `GET /api/font?url=&track=` | Extrai uma fonte embutida |
+| `GET /api/font?url=&track=` | Extrai uma fonte embutida. As fontes ficam guardadas uma vez por conteúdo (hardlinks em `.cache/fonts/_shared`), então episódios do mesmo grupo as compartilham |
+| `GET /api/fontmap?url=` | Os nomes pelos quais cada fonte embutida pode ser pedida (família, nome completo, PostScript). O player carrega só as fontes que a legenda usa, em vez das ~24 anexadas ao MKV |
 | `GET /api/resolve?url=` | Resolve redirecionamentos do Torrentio/debrid até a URL final da CDN |
 | `GET /api/upstream?url=` | Se o provedor do vídeo (ou o CDN dele) limitou o servidor agora (429). O player pergunta quando a reprodução falha, para dizer "o provedor limitou os pedidos". Não faz pedido nenhum ao provedor |
 | `GET /api/room?id=` | Se uma sala existe ou foi encerrada |
