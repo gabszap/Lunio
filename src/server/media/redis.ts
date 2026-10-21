@@ -19,6 +19,8 @@ export const redisKeys = {
   roomClosed: (roomId: string) => `${PREFIX}room:closed:${roomId}`,
   // Prefixo próprio (não `room:<id>:state`): com ids livres, `room:closed:<id>` e `room:<id>:state` podiam se confundir
   roomState: (roomId: string) => `${PREFIX}roomstate:${roomId}`,
+  // Respostas do catálogo; o `hash` é do endereço pedido (que tem a configuração da pessoa), nunca o endereço
+  catalog: (hash: string) => `${PREFIX}catalog:${hash}`,
 };
 
 const TTL_MS = 48 * 60 * 60 * 1000;

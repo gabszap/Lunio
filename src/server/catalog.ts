@@ -1,5 +1,7 @@
+import crypto from 'node:crypto';
 import { BoundedCache } from './cache';
 import { config } from './config';
+import { redisKeys, withRedis } from './media/redis';
 
 /**
  * Catálogo de filmes e séries a partir de um addon do Stremio (AIOMetadata, Cinemeta…). O servidor é o único que fala
@@ -55,12 +57,51 @@ type Kind = 'manifest' | 'rows' | 'search' | 'meta';
 const FRESH_MS: Record<Kind, number> = { manifest: 60 * 60_000, rows: 15 * 60_000, search: 10 * 60_000, meta: 15 * 60_000 };
 /** Depois disso, mesmo com a fonte fora do ar, a resposta guardada não é mais servida. */
 const STALE_MS = 24 * 60 * 60_000;
-const UPSTREAM_TIMEOUT_MS = 10_000;
+/** Catálogos de streaming (Netflix, HBO…) numa instância fria passam de 10 s. */
+const UPSTREAM_TIMEOUT_MS = 20_000;
+/** Pedidos simultâneos à fonte: uma Home com muitas fileiras não deve disparar todas de uma vez numa instância fria. */
+const MAX_PARALLEL_UPSTREAM = 4;
+/** Resposta vazia (fonte fria ou lista que ainda não encheu) vale pouco: logo se pergunta de novo. */
+const EMPTY_FRESH_MS = 30_000;
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 const store = new BoundedCache<{ value: any; at: number }>(1500, STALE_MS);
 const inflight = new Map<string, Promise<any>>();
 let announced = false;
+
+let activeRequests = 0;
+const waiting: Array<() => void> = [];
+async function limited<T>(fn: () => Promise<T>): Promise<T> {
+  if (activeRequests >= MAX_PARALLEL_UPSTREAM) await new Promise<void>((resolve) => waiting.push(resolve));
+  activeRequests++;
+  try {
+    return await fn();
+  } finally {
+    activeRequests--;
+    waiting.shift()?.();
+  }
+}
+
+/** Algumas fontes respondem 200 com um item de erro no lugar da lista (ex.: "[❌] <nome do addon>"): isso é falha, não conteúdo. */
+export function isErrorPayload(data: any): boolean {
+  const names: unknown[] = Array.isArray(data?.metas) ? data.metas.map((m: any) => m?.name) : data?.meta ? [data.meta.name] : [];
+  return names.length > 0 && names.every((n) => typeof n === 'string' && /^\s*\[\s*(❌|✖|✗|x)\s*\]/i.test(n));
+}
+
+// ───────────── cache que sobrevive a restart (Redis, opcional) ─────────────
+
+const redisKeyOf = (key: string) => redisKeys.catalog(crypto.createHash('sha256').update(key).digest('hex').slice(0, 40));
+
+async function persistedGet(key: string): Promise<{ value: any; at: number } | undefined> {
+  return withRedis<{ value: any; at: number } | undefined>(undefined, async (r) => {
+    const raw = await r.get(redisKeyOf(key));
+    return raw ? JSON.parse(raw) : undefined;
+  });
+}
+
+function persistedSet(key: string, entry: { value: any; at: number }) {
+  void withRedis<void>(undefined, (r) => r.set(redisKeyOf(key), JSON.stringify(entry), 'PX', STALE_MS).then(() => undefined));
+}
 
 async function requestJson(url: string): Promise<any> {
   let res: Response;
@@ -96,17 +137,30 @@ export async function fetchCatalogJson(path: string, kind: Kind): Promise<{ data
     console.log(`[Catálogo] Fonte: ${hostLabel(base)} (${isDefaultCatalog() ? 'padrão' : 'configurada em CATALOG_URL'}).`);
   }
   const key = `${base}${path}`;
-  const hit = store.get(key);
-  if (hit && Date.now() - hit.at < FRESH_MS[kind]) return { data: hit.value, stale: false };
+  let hit = store.get(key);
+  // Depois de um restart a memória está vazia: o Redis (se houver) devolve o que já se sabia
+  if (!hit) {
+    hit = await persistedGet(key);
+    if (hit) store.set(key, hit);
+  }
+  const freshFor = (e: { value: any }) =>
+    (kind === 'rows' || kind === 'search') && Array.isArray(e.value?.metas) && e.value.metas.length === 0 ? EMPTY_FRESH_MS : FRESH_MS[kind];
+  if (hit && Date.now() - hit.at < freshFor(hit)) return { data: hit.value, stale: false };
 
   let pending = inflight.get(key);
   if (!pending) {
-    pending = requestJson(key).finally(() => inflight.delete(key));
+    pending = limited(async () => {
+      const data = await requestJson(key);
+      if (isErrorPayload(data)) throw new CatalogUnavailableError();
+      return data;
+    }).finally(() => inflight.delete(key));
     inflight.set(key, pending);
   }
   try {
     const data = await pending;
-    store.set(key, { value: data, at: Date.now() });
+    const entry = { value: data, at: Date.now() };
+    store.set(key, entry);
+    persistedSet(key, entry);
     return { data, stale: false };
   } catch (err) {
     if (hit) {
@@ -336,6 +390,8 @@ export function resetCatalogCache() {
   inflight.clear();
   announced = false;
   statusFailedAt = 0;
+  activeRequests = 0;
+  waiting.length = 0;
 }
 
 export { TYPE_RE as CATALOG_TYPE_RE, ID_RE as CATALOG_ID_RE };
