@@ -38,7 +38,16 @@ async function mockCatalog(page: Page, opts: { manifestStatus?: number } = {}) {
       return json({ metas: ITEMS[id] ?? [], stale: false });
     }
     if (action === 'meta') return json({ meta: META, stale: false });
-    if (action === 'search') return json({ metas: [{ id: 'tt0000001', type: 'series', name: `Resultado de ${url.searchParams.get('q')}`, year: '2016' }], stale: false });
+    if (action === 'search') {
+      const q = url.searchParams.get('q');
+      return json({
+        groups: [
+          { type: 'series', id: 'search.series', name: 'Series Search', metas: [{ id: 'tt0000001', type: 'series', name: `Resultado de ${q}`, year: '2016' }] },
+          { type: 'anime.series', id: 'search.anime_series', name: 'Anime Series Search', metas: [{ id: 'mal:5114', type: 'series', name: `Anime de ${q}`, year: '2016' }] },
+        ],
+        stale: false,
+      });
+    }
     return json({ metas: [], stale: false });
   });
   return rowRequests;
@@ -108,6 +117,39 @@ test.describe('Catálogo (fonte configurada no servidor)', () => {
     await expect.poll(() => new URL(page.url()).searchParams.get('search')).toBe('naruto');
     await page.getByRole('tab', { name: /Status/ }).click();
     await expect.poll(() => new URL(page.url()).searchParams.has('search')).toBe(false);
+    await page.close();
+  });
+
+  test('a busca vem em grupos, um por catálogo de busca da fonte (como no Stremio)', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await mockCatalog(page);
+    await openCatalog(page);
+
+    await page.getByRole('searchbox').fill('re: zero');
+    const titles = page.locator('section[aria-label] h2');
+    await expect(titles).toHaveText(['Series Search', 'Anime Series Search']);
+    await expect(page.getByText('Resultado de re: zero')).toBeVisible();
+    await expect(page.getByText('Anime de re: zero')).toBeVisible();
+    await expect(page.getByText('2 resultados')).toBeVisible();
+    await page.close();
+  });
+
+  test('o título aberto vai para o endereço (?detail=tipo/id), um link com ele abre direto e fechar o tira', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await mockCatalog(page);
+    await openCatalog(page);
+
+    await page.getByRole('button', { name: /Anime Três/ }).click();
+    await expect(page.getByRole('heading', { name: 'Anime Três', level: 1 })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('detail')).toBe('anime/mal:5114');
+    expect(page.url()).toContain('detail=anime/mal:5114'); // legível: / e : sem codificar
+
+    // Recarregar (ou abrir o link) volta para o mesmo título, já na aba Catálogo
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Anime Três', level: 1 })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Catálogo' }).last().click();
+    await expect.poll(() => new URL(page.url()).searchParams.has('detail')).toBe(false);
     await page.close();
   });
 });

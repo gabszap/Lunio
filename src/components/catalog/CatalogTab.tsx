@@ -6,6 +6,7 @@ import {
   CatalogMeta,
   CatalogRow,
   GENRES_PT,
+  SearchGroup,
   episodeTag,
   fetchManifest,
   fetchMeta,
@@ -20,7 +21,7 @@ import {
 } from '../../lib/catalog';
 import { GhostButton, IconButton, PillTabs, PrimaryButton, Spinner, TextButton, cx } from '../ui';
 import { t } from '../../lib/i18n';
-import { writeSearchToUrl } from '../../lib/searchUrl';
+import { DetailRef, writeDetailToUrl, writeSearchToUrl } from '../../lib/searchUrl';
 
 export interface WatchIntent {
   title: string;
@@ -28,8 +29,9 @@ export interface WatchIntent {
 }
 
 interface CatalogTabProps {
-  /** Busca vinda do endereço (`?search=`). */
+  /** Busca e título vindos do endereço (`?search=`, `?detail=`). */
   initialQuery?: string;
+  initialDetail?: DetailRef | null;
   onWatch: (intent: WatchIntent) => void;
   onCreateRoom: () => void;
 }
@@ -265,9 +267,9 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
                     </React.Fragment>
                   ))}
                   {data.imdbRating && (
-                    <span className="inline-flex items-center gap-1 px-1.5 border border-white/18 rounded text-[12px] font-semibold">
+                    <span title={t('Nota do IMDb')} className="inline-flex items-center gap-1 px-1.5 border border-white/18 rounded text-[12px] font-semibold">
                       <Star size={12} />
-                      {data.imdbRating}
+                      IMDb {data.imdbRating}
                     </span>
                   )}
                 </p>
@@ -415,15 +417,14 @@ const HomeRows: React.FC<{
 
 // ───────────────────────── Aba ─────────────────────────
 
-type Filter = 'all' | 'movie' | 'series';
-
-export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', onWatch, onCreateRoom }) => {
+export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initialDetail = null, onWatch, onCreateRoom }) => {
   const [query, setQuery] = useState(initialQuery);
   const [debounced, setDebounced] = useState(initialQuery.trim());
-  const [results, setResults] = useState<CatalogItem[] | null>(null);
+  /** Um grupo por catálogo de busca da fonte (como no Stremio). */
+  const [results, setResults] = useState<SearchGroup[] | null>(null);
   const [searchError, setSearchError] = useState(false);
-  const [filter, setFilter] = useState<Filter>('all');
-  const [selected, setSelected] = useState<CatalogItem | null>(null);
+  // Um link com `?detail=` abre o título direto; os dados completos vêm do detalhe
+  const [selected, setSelected] = useState<CatalogItem | null>(() => (initialDetail ? { id: initialDetail.id, type: initialDetail.type, name: '' } : null));
   const [myList, setMyList] = useState<CatalogItem[]>(() => getMyList());
   /** As fileiras vêm do manifesto da fonte configurada no servidor (na ordem dela). */
   const [manifest, setManifest] = useState<CatalogManifest | null | 'error'>(null);
@@ -450,6 +451,11 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', onWat
     writeSearchToUrl(debounced);
   }, [debounced]);
   useEffect(() => () => writeSearchToUrl(''), []);
+  // O título aberto também vai para o endereço
+  useEffect(() => {
+    writeDetailToUrl(selected ? { type: selected.type, id: selected.id } : null);
+  }, [selected]);
+  useEffect(() => () => writeDetailToUrl(null), []);
 
   useEffect(() => {
     if (!debounced) {
@@ -459,7 +465,6 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', onWat
     let cancelled = false;
     setResults(null);
     setSearchError(false);
-    setFilter('all');
     searchCatalog(debounced)
       .then((list) => !cancelled && setResults(list))
       .catch(() => !cancelled && setSearchError(true));
@@ -477,9 +482,8 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', onWat
     return <Detail item={selected} onBack={() => setSelected(null)} onWatch={onWatch} />;
   }
 
-  const movies = results?.filter((r) => !isSeriesType(r.type)) ?? [];
-  const series = results?.filter((r) => isSeriesType(r.type)) ?? [];
-  const shown = filter === 'all' ? results ?? [] : filter === 'movie' ? movies : series;
+  const total = results?.reduce((n, g) => n + g.metas.length, 0) ?? 0;
+  const groupTitles = results ? rowTitles(results) : [];
 
   return (
     <div className="flex flex-col gap-8">
@@ -510,7 +514,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', onWat
             <Spinner size={18} className="text-lu-accent" />
             {t('Buscando…')}
           </div>
-        ) : searchError || (results && results.length === 0) ? (
+        ) : searchError || (results && total === 0) ? (
           <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
             <span className="w-[72px] h-[72px] rounded-[20px] bg-lu-surface border border-lu-border text-lu-muted flex items-center justify-center">
               <SearchX size={32} />
@@ -539,27 +543,14 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', onWat
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="m-0 text-[14px] text-lu-muted">
                 <strong className="text-lu-text font-semibold">
-                  {results!.length} {results!.length === 1 ? t('resultado') : t('resultados')}
+                  {total} {total === 1 ? t('resultado') : t('resultados')}
                 </strong>{' '}
                 pra “{debounced}”
               </p>
-              <PillTabs
-                label={t('Filtrar')}
-                size="sm"
-                value={filter}
-                onChange={setFilter}
-                options={[
-                  { value: 'all' as Filter, label: t('Tudo') },
-                  { value: 'movie' as Filter, label: t('Filmes · {length}', { length: movies.length }) },
-                  { value: 'series' as Filter, label: t('Séries · {length}', { length: series.length }) },
-                ]}
-              />
             </div>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(152px,1fr))] gap-x-4 gap-y-6">
-              {shown.map((item) => (
-                <PosterCard key={`${item.type}-${item.id}`} item={item} onOpen={setSelected} showType fluid />
-              ))}
-            </div>
+            {results!.map((group, i) => (
+              <Row key={`${group.type}:${group.id}`} title={groupTitles[i]} load={async () => group.metas} items={group.metas} onOpen={setSelected} />
+            ))}
           </>
         )
       ) : (

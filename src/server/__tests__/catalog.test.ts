@@ -36,7 +36,10 @@ const MANIFEST = {
     { type: 'anime', id: 'mal.airing', name: 'Animes no ar', extra: [] },
     { type: 'movie', id: 'tmdb.search', name: 'Busca de filmes', extra: [{ name: 'search', isRequired: true }] },
     { type: 'series', id: 'tvdb.search', name: 'Busca de séries', extra: [{ name: 'search', isRequired: true }] },
-    { type: 'movie', id: 'so-com-genero', name: 'Exige gênero', extra: [{ name: 'genre', isRequired: true }] },
+    { type: 'movie', id: 'so-com-genero', name: 'Exige gênero', extra: [{ name: 'genre', isRequired: true, options: ['Ação', 'Drama'] }] },
+    // tipos com ponto e uma fileira que exige gênero mas só tem uma opção
+    { type: 'anime.series', id: 'search.anime_series', name: 'Anime Series Search', extra: [{ name: 'search', isRequired: true }] },
+    { type: 'anime', id: 'mal.top_series', name: 'MAL Melhores Séries', extra: [{ name: 'genre', isRequired: true, options: ['Top'] }] },
   ],
 };
 
@@ -81,6 +84,10 @@ beforeAll(async () => {
         { id: 'tmdb:2', type: 'movie', name: 'Outro Filme', poster: 'javascript:alert(1)', year: '2019' },
       ] });
     }
+    if (rest.startsWith('/catalog/anime.series/search.anime_series/search=')) {
+      return respond(res, { metas: [{ id: 'mal:31240', imdb_id: 'tt5607616', type: 'series', name: 'Re:ZERO (anime)', releaseInfo: '2016', poster: 'https://cdn.myanimelist.net/x.jpg' }] });
+    }
+    if (rest.startsWith('/catalog/anime/mal.top_series/genre=Top')) return respond(res, { metas: [{ id: 'mal:1', type: 'series', name: 'Top 1' }] });
     if (rest.startsWith('/catalog/series/tvdb.search/search=')) {
       return respond(res, { metas: [
         { id: 'tvdb:9', imdb_id: 'tt0000001', type: 'series', name: 'Link Click', releaseInfo: '2021–' }, // o mesmo título (mesmo IMDb)
@@ -128,9 +135,17 @@ describe('summarizeManifest', () => {
   it('fileiras = catálogos sem parâmetro obrigatório; busca = quem declara search', () => {
     const s = summarizeManifest(MANIFEST);
     expect(s.name).toBe('AIOMetadata');
-    expect(s.rows.map((r) => r.id)).toEqual(['tmdb.popular', 'tmdb.trending', 'mal.airing']);
+    // `so-com-genero` exige gênero com 2 opções: fora. `mal.top_series` exige gênero com uma só: entra com ele preenchido
+    expect(s.rows.map((r) => r.id)).toEqual(['tmdb.popular', 'tmdb.trending', 'mal.airing', 'mal.top_series']);
     expect(s.rows[0].genres).toEqual(['Ação', 'Drama']);
-    expect(s.searchCatalogs).toEqual([{ type: 'movie', id: 'tmdb.search' }, { type: 'series', id: 'tvdb.search' }]);
+    expect(s.rows[3]).toMatchObject({ type: 'anime', fixedGenre: 'Top' });
+    expect(s.rows[0].fixedGenre).toBeUndefined();
+    // inclui os catálogos de tipo com ponto (`anime.series`), que antes eram descartados
+    expect(s.searchCatalogs).toEqual([
+      { type: 'movie', id: 'tmdb.search', name: 'Busca de filmes' },
+      { type: 'series', id: 'tvdb.search', name: 'Busca de séries' },
+      { type: 'anime.series', id: 'search.anime_series', name: 'Anime Series Search' },
+    ]);
   });
 
   it('entende o formato antigo (extraSupported/extraRequired) e o Cinemeta', () => {
@@ -185,8 +200,8 @@ describe('/api/catalog/*', () => {
     expect(text).not.toContain(base);
     const body = JSON.parse(text);
     expect(body).toMatchObject({ name: 'AIOMetadata', isDefault: false, stale: false });
-    expect(body.rows).toHaveLength(3);
-    expect(body.searchCatalogs).toHaveLength(2);
+    expect(body.rows).toHaveLength(4);
+    expect(body.searchCatalogs).toHaveLength(3);
   });
 
   it('row: monta o caminho com gênero e skip, e devolve itens limpos (sem nome, descarta; id preservado)', async () => {
@@ -206,12 +221,38 @@ describe('/api/catalog/*', () => {
     expect((await get('nada')).status).toBe(404);
   });
 
-  it('search: junta os catálogos de busca, sem repetir o mesmo título, e descarta pôster que não é http(s)', async () => {
+  it('search: um grupo por catálogo de busca (como o Stremio), na ordem do manifesto, com os de tipo com ponto, sem pôster que não é http(s)', async () => {
     const body = await json(await get('search?q=Link%20Click'));
-    expect(body.metas.map((m: any) => m.id)).toEqual(['tmdb:1', 'tmdb:2', 'tvdb:10']); // tvdb:9 é o mesmo IMDb de tmdb:1
-    expect(body.metas[0]).toMatchObject({ imdbId: 'tt0000001', year: '2021' });
-    expect(body.metas[1].poster).toBeUndefined(); // javascript:… não passa
-    expect(Object.keys(hits).filter((p) => p.includes('search='))).toHaveLength(2);
+    expect(body.groups.map((g: any) => [g.id, g.name, g.metas.map((m: any) => m.id)])).toEqual([
+      ['tmdb.search', 'Busca de filmes', ['tmdb:1', 'tmdb:2']],
+      ['tvdb.search', 'Busca de séries', ['tvdb:9', 'tvdb:10']],
+      ['search.anime_series', 'Anime Series Search', ['mal:31240']],
+    ]);
+    // O mesmo título em dois catálogos aparece nos dois (cada fonte tem o seu id), e o item de anime é uma série com o IMDb junto
+    expect(body.groups[0].metas[0]).toMatchObject({ imdbId: 'tt0000001', year: '2021' });
+    expect(body.groups[1].metas[0]).toMatchObject({ imdbId: 'tt0000001' });
+    expect(body.groups[2].metas[0]).toMatchObject({ id: 'mal:31240', type: 'series', imdbId: 'tt5607616' });
+    expect(body.groups[0].metas[1].poster).toBeUndefined(); // javascript:… não passa
+    expect(Object.keys(hits).filter((p) => p.includes('search='))).toHaveLength(3);
+  });
+
+  it('search: catálogo sem resultado não vira grupo vazio', async () => {
+    const body = await json(await get('search?q=zzzz'));
+    expect(body.groups.length).toBeGreaterThan(0);
+    expect(body.groups.every((g: any) => g.metas.length > 0)).toBe(true);
+  });
+
+  it('row: fileira que exige um gênero de uma só opção é pedida com ele', async () => {
+    const manifest = await json(await get('manifest'));
+    const row = manifest.rows.find((r: any) => r.id === 'mal.top_series');
+    expect(row).toMatchObject({ type: 'anime', fixedGenre: 'Top' });
+    const body = await json(await get(`row?type=${row.type}&id=${row.id}&genre=${encodeURIComponent(row.fixedGenre)}`));
+    expect(body.metas[0]).toMatchObject({ id: 'mal:1', type: 'series' });
+  });
+
+  it('o tipo com ponto (anime.series) é aceito nas rotas', async () => {
+    expect((await get('row?type=anime.series&id=search.anime_series')).status).not.toBe(400);
+    expect((await get('row?type=a..b/c&id=x')).status).toBe(400);
   });
 
   it('meta: id composto vai codificado, episódios ordenados com a temporada 0 e sem os que não têm temporada', async () => {

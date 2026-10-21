@@ -187,6 +187,8 @@ export interface CatalogDef {
   name: string;
   /** Gêneros aceitos como filtro (vazio = a fileira não filtra). */
   genres: string[];
+  /** A fileira exige um gênero e só tem um: ele é preenchido sozinho (ex.: "MAL Melhores Séries"). */
+  fixedGenre?: string;
 }
 
 export interface CatalogManifest {
@@ -194,13 +196,14 @@ export interface CatalogManifest {
   /** Fileiras para a Home: catálogos que não exigem nenhum parâmetro (como `search`). */
   rows: CatalogDef[];
   /** Catálogos que respondem a busca. */
-  searchCatalogs: Array<{ type: string; id: string }>;
+  searchCatalogs: Array<{ type: string; id: string; name: string }>;
   isDefault: boolean;
   stale: boolean;
 }
 
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
-const TYPE_RE = /^[a-z][a-z0-9_-]{1,19}$/;
+// Tipos de catálogo podem ter ponto (`anime.series`, `anime.movie`)
+const TYPE_RE = /^[a-z][a-z0-9_.-]{1,29}$/;
 const ID_RE = /^[A-Za-z0-9_.:-]{1,100}$/;
 
 /** Os formatos antigo (`extraSupported`/`extraRequired`) e novo (`extra: [{ name, isRequired, options }]`) do Stremio. */
@@ -224,14 +227,17 @@ function extraInfo(cat: any): { supported: Set<string>; required: Set<string>; g
 
 export function summarizeManifest(manifest: any): Omit<CatalogManifest, 'isDefault' | 'stale'> {
   const rows: CatalogDef[] = [];
-  const searchCatalogs: Array<{ type: string; id: string }> = [];
+  const searchCatalogs: Array<{ type: string; id: string; name: string }> = [];
   for (const cat of Array.isArray(manifest?.catalogs) ? manifest.catalogs : []) {
-    const type = str(cat?.type, 20);
+    const type = str(cat?.type, 30);
     const id = str(cat?.id, 100);
     if (!TYPE_RE.test(type) || !ID_RE.test(id)) continue;
     const { supported, required, genres } = extraInfo(cat);
-    if (supported.has('search')) searchCatalogs.push({ type, id });
-    if (required.size === 0) rows.push({ type, id, name: str(cat?.name, 120) || id, genres });
+    const name = str(cat?.name, 120) || id;
+    if (supported.has('search')) searchCatalogs.push({ type, id, name });
+    if (required.size === 0) rows.push({ type, id, name, genres });
+    // Só o gênero é obrigatório e há uma única opção: dá para pedir a fileira com ela
+    else if (required.size === 1 && required.has('genre') && genres.length === 1) rows.push({ type, id, name, genres, fixedGenre: genres[0] });
   }
   return { name: str(manifest?.name, 80) || 'Catálogo', rows, searchCatalogs };
 }
@@ -309,32 +315,45 @@ export async function getRow(q: RowQuery): Promise<{ metas: CatalogItem[]; stale
 /** No máximo isto de catálogos de busca por pesquisa (uma instância pode declarar dezenas). */
 const MAX_SEARCH_CATALOGS = 8;
 
-export async function search(query: string): Promise<{ metas: CatalogItem[]; stale: boolean }> {
+export interface SearchGroup {
+  type: string;
+  id: string;
+  /** Nome do catálogo de busca, como a fonte o declara (ex.: "Anime Series Search"). */
+  name: string;
+  metas: CatalogItem[];
+}
+
+/**
+ * Como no Stremio: cada catálogo de busca da fonte devolve o seu grupo (anime, séries, filmes, pessoas…), na ordem do
+ * manifesto, sem mesclar nem esconder repetidos entre grupos (o mesmo título pode ter um id de cada fonte). Grupos vazios
+ * ficam de fora; se todos os catálogos falharem, é falha.
+ */
+export async function search(query: string): Promise<{ groups: SearchGroup[]; stale: boolean }> {
   const manifest = await getManifest();
   const catalogs = manifest.searchCatalogs.slice(0, MAX_SEARCH_CATALOGS);
-  if (catalogs.length === 0) return { metas: [], stale: manifest.stale };
+  if (catalogs.length === 0) return { groups: [], stale: manifest.stale };
 
   const q = encodeURIComponent(query);
   const results = await Promise.allSettled(
-    catalogs.map((c) => fetchCatalogJson(`/catalog/${c.type}/${encodeURIComponent(c.id)}/search=${q}.json`, 'search').then((r) => ({ ...r, type: c.type })))
+    catalogs.map((c) => fetchCatalogJson(`/catalog/${c.type}/${encodeURIComponent(c.id)}/search=${q}.json`, 'search').then((r) => ({ ...r, catalog: c })))
   );
-  const ok = results.filter((r): r is PromiseFulfilledResult<{ data: any; stale: boolean; type: string }> => r.status === 'fulfilled');
+  const ok = results.filter((r): r is PromiseFulfilledResult<{ data: any; stale: boolean; catalog: (typeof catalogs)[number] }> => r.status === 'fulfilled');
   if (ok.length === 0) throw new CatalogUnavailableError();
 
-  // Mesclada na ordem dos catálogos; o mesmo título vindo de dois (mesmo IMDb, ou mesmo nome e ano) aparece uma vez
-  const seen = new Set<string>();
-  const metas: CatalogItem[] = [];
+  const groups: SearchGroup[] = [];
   for (const r of ok) {
-    for (const raw of Array.isArray(r.value.data?.metas) ? r.value.data.metas : []) {
-      const item = toItem(raw, r.value.type);
-      if (!item) continue;
-      const key = item.imdbId || `${item.name.toLowerCase()}|${item.year ?? ''}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+    const { catalog, data } = r.value;
+    const seen = new Set<string>();
+    const metas: CatalogItem[] = [];
+    for (const raw of Array.isArray(data?.metas) ? data.metas : []) {
+      const item = toItem(raw, catalog.type);
+      if (!item || seen.has(item.id)) continue;
+      seen.add(item.id);
       metas.push(item);
     }
+    if (metas.length) groups.push({ type: catalog.type, id: catalog.id, name: catalog.name, metas });
   }
-  return { metas, stale: manifest.stale || ok.some((r) => r.value.stale) };
+  return { groups, stale: manifest.stale || ok.some((r) => r.value.stale) };
 }
 
 export interface CatalogEpisode {

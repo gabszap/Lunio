@@ -14,7 +14,7 @@ import {
  * /api/catalog/* — o catálogo (fileiras, busca e detalhes) vindo da fonte configurada em `CATALOG_URL` (padrão: Cinemeta).
  *   GET manifest                              → fileiras da Home e catálogos de busca
  *   GET row?type=&id=[&genre=][&skip=]        → itens de uma fileira
- *   GET search?q=                             → busca nos catálogos de busca da fonte, mesclada e sem repetidos
+ *   GET search?q=                             → busca em cada catálogo de busca da fonte, em grupos (como o Stremio)
  *   GET meta?type=&id=                        → detalhes (com episódios, inclusive a temporada 0)
  * Respostas servidas do cache antigo (fonte fora do ar) trazem `stale: true`. Nada aqui aceita uma URL do navegador.
  */

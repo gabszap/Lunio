@@ -46,6 +46,16 @@ export interface CatalogRow {
   id: string;
   name: string;
   genres: string[];
+  /** A fileira exige um gênero e só tem um: ele vai no pedido. */
+  fixedGenre?: string;
+}
+
+/** Resultado da busca em um catálogo de busca da fonte ("Anime Series Search", "Movies Search"…). */
+export interface SearchGroup {
+  type: CatalogType;
+  id: string;
+  name: string;
+  metas: CatalogItem[];
 }
 
 export interface CatalogManifest {
@@ -76,16 +86,18 @@ export function fetchManifest(): Promise<CatalogManifest> {
   return getJson<CatalogManifest>('manifest');
 }
 
-export async function fetchRow(row: Pick<CatalogRow, 'type' | 'id'>, genre?: string): Promise<CatalogItem[]> {
+export async function fetchRow(row: Pick<CatalogRow, 'type' | 'id'> & { fixedGenre?: string }, genre?: string): Promise<CatalogItem[]> {
   const q = new URLSearchParams({ type: row.type, id: row.id });
-  if (genre) q.set('genre', genre);
+  const g = genre ?? (row as CatalogRow).fixedGenre;
+  if (g) q.set('genre', g);
   const data = await getJson<{ metas: CatalogItem[] }>(`row?${q}`);
   return data.metas || [];
 }
 
-export async function searchCatalog(query: string): Promise<CatalogItem[]> {
-  const data = await getJson<{ metas: CatalogItem[] }>(`search?${new URLSearchParams({ q: query.trim() })}`);
-  return data.metas || [];
+/** Um grupo por catálogo de busca da fonte, como no Stremio (grupos sem resultado nem chegam). */
+export async function searchCatalog(query: string): Promise<SearchGroup[]> {
+  const data = await getJson<{ groups: SearchGroup[] }>(`search?${new URLSearchParams({ q: query.trim() })}`);
+  return data.groups || [];
 }
 
 export async function fetchMeta(type: CatalogType, id: string): Promise<CatalogMeta> {
@@ -94,7 +106,7 @@ export async function fetchMeta(type: CatalogType, id: string): Promise<CatalogM
 }
 
 /** Fileiras com o mesmo nome (ex.: "Popular" de filmes e de séries) ganham o tipo no título para se distinguirem. */
-export function rowTitles(rows: CatalogRow[]): string[] {
+export function rowTitles(rows: Array<{ name: string; type: CatalogType }>): string[] {
   const count = new Map<string, number>();
   for (const r of rows) count.set(r.name, (count.get(r.name) || 0) + 1);
   const typeLabel = (type: string) => (type === 'movie' ? t('Filmes') : type === 'series' ? t('Séries') : type === 'anime' ? t('Animes') : type);
