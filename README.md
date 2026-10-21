@@ -221,7 +221,7 @@ Open `https://lunio.example.com`, go to **Status**: Server, FFmpeg and Python sh
 
 ### Optional: Redis
 
-Lunio runs fine without Redis. With it, **rooms survive a restart or deploy**: the host, bans, queue, current video and position are saved and restored before the server accepts connections, and the previous host gets 60 s to come back (anyone reconnecting sooner joins as a viewer). Without it, a restart closes every open room. Chat and who is connected are never saved. Redis also keeps the upload index (last read, rooms, closed marks), which is rebuilt from disk on every start.
+Lunio runs fine without Redis. With it, **rooms survive a restart or deploy**: the host, bans, queue, current video and position are saved and restored before the server accepts connections, and the previous host gets 60 s to come back (anyone reconnecting sooner joins as a viewer). Without it, a restart closes every open room. Chat and who is connected are never saved. Redis also keeps the upload index (last read, rooms, closed marks), which is rebuilt from disk on every start, and the catalog responses (so a restart does not start the catalog source from cold).
 
 Redis is never the source of truth and never blocks the server: each call has a 300 ms ceiling and falls back silently (one log warning per minute). It holds no secrets worth persisting, so run it **in RAM only and bound to localhost**:
 

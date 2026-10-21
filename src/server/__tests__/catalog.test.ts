@@ -4,6 +4,23 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 process.env.SESSION_SECRET = 'segredo-de-teste';
 
+// Redis falso em memória (só o que o catálogo usa: get e set): prova que o cache sobrevive a um restart sem Redis de verdade
+const fakeRedis = vi.hoisted(() => ({ data: new Map<string, string>() }));
+vi.mock('../media/redis', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../media/redis')>();
+  return {
+    ...actual,
+    withRedis: async (_fallback: unknown, fn: (r: unknown) => Promise<unknown>) =>
+      fn({
+        get: async (k: string) => fakeRedis.data.get(k) ?? null,
+        set: async (k: string, v: string) => {
+          fakeRedis.data.set(k, v);
+          return 'OK';
+        },
+      }),
+  };
+});
+
 const { startApi } = await import('./helpers');
 const { createApiRouter } = await import('../app');
 const { config } = await import('../config');
@@ -27,6 +44,10 @@ let upstream: http.Server;
 let base: string;
 let hits: Record<string, number>;
 let failing: boolean;
+let errorItem: boolean; // a fonte responde 200 com um item de erro no lugar da lista
+let emptyList: boolean;
+let concurrent = 0;
+let maxConcurrent = 0;
 
 function respond(res: http.ServerResponse, body: unknown, status = 200) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -44,6 +65,16 @@ beforeAll(async () => {
     if (!path.startsWith('/stremio/UUID-SECRETO/CONFIG-SECRETA')) return respond(res, {}, 404);
     const rest = path.slice('/stremio/UUID-SECRETO/CONFIG-SECRETA'.length);
     if (rest === '/manifest.json') return respond(res, MANIFEST);
+    if (errorItem && rest.startsWith('/catalog/anime/mal.airing')) return respond(res, { metas: [{ id: 'erro', type: 'anime', name: '[❌] AIOMetadata' }] });
+    if (emptyList && rest.startsWith('/catalog/anime/mal.airing')) return respond(res, { metas: [] });
+    if (rest.startsWith('/catalog/series/lenta-')) {
+      concurrent++;
+      maxConcurrent = Math.max(maxConcurrent, concurrent);
+      return void setTimeout(() => {
+        concurrent--;
+        respond(res, { metas: [{ id: rest, type: 'series', name: 'Lenta' }] });
+      }, 60);
+    }
     if (rest.startsWith('/catalog/movie/tmdb.search/search=')) {
       return respond(res, { metas: [
         { id: 'tmdb:1', imdb_id: 'tt0000001', type: 'movie', name: 'Link Click', poster: 'https://image.tmdb.org/a.jpg', releaseInfo: '2021' },
@@ -132,6 +163,11 @@ describe('/api/catalog/*', () => {
   beforeEach(() => {
     hits = {};
     failing = false;
+    errorItem = false;
+    emptyList = false;
+    concurrent = 0;
+    maxConcurrent = 0;
+    fakeRedis.data.clear();
     resetCatalogCache();
     config.catalogUrl = `${base}/stremio/UUID-SECRETO/CONFIG-SECRETA/manifest.json`;
   });
@@ -216,10 +252,88 @@ describe('/api/catalog/*', () => {
     expect(await json(nothing)).toMatchObject({ code: 'catalog_unavailable' });
   });
 
+  it('item de erro no lugar da lista (200 com "[❌] …") é falha: não vai para o cache e, com cache, serve o antigo', async () => {
+    errorItem = true;
+    const first = await get('row?type=anime&id=mal.airing');
+    expect(first.status).toBe(502);
+    expect(await json(first)).toMatchObject({ code: 'catalog_unavailable' });
+
+    // a fonte se recupera: a resposta boa aparece na hora (o erro não ficou guardado)
+    errorItem = false;
+    expect((await json(await get('row?type=anime&id=mal.airing'))).metas[0].name).toBe('Anime A');
+
+    // com uma resposta boa guardada, o erro seguinte serve a guardada (stale)
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + 20 * 60_000);
+      errorItem = true;
+      const stale = await json(await get('row?type=anime&id=mal.airing'));
+      expect(stale).toMatchObject({ stale: true });
+      expect(stale.metas[0].name).toBe('Anime A');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lista vazia vale só 30 s (fonte fria): a seguinte pergunta, depois disso, volta à fonte', async () => {
+    emptyList = true;
+    const path = '/stremio/UUID-SECRETO/CONFIG-SECRETA/catalog/anime/mal.airing.json';
+    expect((await json(await get('row?type=anime&id=mal.airing'))).metas).toEqual([]);
+    await get('row?type=anime&id=mal.airing');
+    expect(hits[path]).toBe(1); // dentro dos 30 s vem do cache
+
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + 40_000);
+      emptyList = false;
+      expect((await json(await get('row?type=anime&id=mal.airing'))).metas[0].name).toBe('Anime A');
+      expect(hits[path]).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('no máximo 4 pedidos simultâneos à fonte (uma Home inteira não a atropela)', async () => {
+    const calls = Array.from({ length: 12 }, (_, i) => get(`row?type=series&id=lenta-${i}`));
+    const results = await Promise.all(calls);
+    expect(results.every((r) => r.status === 200)).toBe(true);
+    expect(maxConcurrent).toBeGreaterThan(1);
+    expect(maxConcurrent).toBeLessThanOrEqual(4);
+  });
+
+  it('o cache sobrevive a um restart: com a memória vazia, o Redis responde sem ir à fonte, e a chave não tem a URL da fonte', async () => {
+    const path = '/stremio/UUID-SECRETO/CONFIG-SECRETA/catalog/anime/mal.airing.json';
+    await get('row?type=anime&id=mal.airing');
+    await new Promise((r) => setTimeout(r, 20)); // a gravação no Redis não é esperada
+    expect(hits[path]).toBe(1);
+    for (const k of fakeRedis.data.keys()) {
+      expect(k.startsWith('lunio:catalog:')).toBe(true);
+      expect(k).not.toContain('SECRET');
+    }
+
+    resetCatalogCache(); // "restart": a memória some, o Redis fica
+    const body = await json(await get('row?type=anime&id=mal.airing'));
+    expect(body).toMatchObject({ stale: false });
+    expect(body.metas[0].name).toBe('Anime A');
+    expect(hits[path]).toBe(1);
+
+    // e com a fonte fora do ar depois do restart ainda há o que mostrar
+    resetCatalogCache();
+    failing = true;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + 20 * 60_000);
+      expect((await json(await get('row?type=anime&id=mal.airing'))).stale).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('/api/status traz o estado do catálogo (ok, nome) e, fora do ar, ok false', async () => {
     const okStatus = await (await fetch(`${api.base}/api/status`)).json();
     expect(okStatus.catalog).toMatchObject({ ok: true, stale: false, name: 'AIOMetadata', isDefault: false });
     resetCatalogCache();
+    fakeRedis.data.clear(); // sem nada guardado, nem no Redis
     failing = true;
     const down = await (await fetch(`${api.base}/api/status`)).json();
     expect(down.catalog).toMatchObject({ ok: false, stale: false });

@@ -221,7 +221,7 @@ Abra `https://lunio.exemplo.com` e vá em **Status**: Servidor, FFmpeg e Python 
 
 ### Opcional: Redis
 
-O Lunio funciona sem Redis. Com ele, **as salas sobrevivem a um restart ou deploy**: Host, bans, fila, vídeo atual e posição são salvos e restaurados antes de o servidor aceitar conexões, e o Host anterior tem 60 s para voltar (quem reconecta antes entra como espectador). Sem ele, um restart encerra todas as salas abertas. O chat e quem está conectado nunca são salvos. O Redis também guarda o índice dos envios (último uso, salas, marcas de sala fechada), reconstruído do disco a cada subida.
+O Lunio funciona sem Redis. Com ele, **as salas sobrevivem a um restart ou deploy**: Host, bans, fila, vídeo atual e posição são salvos e restaurados antes de o servidor aceitar conexões, e o Host anterior tem 60 s para voltar (quem reconecta antes entra como espectador). Sem ele, um restart encerra todas as salas abertas. O chat e quem está conectado nunca são salvos. O Redis também guarda o índice dos envios (último uso, salas, marcas de sala fechada), reconstruído do disco a cada subida, e as respostas do catálogo (para um restart não esfriar a fonte do catálogo).
 
 O Redis nunca é a fonte da verdade e nunca trava o servidor: cada chamada tem teto de 300 ms e cai para o comportamento sem Redis em silêncio (um aviso no log por minuto). Rode-o **só em RAM e preso ao localhost**. Este exemplo usa Docker; sem ele, `sudo apt install redis-server` também serve, desde que escute só em `127.0.0.1` e com a persistência desligada (`save ""`, `appendonly no`):
 
