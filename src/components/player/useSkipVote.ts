@@ -12,8 +12,8 @@ import { t } from '../../lib/i18n';
  *
  * - Quem tem o controle (Host ou quem assiste sozinho) pula direto pelo botão.
  * - Espectador vota; passando de metade da sala, o servidor avisa o Host e o player dele faz o seek (a sala o segue).
- * - Com "pular abertura e encerramento sozinho" ligado: ao entrar num deles, uma contagem de 5 s; no fim, quem tem o
- *   controle pula e o espectador vota. Qualquer tecla cancela (Tab pula já). Vale uma vez por capítulo de cada vídeo.
+ * - Com "pular abertura e encerramento sozinho" ligado (só para quem tem o controle): ao entrar num deles, uma contagem
+ *   de 5 s e o pulo. Qualquer tecla cancela (Tab pula já). Vale uma vez por capítulo de cada vídeo.
  */
 /** Quanto o player espera antes de pular sozinho (dá tempo de cancelar com qualquer tecla). */
 export const AUTO_SKIP_DELAY_MS = 5000;
@@ -74,7 +74,8 @@ export function useSkipVote(args: {
   const chapterTarget = skippableChapter?.targetTime;
   const chapterType = skippableChapter?.type;
   useEffect(() => {
-    const auto = autoSkipIntro && (chapterType === 'op' || chapterType === 'ed') && chapterStart !== undefined && chapterTarget !== undefined;
+    // Só quem controla a reprodução (Host ou quem assiste sozinho) pula sozinho; espectador decide o voto na hora
+    const auto = autoSkipIntro && !isViewer && (chapterType === 'op' || chapterType === 'ed') && chapterStart !== undefined && chapterTarget !== undefined;
     if (!auto) {
       setAutoSkipIn(null);
       return;
@@ -95,14 +96,9 @@ export function useSkipVote(args: {
     };
     const run = () => {
       finish();
-      if (isViewer) {
-        syncManager.emitSkipVote(chapterStart as number, chapterTarget as number, true);
-        triggerOsdToast(t('Voto para pular enviado'));
-      } else {
-        logger.action(`[Player] ${label} automaticamente → ${formatTime(chapterTarget as number)}`);
-        handleSeekRef.current(chapterTarget as number);
-        triggerOsdToast(label);
-      }
+      logger.action(`[Player] ${label} automaticamente → ${formatTime(chapterTarget as number)}`);
+      handleSeekRef.current(chapterTarget as number);
+      triggerOsdToast(label);
     };
     const onKey = (e: KeyboardEvent) => {
       // Só teclas de modificador (Alt+Tab, por exemplo) não cancelam; Tab é o próprio atalho de pular (o player já o trata)

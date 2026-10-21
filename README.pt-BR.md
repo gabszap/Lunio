@@ -10,7 +10,7 @@ O Lunio é um player de vídeo web feito para assistir junto. Cole um link de st
 
 ## Recursos
 
-- **Salas (Watch Party)** — crie uma sala a partir de qualquer fonte e compartilhe um código de 8 caracteres ou o link. O Host controla play, pause, seek e velocidade; os demais acompanham com correção contínua de atraso. Chat, lista de participantes, passar o Host, expulsar e banir. Pular abertura/encerramento: o Host pula direto e os demais votam (a sala pula quando mais da metade vota); uma opção pula abertura e encerramento sozinha depois de 5 s (qualquer tecla cancela; espectadores votam sozinhos).
+- **Salas (Watch Party)** — crie uma sala a partir de qualquer fonte e compartilhe um código de 8 caracteres ou o link. O Host controla play, pause, seek e velocidade; os demais acompanham com correção contínua de atraso. Chat, lista de participantes, passar o Host, expulsar e banir. Pular abertura/encerramento: o Host pula direto e os demais votam (a sala pula quando mais da metade vota); uma opção pula abertura e encerramento sozinha depois de 5 s (qualquer tecla cancela; vale para o Host ou quem assiste sozinho, espectador sempre vota na hora).
 - **Fila (playlist)** — dentro da sala, qualquer pessoa adiciona links à fila; o Host reordena, toca um item na hora, e o próximo começa sozinho quando o vídeo acaba.
 - **Fontes de vídeo**
   - Links diretos de stream: Stremio, TorBox, e outros debrids, `.mkv`/`.mp4`/`.webm`/HLS, passando pelo proxy do servidor local (HTTP Range, contorna CORS).

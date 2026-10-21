@@ -162,7 +162,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   <MenuDivider />
                   <MenuSection
                     title={t('Pular abertura e encerramento sozinho')}
-                    description={t('Quando o arquivo marca a abertura ou o encerramento, o player pula depois de 5 s (qualquer tecla cancela). Na sala, o Host pula e os demais votam.')}
+                    description={t('Quando o arquivo marca a abertura ou o encerramento, o player pula depois de 5 s (qualquer tecla cancela). Vale para quem controla o vídeo: o Host ou quem assiste sozinho.')}
                   >
                     <ChipRow gap="tight">
                       <Chip selected={!autoSkipIntro} onClick={() => onAutoSkipIntroChange(false)}>
