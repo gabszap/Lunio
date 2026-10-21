@@ -85,3 +85,26 @@ test.describe('Legendas', () => {
     await guest.context.close();
   });
 });
+
+test('fontes: o player baixa só a fonte que a legenda usa (o MKV traz duas, a PT cita uma)', async ({ browser }) => {
+  const { page, context } = await newUser(browser);
+  const fontFiles: string[] = [];
+  let mapped = false;
+  page.on('request', (r) => {
+    const u = new URL(r.url());
+    if (u.pathname === '/api/font') fontFiles.push(u.searchParams.get('name') || '');
+  });
+  page.on('response', (r) => {
+    if (new URL(r.url()).pathname === '/api/fontmap' && r.ok()) mapped = true;
+  });
+
+  await createRoom(page, 'Ana', SUBTITLES_URL);
+  await waitReady(page);
+  // O ranking escolhe a PT (Trebuchet MS, anexada); a "outra.ttf" (família renomeada) ninguém cita
+  await expect.poll(() => mapped, { timeout: 30_000 }).toBe(true);
+  await expect.poll(() => fontFiles.length, { timeout: 30_000 }).toBeGreaterThan(0);
+  await page.waitForTimeout(2500); // dá tempo de um eventual pedido a mais aparecer
+  expect(fontFiles).toEqual(['trebuc.ttf']);
+
+  await context.close();
+});

@@ -6,6 +6,7 @@ import { spawnLimited } from '../limits';
 import { ffmpegBin, getTools, killTree } from '../tools';
 import { FFMPEG_NET_ONLY } from './ffmpeg';
 import { ffmpegMbpsFor, recordFfmpegRead } from './ffmpegSpeed';
+import { warmFonts } from './fonts';
 import { getMediaFingerprint } from './fingerprint';
 import { SUB_CACHE_DIR } from './paths';
 import { resolveFinalCdnUrl } from './resolver';
@@ -352,9 +353,13 @@ export async function getOrExtractSubtitle(targetUrl: string, track: string, cus
   // Se já existe no cache e é válido, responde em 0ms
   if (fs.existsSync(cacheFile) && fs.statSync(cacheFile).size > 100) {
     touchCacheFile(cacheFile);
+    warmFonts(targetUrl, customFingerprint);
     return fs.readFileSync(cacheFile, 'utf-8');
   }
 
   // Extração pontual exclusiva da faixa selecionada
-  return await extractSubtitleTrack(targetUrl, track, customFingerprint, Boolean(opts.prefetch));
+  const content = await extractSubtitleTrack(targetUrl, track, customFingerprint, Boolean(opts.prefetch));
+  // A legenda ficou pronta: a leitura das fontes (bloco Attachments) já começa, sem esperar o player pedir o mapa
+  warmFonts(targetUrl, customFingerprint);
+  return content;
 }

@@ -114,7 +114,8 @@ or plugged into the Vite dev/preview server (vite.config.ts)
 | `POST /api/hls/start`, `GET /api/hls/<id>/<audio>/index.m3u8`, `GET /api/hls/<id>/<audio>/<n>.ts` | Shared HLS for an alternate audio track: playlist and ~6 s segments generated on demand and cached (MKV with Cues + H.264 only; otherwise `start` answers 501 and the player uses the remux) |
 | `GET /api/tracks?url=` | Audio, subtitle, chapter and font tracks of a file |
 | `GET /api/subtitle?url=&track=` | Extracts an embedded subtitle (cached in `.cache/subtitles`) |
-| `GET /api/font?url=&track=` | Extracts an embedded font |
+| `GET /api/font?url=&track=` | Extracts an embedded font. Fonts are stored once per content (hardlinks in `.cache/fonts/_shared`), so episodes of the same group share them |
+| `GET /api/fontmap?url=` | The names each embedded font can be requested by (family, full, PostScript). The player loads only the fonts the subtitle uses instead of all ~24 attached to the MKV |
 | `GET /api/resolve?url=` | Resolves Torrentio/debrid redirects to the final CDN URL |
 | `GET /api/upstream?url=` | Whether the video's provider (or its CDN) rate-limited the server just now (429). The player asks on a playback error to say "the provider limited the requests". Makes no request to the provider |
 | `GET /api/room?id=` | Whether a room exists or was closed |

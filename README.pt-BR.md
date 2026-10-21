@@ -114,7 +114,8 @@ ou plugado no servidor de dev/preview do Vite (vite.config.ts)
 | `POST /api/hls/start`, `GET /api/hls/<id>/<áudio>/index.m3u8`, `GET /api/hls/<id>/<áudio>/<n>.ts` | HLS compartilhado de uma faixa de áudio alternativa: playlist e segmentos de ~6 s gerados sob demanda e guardados em cache (só MKV com Cues + vídeo H.264; senão o `start` responde 501 e o player usa o remux) |
 | `GET /api/tracks?url=` | Faixas de áudio, legenda, capítulos e fontes de um arquivo |
 | `GET /api/subtitle?url=&track=` | Extrai uma legenda embutida (cache em `.cache/subtitles`) |
-| `GET /api/font?url=&track=` | Extrai uma fonte embutida |
+| `GET /api/font?url=&track=` | Extrai uma fonte embutida. As fontes ficam guardadas uma vez por conteúdo (hardlinks em `.cache/fonts/_shared`), então episódios do mesmo grupo as compartilham |
+| `GET /api/fontmap?url=` | Os nomes pelos quais cada fonte embutida pode ser pedida (família, nome completo, PostScript). O player carrega só as fontes que a legenda usa, em vez das ~24 anexadas ao MKV |
 | `GET /api/resolve?url=` | Resolve redirecionamentos do Torrentio/debrid até a URL final da CDN |
 | `GET /api/upstream?url=` | Se o provedor do vídeo (ou o CDN dele) limitou o servidor agora (429). O player pergunta quando a reprodução falha, para dizer "o provedor limitou os pedidos". Não faz pedido nenhum ao provedor |
 | `GET /api/room?id=` | Se uma sala existe ou foi encerrada |

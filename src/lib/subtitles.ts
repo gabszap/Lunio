@@ -8,6 +8,7 @@ import {
 } from '../types/media';
 import { logger } from './logger';
 import { apiFetch } from './access';
+import { collectAssFontNames, selectFontsToLoad } from './assFonts';
 import { srtToVtt } from './media';
 import { sessionManager } from './session';
 import { t } from './/i18n';
@@ -745,12 +746,28 @@ export class SubtitleManager {
 
       const session = sessionManager.getSession();
       const embeddedFonts = session?.source?.fonts || [];
-      const embeddedFontUrls = embeddedFonts
-        .map((f) => f.url)
-        .filter(Boolean) as string[];
+
+      // Só as fontes que a legenda cita (o MKV costuma trazer ~24, ~46 MB). Se o servidor não souber dizer quais são
+      // (rota indisponível, nomes ilegíveis), carrega todas como antes.
+      let fontMap: { complete: boolean; fonts: Record<string, string[] | null> } | null = null;
+      if (embeddedFonts.length > 1 && session?.source?.mediaUrl) {
+        try {
+          const res = await apiFetch(
+            `/api/fontmap?url=${encodeURIComponent(session.source.mediaUrl)}&fingerprint=${encodeURIComponent(session.source.mediaFingerprint || '')}`,
+            { signal: AbortSignal.timeout(20_000) }
+          );
+          if (res.ok) fontMap = await res.json();
+        } catch {
+          // sem o mapa: carrega todas
+        }
+      }
+      const { urls: embeddedFontUrls, skipped } = selectFontsToLoad(embeddedFonts, fontMap, collectAssFontNames(subContent));
 
       if (embeddedFontUrls.length > 0) {
-        logger.info(`[Legenda] ${embeddedFontUrls.length} ${embeddedFontUrls.length === 1 ? 'fonte' : 'fontes'} do arquivo carregada(s)`);
+        logger.info(
+          `[Legenda] ${embeddedFontUrls.length} ${embeddedFontUrls.length === 1 ? 'fonte' : 'fontes'} do arquivo carregada(s)` +
+            (skipped > 0 ? ` (${skipped} que a legenda não usa ficaram de fora)` : '')
+        );
       }
 
       const opts: any = {

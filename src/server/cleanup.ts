@@ -27,7 +27,20 @@ export function touchCacheFile(file: string) {
   fs.utimes(file, now, now, () => {});
 }
 
-function dirSize(dir: string): number {
+/**
+ * Bytes de um arquivo, contando cada hardlink (fontes deduplicadas entre mídias, ver `fontCache.ts`) uma única vez por
+ * varredura: sem isso o cache pareceria maior do que é e a limpeza por tamanho apagaria à toa.
+ */
+function fileBytes(st: fs.Stats, seen: Set<string>): number {
+  if (st.nlink > 1) {
+    const key = `${st.dev}:${st.ino}`;
+    if (seen.has(key)) return 0;
+    seen.add(key);
+  }
+  return st.size;
+}
+
+function dirSize(dir: string, seen: Set<string> = new Set()): number {
   let total = 0;
   let entries: fs.Dirent[];
   try {
@@ -38,7 +51,7 @@ function dirSize(dir: string): number {
   for (const e of entries) {
     const full = path.join(dir, e.name);
     try {
-      total += e.isDirectory() ? dirSize(full) : fs.statSync(full).size;
+      total += e.isDirectory() ? dirSize(full, seen) : fileBytes(fs.statSync(full), seen);
     } catch {
       // sumiu no meio da varredura
     }
@@ -135,6 +148,7 @@ interface CacheUnit {
 /** Unidades de despejo: cada arquivo de legenda/áudio e cada pasta de fontes ou de HLS de uma mídia. */
 function cacheUnits(root: string): CacheUnit[] {
   const units: CacheUnit[] = [];
+  const seen = new Set<string>();
   let groups: fs.Dirent[];
   try {
     groups = fs.readdirSync(root, { withFileTypes: true });
@@ -150,7 +164,7 @@ function cacheUnits(root: string): CacheUnit[] {
         units.push({
           path: full,
           group: g.name,
-          size: e.isDirectory() ? dirSize(full) : fs.statSync(full).size,
+          size: e.isDirectory() ? dirSize(full, seen) : fileBytes(fs.statSync(full), seen),
           mtime: newestMtime(full),
         });
       } catch {
