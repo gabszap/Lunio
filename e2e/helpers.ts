@@ -4,6 +4,8 @@ import { expect, type Browser, type BrowserContext, type Page } from '@playwrigh
 export const FIXTURE_URL = 'http://127.0.0.1:3101/teste.mkv';
 /** Vídeo curto com áudio japonês/português e legendas ASS en (faixa 3) e pt (faixa 4). */
 export const SUBTITLES_URL = 'http://127.0.0.1:3101/legendas.mkv';
+/** Vídeo de 40 s com capítulos: cena inicial (0-5 s), "OP" (5-15 s), episódio (15-35 s) e "ED" (35-40 s). */
+export const CHAPTERS_URL = 'http://127.0.0.1:3101/capitulos.mkv';
 
 export async function newUser(browser: Browser): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });

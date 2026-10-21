@@ -17,6 +17,7 @@ import { WatchPartyPanel } from './WatchPartyPanel';
 import type { PlaylistItem } from '../types/sync';
 import { audioBoost } from '../lib/audioBoost';
 import { normalizeChapters, getCurrentChapter, getSkippableChapter } from '../lib/chapters';
+import { useSkipVote } from './player/useSkipVote';
 import { logger } from '../lib/logger';
 import { formatTime } from '../lib/chapters';
 import { syncManager } from '../lib/sync';
@@ -315,7 +316,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   usePlaybackReadiness({ readiness, autoPlay, paused, setPaused, playerRef, source, handleSeekRef, pendingPlayRef });
 
+  const skipVote = useSkipVote({
+    skippableChapter,
+    chapters: normalizedChapters,
+    isViewer: syncStatus.isConnected && !syncStatus.isHost,
+    isConnected: syncStatus.isConnected,
+    autoSkipIntro: prefs.autoSkipIntro,
+    sourceSrc: source.src,
+    lastKnownTimeRef,
+    handleSeekRef,
+    triggerOsdToast: prefs.triggerOsdToast,
+  });
+
   usePlayerShortcuts({
+    onSkipVote: skipVote.toggleVote,
     currentTime,
     duration,
     volume,
@@ -556,12 +570,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       {/* Pular abertura / encerramento / resumo (Player · Pular abertura) */}
       {/* Some enquanto um menu (ajustes, legendas, áudio…) está aberto, para não ficar por cima dele */}
-      {skippableChapter && !isViewer && !controls.menuOpen && (
+      {skippableChapter && !controls.menuOpen && (
         <SkipChapterButton
           chapter={skippableChapter}
           showControls={showControls}
           skipProgress={skipProgress}
+          viewer={isViewer}
+          voted={skipVote.voted}
+          vote={skipVote.chapterVote}
+          autoSkipIn={skipVote.autoSkipIn}
           onSkip={() => {
+            if (isViewer) {
+              skipVote.toggleVote();
+              return;
+            }
             logger.action(`[Player] ${skippableChapter.label} → ${formatTime(skippableChapter.targetTime)}`);
             playback.handleSeek(skippableChapter.targetTime);
           }}
@@ -603,6 +625,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           onMuteToggle={playback.handleMuteToggle}
           onPlaybackRateChange={playback.handlePlaybackRateChange}
           onVolumeBoostChange={playback.handleVolumeBoostChange}
+          autoSkipIntro={prefs.autoSkipIntro}
+          onAutoSkipIntroChange={prefs.setAutoSkipIntro}
           audioDelay={prefs.audioDelay}
           onAudioDelayChange={prefs.handleAudioDelayChange}
           subtitleDelay={prefs.subtitleDelay}

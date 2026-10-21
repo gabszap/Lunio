@@ -12,6 +12,7 @@ import { roomStore, type PersistedRoom, type RoomStore } from './roomStore';
 import type {
   ClientMessage,
   ServerMessage,
+  SkipVoteState,
   RoomState,
   RoomMember,
   RoomMedia,
@@ -58,6 +59,8 @@ interface RoomInternal {
    */
   hostGraceUntil?: number;
   hostGraceTimer?: NodeJS.Timeout;
+  /** Votação para pular o capítulo atual (só na memória: some com a troca de vídeo ou do ponto do vídeo). */
+  skipVote?: { start: number; target: number; voters: Set<string>; lastBroadcast: string };
 }
 
 /** O servidor dá `<id>_tab####` à segunda aba aberta pela mesma pessoa; o ban vale para o ID de verdade (todas as abas). */
@@ -338,6 +341,9 @@ export class RoomManager {
       accessToken: issueRoomToken(roomId, session.userId),
     });
 
+    // Votação para pular em andamento: o recém-chegado também a vê
+    if (room.skipVote) this.send(ws, { type: 'skip:votes', skip: this.skipVoteState(room) });
+
     // Envia histórico de chat recente para o novo membro
     for (const msg of room.chatHistory.slice(-20)) {
       this.send(ws, {
@@ -548,6 +554,86 @@ export class RoomManager {
     return restored;
   }
 
+  // ───────────── voto para pular abertura/encerramento ─────────────
+
+  /** Quantas pessoas (IDs únicos, sem o sufixo de aba) há na sala agora. */
+  private memberIds(room: RoomInternal): Set<string> {
+    return new Set(Array.from(room.clients.values()).map((c) => baseUserId(c.userId)));
+  }
+
+  /** Mais da metade da sala (o Host conta na sala, mas não vota: ele pula direto). */
+  private skipVotesNeeded(room: RoomInternal): number {
+    return Math.floor(this.memberIds(room).size / 2) + 1;
+  }
+
+  private skipVoteState(room: RoomInternal): SkipVoteState | null {
+    const v = room.skipVote;
+    if (!v) return null;
+    return { start: v.start, target: v.target, votes: v.voters.size, needed: this.skipVotesNeeded(room), voters: [...v.voters] };
+  }
+
+  /** Capítulo da mídia da sala que bate com o pedido: o destino do pulo vem da lista do Host, nunca do voto. */
+  private findChapter(room: RoomInternal, start: number, target: number) {
+    return room.media?.chapters?.find(
+      (c) => c.endTime !== undefined && Math.abs(c.startTime - start) < 0.5 && Math.abs(c.endTime - target) < 0.5 && c.endTime > c.startTime
+    );
+  }
+
+  private clearSkipVote(room: RoomInternal) {
+    if (!room.skipVote) return;
+    room.skipVote = undefined;
+    this.broadcast(room, { type: 'skip:votes', skip: null });
+  }
+
+  /**
+   * Confere a votação depois de qualquer mudança (voto, entrada ou saída de alguém): tira votos de quem saiu, avisa a sala
+   * quando algo mudou e, se passou da metade, manda o Host pular (o seek continua sendo dele).
+   */
+  private refreshSkipVote(room: RoomInternal) {
+    const v = room.skipVote;
+    if (!v) return;
+    const present = this.memberIds(room);
+    for (const id of [...v.voters]) if (!present.has(id)) v.voters.delete(id);
+    const needed = this.skipVotesNeeded(room);
+
+    if (v.voters.size >= needed) {
+      const { start, target } = v;
+      room.skipVote = undefined;
+      console.log(`[WatchParty] ⏭️ Sala "${room.roomId}" aprovou pular ${start.toFixed(1)}s → ${target.toFixed(1)}s (${v.voters.size}/${needed}).`);
+      this.sendSystemChat(room, `⏭️ A sala votou para pular (${v.voters.size}/${present.size}).`);
+      for (const [ws, c] of room.clients) if (c.userId === room.hostId) this.send(ws, { type: 'skip:passed', start, target });
+      this.broadcast(room, { type: 'skip:votes', skip: null });
+      return;
+    }
+    if (v.voters.size === 0) {
+      room.skipVote = undefined;
+      this.broadcast(room, { type: 'skip:votes', skip: null });
+      return;
+    }
+    const signature = `${v.voters.size}/${needed}/${[...v.voters].sort().join(',')}`;
+    if (signature === v.lastBroadcast) return;
+    v.lastBroadcast = signature;
+    this.broadcast(room, { type: 'skip:votes', skip: this.skipVoteState(room) });
+  }
+
+  private handleSkipVote(room: RoomInternal, session: ClientSession, msg: { start: number; target: number; vote: boolean }) {
+    // Host pula direto pelo botão dele; voto de quem sai do que a sala conhece não vale
+    if (baseUserId(session.userId) === baseUserId(room.hostId)) return;
+    if (!Number.isFinite(msg.start) || !Number.isFinite(msg.target)) return;
+    const chapter = this.findChapter(room, msg.start, msg.target);
+    if (!chapter || chapter.endTime === undefined) return;
+
+    const voter = baseUserId(session.userId);
+    // Só uma votação por vez: um voto em outro capítulo começa uma nova (a anterior já não vale: o vídeo andou)
+    if (!room.skipVote || room.skipVote.start !== chapter.startTime) {
+      if (!msg.vote) return;
+      room.skipVote = { start: chapter.startTime, target: chapter.endTime, voters: new Set(), lastBroadcast: '' };
+    }
+    if (msg.vote) room.skipVote.voters.add(voter);
+    else room.skipVote.voters.delete(voter);
+    this.refreshSkipVote(room);
+  }
+
   public broadcastMembersUpdate(room: RoomInternal) {
     const uniqueClientsMap = new Map<string, ClientSession>();
     for (const session of room.clients.values()) {
@@ -570,6 +656,7 @@ export class RoomManager {
       members,
       hostId: room.hostId,
     });
+    this.refreshSkipVote(room);
   }
 
   public send(ws: WebSocket, message: ServerMessage) {
@@ -683,6 +770,8 @@ export class RoomManager {
           rate: currentRoom.playback.rate,
           updatedAt: Date.now(),
         };
+        const sv = currentRoom.skipVote;
+        if (sv && (currentRoom.playback.position < sv.start - 0.5 || currentRoom.playback.position >= sv.target)) this.clearSkipVote(currentRoom);
 
         this.broadcast(currentRoom, {
           type: 'playback:sync',
@@ -787,6 +876,7 @@ export class RoomManager {
           updatedAt: Date.now(),
         };
 
+        this.clearSkipVote(currentRoom);
         console.log(`[WatchParty] 🎬 Nova mídia definida na sala "${currentRoom.roomId}": "${msg.media.title}"`);
         // Trocou de vídeo: o envio que estava tocando (e mais nenhum item da sala) pode sair do disco
         pruneRoomUploads(currentRoom.roomId, this.referencedUploadIds(currentRoom.roomId));
@@ -828,6 +918,23 @@ export class RoomManager {
           },
           ws
         );
+        break;
+      }
+
+      case 'media:chapters': {
+        if (!isHost || !currentRoom.media || msg.url !== currentRoom.media.url || !Array.isArray(msg.chapters)) return;
+        // Dado do cliente: só números finitos e títulos curtos, no máximo 200 capítulos
+        const chapters = msg.chapters
+          .slice(0, 200)
+          .filter((c) => c && Number.isFinite(c.startTime) && (c.endTime === undefined || Number.isFinite(c.endTime)))
+          .map((c) => ({ startTime: c.startTime, endTime: c.endTime, title: String(c.title ?? '').slice(0, 200) }));
+        currentRoom.media = { ...currentRoom.media, chapters: chapters as any };
+        this.schedulePersist(currentRoom);
+        break;
+      }
+
+      case 'skip:vote': {
+        this.handleSkipVote(currentRoom, clientSession, msg);
         break;
       }
 
