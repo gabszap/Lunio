@@ -31,6 +31,7 @@ import { syncManager } from './lib/sync';
 import { generateRoomCode, roomCodeFrom } from './lib/roomCode';
 import { RecentStream, loadRecentStreams, pushRecentStream, saveRecentStreams } from './lib/recent';
 import { t, useLang } from './lib/i18n';
+import { streamMediaInfo } from './lib/streamMime';
 
 type HomeStep = 'menu' | 'join' | SourceStep;
 
@@ -381,16 +382,16 @@ export default function App() {
 
   /** Um stream escolhido no detalhe do catálogo ("Onde assistir"): cria a sala e abre o player. */
   const playStream = (stream: StreamOption, title: string) => {
-    const name = stream.filename ?? '';
+    const { mimeType, isMkv } = streamMediaInfo(stream.url, stream.filename);
     commitMedia(
       {
         url: stream.url,
         title,
-        mimeType: /\.mp4$/i.test(name) || /\.mp4(\?|$)/i.test(stream.url) ? 'video/mp4' : 'video/x-matroska',
+        mimeType,
         chapters: [],
         subtitles: [],
         audioTracks: [],
-        isMkv: /\.mkv|torrentio/i.test(name || stream.url),
+        isMkv,
       },
       'room'
     );

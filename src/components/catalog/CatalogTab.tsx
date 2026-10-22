@@ -238,10 +238,13 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
   const [saved, setSaved] = useState(() => isInMyList(item.id));
 
   useEffect(() => {
+    // Resposta de um título anterior não pode mexer no atual
+    let cancelled = false;
     setMeta(null);
     setError(false);
     fetchMeta(item.type, item.id)
       .then((m) => {
+        if (cancelled) return;
         setMeta(m);
         const order = seasonOrder(m.episodes.map((e) => e.season));
         // O episódio do endereço manda na temporada; senão vale a do endereço (se o título a tem); senão, a primeira
@@ -252,7 +255,12 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
         // Episódio que o título não tem: volta à lista
         if (episodeId && !opened) onEpisodeChange(null);
       })
-      .catch(() => setError(true));
+      .catch(() => {
+        if (!cancelled) setError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [item]);
 
   // A nota do MyAnimeList vem à parte, com novas tentativas (a API pode estar fria ou limitando): o detalhe nunca espera por ela

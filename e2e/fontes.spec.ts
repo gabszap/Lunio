@@ -202,9 +202,16 @@ test.describe('Streams no detalhe (Onde assistir)', () => {
     await withAddon(page);
     await mockTitles(page);
     const cors = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };
+    // A resposta do episódio 1 só sai depois que a lista do episódio 2 está na tela
+    let releaseEp1!: () => void;
+    const ep1Gate = new Promise<void>((r) => (releaseEp1 = r));
+    let ep1Requested = false;
+    let ep1Fulfilled = false;
     await page.route('**/stream/series/tt2%3A1%3A1.json', async (route) => {
-      await new Promise((r) => setTimeout(r, 1500));
+      ep1Requested = true;
+      await ep1Gate;
       await route.fulfill({ status: 200, headers: cors, body: JSON.stringify({ streams: [{ name: 'Tardio', title: 'EP1-TARDIO.mkv', url: 'http://127.0.0.1:3101/teste.mkv' }] }) });
+      ep1Fulfilled = true;
     });
     await page.route('**/stream/series/tt2%3A1%3A2.json', (route) =>
       route.fulfill({ status: 200, headers: cors, body: JSON.stringify({ streams: [{ name: 'Rápido', title: 'EP2-OK.mkv', url: 'http://127.0.0.1:3101/teste.mkv' }] }) })
@@ -215,8 +222,13 @@ test.describe('Streams no detalhe (Onde assistir)', () => {
     await page.getByRole('button', { name: 'Episódios' }).click();
     await page.getByRole('button', { name: /Segundo/ }).click();
     await expect(page.getByRole('button', { name: /EP2-OK/ })).toBeVisible();
-    await page.waitForTimeout(2000);
+    expect(ep1Requested).toBe(true);
+    releaseEp1();
+    await expect.poll(() => ep1Fulfilled).toBe(true);
+    // Dá ao navegador a chance de processar a resposta entregue antes de checar que ela foi descartada
+    await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
     await expect(page.getByText('EP1-TARDIO')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /EP2-OK/ })).toBeVisible();
     await page.close();
   });
 
