@@ -48,7 +48,7 @@ npm run dev      # development (hot reload)
 npm start        # production: builds, then runs the production server (no Vite)
 ```
 
-Open <http://localhost:3000>. The dev server also listens on your local network, so friends on the same network can join using your machine's IP.
+Open <http://localhost:3000>. The Home tabs have their own routes: `/catalog` (Catalog), `/home` (Room, also `/`) and `/status` (Status); the browser's Back button moves between them. The dev server also listens on your local network, so friends on the same network can join using your machine's IP.
 
 ### Environment variables
 

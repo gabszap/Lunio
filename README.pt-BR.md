@@ -48,7 +48,7 @@ npm run dev      # desenvolvimento (hot reload)
 npm start        # produção: gera o build e roda o servidor de produção (sem Vite)
 ```
 
-Abra <http://localhost:3000>. O servidor de desenvolvimento também escuta na rede local, então amigos na mesma rede podem entrar usando o IP da sua máquina.
+Abra <http://localhost:3000>. As abas da Home têm rota própria: `/catalog` (Catálogo), `/home` (Sala, também `/`) e `/status` (Status); o botão Voltar do navegador anda entre elas. O servidor de desenvolvimento também escuta na rede local, então amigos na mesma rede podem entrar usando o IP da sua máquina.
 
 ### Variáveis de ambiente
 
