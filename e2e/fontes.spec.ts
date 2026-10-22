@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { submitName } from './helpers';
 
 const ADDON_PORT = 3102;
 const MANIFEST_URL = `http://127.0.0.1:${ADDON_PORT}/manifest.json`;
@@ -104,5 +105,127 @@ test.describe('Addons de vídeo', () => {
       second.kill();
       await page.close();
     }
+  });
+});
+
+// ───────────── streams no detalhe ─────────────
+
+const SERIES_META = {
+  id: 'tt2',
+  type: 'series',
+  name: 'Série Dois',
+  genres: [],
+  episodes: [
+    { id: 'tt2:1:1', season: 1, episode: 1, title: 'Primeiro' },
+    { id: 'tt2:1:2', season: 1, episode: 2, title: 'Segundo' },
+  ],
+};
+const MOVIE_META = { id: 'tt1', type: 'movie', name: 'Filme Um', genres: [], episodes: [] };
+
+/** Catálogo simulado com um filme (tt1) e uma série (tt2). */
+async function mockTitles(page: Page) {
+  await page.route('**/api/catalog/**', async (route) => {
+    const url = new URL(route.request().url());
+    const action = url.pathname.split('/').pop();
+    const json = (body: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    if (action === 'manifest') return json({ name: 'Fonte', isDefault: false, stale: false, rows: [] });
+    if (action === 'meta') return json({ meta: url.searchParams.get('id') === 'tt1' ? MOVIE_META : SERIES_META });
+    return json({ score: null, failed: false });
+  });
+}
+
+/** Deixa o addon de teste já guardado no navegador (o painel é coberto pelos testes acima). */
+async function withAddon(page: Page) {
+  await page.addInitScript(
+    ([key, manifestUrl, base]) => {
+      if (localStorage.getItem(key) !== null) return;
+      localStorage.setItem(key, JSON.stringify([{ id: 'fake1', name: 'Addon de teste', manifestUrl, base, stream: { types: ['movie', 'series'], idPrefixes: ['tt'] } }]));
+    },
+    ['lunio_addons', MANIFEST_URL, `http://127.0.0.1:${ADDON_PORT}`] as const
+  );
+}
+
+const path = (page: Page) => new URL(page.url()).pathname;
+const query = (page: Page) => new URL(page.url()).search;
+
+test.describe('Streams no detalhe (Onde assistir)', () => {
+  test('filme: lista ordenada, o que não toca fica recolhido e o clique cria a sala', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await withAddon(page);
+    await mockTitles(page);
+    await page.goto('/detail/movie/tt1');
+
+    await expect(page.getByRole('heading', { name: 'Onde assistir' })).toBeVisible();
+    const h264 = page.getByRole('button', { name: /Filme\.1080p\.H264\.mkv/ });
+    await expect(h264).toBeVisible();
+    await expect(h264).toContainText('Toca');
+    // A ordem é Toca, Pode falhar: o H.264 vem antes do HEVC
+    const names = await page.locator('section', { has: page.getByRole('heading', { name: 'Onde assistir' }) }).getByRole('button').allTextContents();
+    expect(names.findIndex((n) => /H264/.test(n))).toBeLessThan(names.findIndex((n) => /HEVC/.test(n)));
+    // O que o addon avisa que não é para navegador fica atrás de "Mostrar o resto"
+    await expect(page.getByRole('button', { name: /Filme\.720p\.mkv/ })).toHaveCount(0);
+    await page.getByRole('button', { name: /Mostrar o resto/ }).click();
+    await expect(page.getByRole('button', { name: /Filme\.720p\.mkv/ })).toContainText('Não toca');
+    // A URL do stream nunca aparece
+    expect(await page.content()).not.toContain('127.0.0.1:3101');
+
+    await h264.click();
+    await submitName(page, 'Ana');
+    await expect(page).toHaveURL(/\?room=[A-Z0-9]+/);
+    await expect(page.locator('video')).toBeAttached();
+    await page.close();
+  });
+
+  test('episódio: o caminho leva o videoId, abrir direto mostra os streams e Voltar volta à lista', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await withAddon(page);
+    await mockTitles(page);
+    await page.goto('/detail/series/tt2');
+
+    await page.getByRole('button', { name: /Primeiro/ }).click();
+    await expect.poll(() => path(page)).toBe('/detail/series/tt2/tt2%3A1%3A1');
+    expect(query(page)).toContain('season=1');
+    await expect(page.getByRole('button', { name: /Filme\.1080p\.H264\.mkv/ })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Episódios' }).click();
+    await expect.poll(() => path(page)).toBe('/detail/series/tt2');
+    await expect(page.getByRole('button', { name: /Segundo/ })).toBeVisible();
+
+    await page.goto('/detail/series/tt2/tt2%3A1%3A2');
+    await expect(page.getByRole('button', { name: /Filme\.1080p\.H264\.mkv/ })).toBeVisible();
+    await expect.poll(() => path(page)).toBe('/detail/series/tt2/tt2%3A1%3A2');
+    await page.close();
+  });
+
+  test('trocar de episódio não deixa a resposta atrasada do anterior na lista', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await withAddon(page);
+    await mockTitles(page);
+    const cors = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };
+    await page.route('**/stream/series/tt2%3A1%3A1.json', async (route) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.fulfill({ status: 200, headers: cors, body: JSON.stringify({ streams: [{ name: 'Tardio', title: 'EP1-TARDIO.mkv', url: 'http://127.0.0.1:3101/teste.mkv' }] }) });
+    });
+    await page.route('**/stream/series/tt2%3A1%3A2.json', (route) =>
+      route.fulfill({ status: 200, headers: cors, body: JSON.stringify({ streams: [{ name: 'Rápido', title: 'EP2-OK.mkv', url: 'http://127.0.0.1:3101/teste.mkv' }] }) })
+    );
+    await page.goto('/detail/series/tt2');
+
+    await page.getByRole('button', { name: /Primeiro/ }).click();
+    await page.getByRole('button', { name: 'Episódios' }).click();
+    await page.getByRole('button', { name: /Segundo/ }).click();
+    await expect(page.getByRole('button', { name: /EP2-OK/ })).toBeVisible();
+    await page.waitForTimeout(2000);
+    await expect(page.getByText('EP1-TARDIO')).toHaveCount(0);
+    await page.close();
+  });
+
+  test('sem nenhum addon aparece o convite, que abre o painel', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await mockTitles(page);
+    await page.goto('/detail/movie/tt1');
+    await page.getByRole('button', { name: 'Adicionar um addon' }).click();
+    await expect(page.getByRole('dialog', { name: 'Addons' })).toBeVisible();
+    await page.close();
   });
 });

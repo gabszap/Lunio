@@ -26,6 +26,10 @@ import { t } from '../../lib/i18n';
 import { DetailRef, writeDetailToUrl, writeSearchToUrl, writeSeasonToUrl } from '../../lib/searchUrl';
 import { ImdbIcon, MalIcon } from './BrandIcons';
 import { AddonsPanel } from './AddonsPanel';
+import { StreamList } from './StreamList';
+import { loadAddons, type VideoAddon } from '../../lib/addons';
+import type { StreamOption } from '../../lib/streams';
+import { discordManager } from '../../lib/discord';
 
 export interface WatchIntent {
   title: string;
@@ -39,6 +43,8 @@ interface CatalogTabProps {
   /** Temporada do título aberto pelo endereço (`?season=`). */
   initialSeason?: number | null;
   onWatch: (intent: WatchIntent) => void;
+  /** Um stream escolhido na lista "Onde assistir" (o App cria a sala e abre o player). */
+  onPlayStream: (stream: StreamOption, title: string) => void;
   onCreateRoom: () => void;
 }
 
@@ -211,7 +217,20 @@ const BrandBadge: React.FC<{ href?: string; label: string; icon: React.ReactNode
   );
 };
 
-const Detail: React.FC<{ item: CatalogItem; initialSeason?: number | null; onBack: () => void; onWatch: (intent: WatchIntent) => void }> = ({ item, initialSeason = null, onBack, onWatch }) => {
+interface DetailProps {
+  item: CatalogItem;
+  initialSeason?: number | null;
+  /** Episódio aberto (o `videos[].id` do meta); o endereço é do CatalogTab. */
+  episodeId: string | null;
+  onEpisodeChange: (id: string | null) => void;
+  addons: VideoAddon[];
+  onOpenAddons: () => void;
+  onBack: () => void;
+  onWatch: (intent: WatchIntent) => void;
+  onPlayStream: (stream: StreamOption, title: string) => void;
+}
+
+const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, onEpisodeChange, addons, onOpenAddons, onBack, onWatch, onPlayStream }) => {
   const [meta, setMeta] = useState<CatalogMeta | null>(null);
   const [error, setError] = useState(false);
   const [season, setSeason] = useState<number>(initialSeason ?? 1);
@@ -225,9 +244,13 @@ const Detail: React.FC<{ item: CatalogItem; initialSeason?: number | null; onBac
       .then((m) => {
         setMeta(m);
         const order = seasonOrder(m.episodes.map((e) => e.season));
-        // A temporada do endereço vale se o título a tem; senão, a primeira
-        if (initialSeason !== null && order.includes(initialSeason)) setSeason(initialSeason);
+        // O episódio do endereço manda na temporada; senão vale a do endereço (se o título a tem); senão, a primeira
+        const opened = episodeId ? m.episodes.find((e) => e.id === episodeId) : undefined;
+        if (opened) setSeason(opened.season);
+        else if (initialSeason !== null && order.includes(initialSeason)) setSeason(initialSeason);
         else if (order[0] !== undefined) setSeason(order[0]);
+        // Episódio que o título não tem: volta à lista
+        if (episodeId && !opened) onEpisodeChange(null);
       })
       .catch(() => setError(true));
   }, [item]);
@@ -277,6 +300,27 @@ const Detail: React.FC<{ item: CatalogItem; initialSeason?: number | null; onBac
     const title = isSeries && firstEpisode ? `${data.name} · ${episodeTag(firstEpisode.season, firstEpisode.episode)}` : data.name;
     onWatch({ title, preferSolo });
   };
+
+  // "Onde assistir": filme direto no detalhe; série, no episódio aberto (`/detail/<tipo>/<id>/<videoId>`)
+  const openEpisode = isSeries && episodeId ? data.episodes.find((e) => e.id === episodeId) : undefined;
+  const episodeTitle = openEpisode ? `${data.name} · ${episodeTag(openEpisode.season, openEpisode.episode)}` : data.name;
+  const streamsList = discordManager.isDiscordActivity() ? (
+    // Dentro do Discord o iframe só fala com origens mapeadas: o navegador não alcança o addon
+    <p className="m-0 text-[14px] text-lu-muted">{t('Os addons não estão disponíveis no Discord. Cole o link do vídeo.')}</p>
+  ) : (
+    <StreamList
+      addons={addons}
+      target={
+        isSeries
+          ? openEpisode
+            ? { type: item.type === 'anime' ? 'anime' : 'series', videoId: openEpisode.id, seriesId: item.id, season: openEpisode.season, episode: openEpisode.episode }
+            : null
+          : { type: 'movie', videoId: item.id }
+      }
+      onPlay={(stream) => onPlayStream(stream, episodeTitle)}
+      onOpenAddons={onOpenAddons}
+    />
+  );
 
   const metaLine = [
     data.year,
@@ -383,7 +427,27 @@ const Detail: React.FC<{ item: CatalogItem; initialSeason?: number | null; onBac
         </div>
       </section>
 
-      {isSeries && seasons.length > 0 && (
+      {!isSeries && !error && <section className="px-4 sm:px-12 pt-2 max-w-[820px]">{streamsList}</section>}
+
+      {isSeries && openEpisode && (
+        <section aria-label={t('Onde assistir')} className="px-4 sm:px-12 pt-2 flex flex-col gap-4 max-w-[820px]">
+          <div className="flex flex-wrap items-center gap-3">
+            <TextButton onClick={() => onEpisodeChange(null)} className="!pl-2 -ml-2">
+              <ChevronLeft size={18} />
+              <span>{t('Episódios')}</span>
+            </TextButton>
+            <h2 className="m-0 text-[18px] font-semibold">
+              {episodeTag(openEpisode.season, openEpisode.episode)} · {openEpisode.title || t('Episódio {v1}', { v1: openEpisode.episode })}
+            </h2>
+          </div>
+          {streamsList}
+          <GhostButton className="self-start" onClick={() => onWatch({ title: episodeTitle, preferSolo: false })}>
+            {t('Colar o link do vídeo')}
+          </GhostButton>
+        </section>
+      )}
+
+      {isSeries && !openEpisode && seasons.length > 0 && (
         <section aria-label={t('Episódios')} className="px-4 sm:px-12 pt-2 flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="m-0 text-[18px] font-semibold">{t('Episódios')}</h2>
@@ -402,7 +466,7 @@ const Detail: React.FC<{ item: CatalogItem; initialSeason?: number | null; onBac
               <button
                 key={ep.id}
                 type="button"
-                onClick={() => onWatch({ title: `${data.name} · ${episodeTag(ep.season, ep.episode)}`, preferSolo: false })}
+                onClick={() => onEpisodeChange(ep.id)}
                 className="group flex items-start gap-4 p-3 rounded-[14px] bg-lu-bg2 border border-lu-border hover:bg-white/6 text-left w-full"
               >
                 <span
@@ -504,7 +568,7 @@ function readSearchMode(): SearchMode {
   }
 }
 
-export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initialDetail = null, initialSeason = null, onWatch, onCreateRoom }) => {
+export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initialDetail = null, initialSeason = null, onWatch, onPlayStream, onCreateRoom }) => {
   const [query, setQuery] = useState(initialQuery);
   const [debounced, setDebounced] = useState(initialQuery.trim());
   /** Um grupo por catálogo de busca da fonte (como no Stremio). */
@@ -520,6 +584,13 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   const [manifest, setManifest] = useState<CatalogManifest | null | 'error'>(null);
   const [manifestTry, setManifestTry] = useState(0);
   const [addonsOpen, setAddonsOpen] = useState(false);
+  const [addons, setAddons] = useState<VideoAddon[]>(() => loadAddons());
+  /** Episódio aberto (`/detail/<tipo>/<id>/<videoId>`); trocar de título o zera. */
+  const [episodeId, setEpisodeId] = useState<string | null>(initialDetail?.videoId ?? null);
+  const openItem = (item: CatalogItem) => {
+    setEpisodeId(null);
+    setSelected(item);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -545,8 +616,8 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   useEffect(() => () => writeSearchToUrl(''), []);
   // O título aberto também vai para o endereço
   useEffect(() => {
-    writeDetailToUrl(selected ? { type: selected.type, id: selected.id } : null);
-  }, [selected]);
+    writeDetailToUrl(selected ? { type: selected.type, id: selected.id, videoId: episodeId ?? undefined } : null);
+  }, [selected, episodeId]);
   useEffect(() => () => writeDetailToUrl(null), []);
 
   useEffect(() => {
@@ -573,7 +644,26 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
 
   if (selected) {
     const fromUrl = initialDetail && initialDetail.id === selected.id && initialDetail.type === selected.type;
-    return <Detail key={`${selected.type}/${selected.id}`} item={selected} initialSeason={fromUrl ? initialSeason : null} onBack={() => setSelected(null)} onWatch={onWatch} />;
+    return (
+      <>
+        <Detail
+          key={`${selected.type}/${selected.id}`}
+          item={selected}
+          initialSeason={fromUrl ? initialSeason : null}
+          episodeId={episodeId}
+          onEpisodeChange={setEpisodeId}
+          addons={addons}
+          onOpenAddons={() => setAddonsOpen(true)}
+          onBack={() => {
+            setEpisodeId(null);
+            setSelected(null);
+          }}
+          onWatch={onWatch}
+          onPlayStream={onPlayStream}
+        />
+        <AddonsPanel open={addonsOpen} onClose={() => setAddonsOpen(false)} onChange={setAddons} />
+      </>
+    );
   }
 
   const groupsTotal = results?.reduce((n, g) => n + g.metas.length, 0) ?? 0;
@@ -618,7 +708,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
           <span>{t('Addons')}</span>
         </GhostButton>
       </div>
-      <AddonsPanel open={addonsOpen} onClose={() => setAddonsOpen(false)} onChange={() => {}} />
+      <AddonsPanel open={addonsOpen} onClose={() => setAddonsOpen(false)} onChange={setAddons} />
 
       {debounced ? (
         results === null && !searchError ? (
@@ -687,12 +777,12 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
             </div>
             {mode === 'groups' ? (
               results!.map((group, i) => (
-                <Row key={`${group.type}:${group.id}`} title={groupTitles[i]} load={async () => group.metas} items={group.metas} onOpen={setSelected} />
+                <Row key={`${group.type}:${group.id}`} title={groupTitles[i]} load={async () => group.metas} items={group.metas} onOpen={openItem} />
               ))
             ) : (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(152px,1fr))] gap-x-4 gap-y-6">
                 {shown.map((item) => (
-                  <PosterCard key={`${item.type}-${item.id}`} item={item} onOpen={setSelected} showType fluid />
+                  <PosterCard key={`${item.type}-${item.id}`} item={item} onOpen={openItem} showType fluid />
                 ))}
               </div>
             )}
@@ -700,8 +790,8 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
         )
       ) : (
         <>
-          {myList.length > 0 && <Row title={t('Minha lista')} load={async () => myList} items={myList} onOpen={setSelected} />}
-          <HomeRows manifest={manifest} onOpen={setSelected} onRetry={() => setManifestTry((n) => n + 1)} onCreateRoom={onCreateRoom} />
+          {myList.length > 0 && <Row title={t('Minha lista')} load={async () => myList} items={myList} onOpen={openItem} />}
+          <HomeRows manifest={manifest} onOpen={openItem} onRetry={() => setManifestTry((n) => n + 1)} onCreateRoom={onCreateRoom} />
         </>
       )}
     </div>

@@ -20,6 +20,7 @@ import { DriveStep, YouTubeStep } from './components/home/LinkSourceSteps';
 import { JoinError, JoinStep, checkRoom } from './components/home/RoomSteps';
 import { StatusTab } from './components/home/StatusTab';
 import type { WatchIntent } from './components/catalog/CatalogTab';
+import type { StreamOption } from './lib/streams';
 import type { CommitMode, CommitOptions } from './components/home/types';
 import { MediaPayload, SubtitleTrack } from './types/media';
 import type { PlaylistItem } from './types/sync';
@@ -378,6 +379,23 @@ export default function App() {
     }
   };
 
+  /** Um stream escolhido no detalhe do catálogo ("Onde assistir"): cria a sala e abre o player. */
+  const playStream = (stream: StreamOption, title: string) => {
+    const name = stream.filename ?? '';
+    commitMedia(
+      {
+        url: stream.url,
+        title,
+        mimeType: /\.mp4$/i.test(name) || /\.mp4(\?|$)/i.test(stream.url) ? 'video/mp4' : 'video/x-matroska',
+        chapters: [],
+        subtitles: [],
+        audioTracks: [],
+        isMkv: /\.mkv|torrentio/i.test(name || stream.url),
+      },
+      'room'
+    );
+  };
+
   /** Fila da sala: o Host toca um item (o servidor tira da fila; o vídeo vai para todos como um media:set normal). */
   const playPlaylistItem = (item: PlaylistItem) => {
     if (!syncManager.isRoomHost()) return;
@@ -522,6 +540,7 @@ export default function App() {
                   setHomeTab('room');
                   setHomeStep('stream');
                 }}
+                onPlayStream={playStream}
                 onCreateRoom={() => goHome('room')}
               />
             </Suspense>

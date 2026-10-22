@@ -523,4 +523,6 @@ export const EN: Record<string, string> = {
   "Nenhum stream encontrado": "No streams found",
   "1 addon falhou": "1 addon failed",
   "{n} addons falharam": "{n} addons failed",
+  "Colar o link do vídeo": "Paste the video link",
+  "Os addons não estão disponíveis no Discord. Cole o link do vídeo.": "Addons are not available in Discord. Paste the video link instead.",
 };
