@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { reduceStreams, type StreamsState } from './useStreams';
+import { reduceStreams, targetKeyOf, type StreamsState } from './useStreams';
 import type { SourceResult, StreamOption } from '../../lib/streams';
 
 const opt = (url: string, level: StreamOption['level']): StreamOption => ({
@@ -48,5 +48,20 @@ describe('reduceStreams', () => {
     const a = reduceStreams(initial, result([opt('u1', 'ok')]));
     const b = reduceStreams(a, result([opt('u1', 'ok')]));
     expect(b.options).toHaveLength(1);
+  });
+});
+
+describe('targetKeyOf', () => {
+  it('é igual para o mesmo conteúdo em objetos diferentes', () => {
+    expect(targetKeyOf({ type: 'series', videoId: 'x:1:2', season: 1, episode: 2 })).toBe(
+      targetKeyOf({ type: 'series', videoId: 'x:1:2', season: 1, episode: 2 }),
+    );
+  });
+  it('muda com o videoId, o tipo e o episódio', () => {
+    const base = targetKeyOf({ type: 'series', videoId: 'a', season: 1, episode: 1 });
+    expect(targetKeyOf({ type: 'series', videoId: 'b', season: 1, episode: 1 })).not.toBe(base);
+    expect(targetKeyOf({ type: 'anime', videoId: 'a', season: 1, episode: 1 })).not.toBe(base);
+    expect(targetKeyOf({ type: 'series', videoId: 'a', season: 1, episode: 2 })).not.toBe(base);
+    expect(targetKeyOf(null)).toBe('');
   });
 });

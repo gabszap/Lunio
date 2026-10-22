@@ -5,7 +5,7 @@ import type { StreamOption, StreamTarget } from '../../lib/streams';
 import type { Playability, PlayabilityReason } from '../../lib/streamPlayability';
 import { Badge, Spinner, TextButton, cx } from '../ui';
 import { t } from '../../lib/i18n';
-import { useStreams } from './useStreams';
+import { targetKeyOf, useStreams } from './useStreams';
 
 interface StreamListProps {
   addons: VideoAddon[];
@@ -72,7 +72,8 @@ export const StreamList: React.FC<StreamListProps> = ({ addons, target, onPlay, 
   const { state, retry } = useStreams(addons, target);
   const [showRest, setShowRest] = useState(false);
 
-  useEffect(() => setShowRest(false), [target]);
+  const targetKey = targetKeyOf(target);
+  useEffect(() => setShowRest(false), [targetKey]);
 
   const playable = state.options.filter((o) => o.level !== 'no');
   const rest = state.options.filter((o) => o.level === 'no');

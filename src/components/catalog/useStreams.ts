@@ -24,6 +24,11 @@ export function reduceStreams(state: StreamsState, result: SourceResult): Stream
   };
 }
 
+/** Chave estável do alvo: o mesmo conteúdo dá a mesma chave, mesmo com outra identidade de objeto. */
+export function targetKeyOf(target: StreamTarget | null): string {
+  return target ? JSON.stringify([target.type, target.videoId, target.season, target.episode, target.seriesId]) : '';
+}
+
 /** Pede os streams ao trocar de alvo; o resultado de um alvo anterior nunca chega ao estado. */
 export function useStreams(addons: VideoAddon[], target: StreamTarget | null): { state: StreamsState; retry: () => void } {
   const [state, setState] = useState<StreamsState>(IDLE);
@@ -35,7 +40,7 @@ export function useStreams(addons: VideoAddon[], target: StreamTarget | null): {
 
   // Só o conjunto de addons e o alvo reiniciam o pedido, não a identidade dos objetos
   const addonsKey = addons.map((a) => a.id).join('|');
-  const targetKey = target ? JSON.stringify(target) : '';
+  const targetKey = targetKeyOf(target);
 
   useEffect(() => {
     const list = addonsRef.current;
@@ -58,7 +63,13 @@ export function useStreams(addons: VideoAddon[], target: StreamTarget | null): {
       });
       // addon que não entende este id não responde: fecha a conta
       if (!ctrl.signal.aborted) setState((s) => (s.status === 'loading' ? { ...s, status: 'done', pending: 0 } : s));
-    })();
+    })().catch(() => {
+      // Falha fora das fontes (suporte do navegador, fetchStreams): sem isso ficaria carregando para sempre
+      if (ctrl.signal.aborted) return;
+      setState((s) =>
+        s.status === 'loading' ? { ...s, status: 'done', pending: 0, failedSources: Math.max(1, s.failedSources) } : s,
+      );
+    });
     return () => ctrl.abort();
   }, [addonsKey, targetKey, attempt]);
 
