@@ -47,4 +47,10 @@ describe('detectCodecs', () => {
     expect(detectCodecs({ description: 'AC3' }).audio).toEqual(['ac3']);
     expect(detectCodecs({ description: 'DD+ | DD' }).audio).toEqual(['eac3', 'ac3']);
   });
+
+  it('AC3 depois de hífen de release continua ac3', () => {
+    expect(detectCodecs({ description: 'WEB-AC3' }).audio).toEqual(['ac3']);
+    expect(detectCodecs({ description: 'BluRay-AC3' }).audio).toEqual(['ac3']);
+    expect(detectCodecs({ filename: 'x.WEB-DL.AC3.mkv' }).audio).toEqual(['ac3']);
+  });
 });

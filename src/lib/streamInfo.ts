@@ -20,8 +20,8 @@ const VIDEO: Array<[NonNullable<StreamCodecs['videoCodec']>, RegExp]> = [
 
 const AUDIO: Array<[StreamCodecs['audio'][number], RegExp]> = [
   ['eac3', new RegExp(`${B}(dd\\+|ddp\\d*|e-?ac-?3)`, 'i')],
-  // DD+ e E-AC3 são eac3: o "+" e o "-" antes de "AC3" tiram o caso do ac3.
-  ['ac3', new RegExp(`${B}dd(?![a-z+])|(?<![a-z0-9-])ac-?3${E}`, 'i')],
+  // DD+ e E-AC3 são eac3: o "+" e o prefixo "E-" antes de "AC3" tiram o caso do ac3.
+  ['ac3', new RegExp(`${B}dd(?![a-z+])|(?<![a-z0-9])(?<!e-)ac-?3${E}`, 'i')],
   ['aac', new RegExp(`${B}aac${E}`, 'i')],
   ['opus', new RegExp(`${B}opus${E}`, 'i')],
   ['dts', new RegExp(`${B}dts`, 'i')],
