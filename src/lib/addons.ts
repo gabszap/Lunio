@@ -41,7 +41,7 @@ export function normalizeAddonUrl(input: string): string | null {
   if (!u.pathname.endsWith(SUFFIX)) return null;
   // URL de instalação do Stremio não usa query nem fragmento; aceitar quebraria o `base`
   if (u.search || u.hash) return null;
-  return s;
+  return u.href;
 }
 
 function fnv1a(text: string): string {

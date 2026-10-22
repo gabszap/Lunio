@@ -26,6 +26,8 @@ export function writeSearchToUrl(query: string) {
 const DETAIL = 'detail';
 const DETAIL_TYPE = /^[a-z][a-z0-9_.-]{1,29}$/;
 const DETAIL_ID = /^[A-Za-z0-9_.:-]{1,100}$/;
+// O id do episódio vem do addon e pode ter `+` e afins; só o que quebraria o caminho fica de fora
+const VIDEO_ID = /^[^\s/?#]{1,200}$/;
 
 export interface DetailRef {
   type: string;
@@ -43,7 +45,7 @@ export function detailPath(ref: DetailRef): string {
 function validDetail(type: string, id: string, videoId?: string): DetailRef | null {
   if (!DETAIL_TYPE.test(type) || !DETAIL_ID.test(id)) return null;
   if (videoId === undefined) return { type, id };
-  return DETAIL_ID.test(videoId) ? { type, id, videoId } : null;
+  return VIDEO_ID.test(videoId) ? { type, id, videoId } : null;
 }
 
 /** Tipo, id e (opcional) episódio do caminho `/detail/<tipo>/<id>[/<videoId>]`; qualquer outra coisa é null. */

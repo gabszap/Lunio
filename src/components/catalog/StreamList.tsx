@@ -97,7 +97,7 @@ export const StreamList: React.FC<StreamListProps> = ({ addons, target, onPlay, 
       ) : (
         <>
           {playable.length > 0 && (
-            <ul className="m-0 p-0 list-none flex flex-col gap-2">
+            <ul aria-label={t('Onde assistir')} className="m-0 p-0 list-none flex flex-col gap-2">
               {playable.map((o) => (
                 <StreamRow key={o.key} option={o} onPlay={onPlay} />
               ))}
@@ -112,7 +112,7 @@ export const StreamList: React.FC<StreamListProps> = ({ addons, target, onPlay, 
                 ))}
               </ul>
             ) : (
-              <TextButton size="sm" className="self-start" onClick={() => setShowRest(true)}>
+              <TextButton size="sm" className="self-start" aria-expanded={false} onClick={() => setShowRest(true)}>
                 {t('Mostrar o resto ({n})', { n: rest.length })}
               </TextButton>
             ))}

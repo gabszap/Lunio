@@ -19,7 +19,7 @@ function errorText(e: unknown): string {
       case 'no_stream':
         return t('Esse addon não oferece streams');
       case 'limit':
-        return t('Limite de 10 addons');
+        return t('Limite de {n} addons', { n: MAX_ADDONS });
       case 'duplicate':
         return t('Esse addon já foi adicionado');
     }
@@ -89,9 +89,11 @@ export const AddonsPanel: React.FC<AddonsPanelProps> = ({ open, onClose, onChang
         <div className="flex gap-3">
           <BigInput
             id="addon-url"
-            type="password"
+            type="text"
             autoComplete="off"
+            autoCapitalize="off"
             spellCheck={false}
+            className="[-webkit-text-security:disc]"
             placeholder="https://…/manifest.json"
             value={url}
             invalid={Boolean(error)}

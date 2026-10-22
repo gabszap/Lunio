@@ -47,6 +47,9 @@ describe('normalizeAddonUrl', () => {
     expect(normalizeAddonUrl('https://addon.test/x')).toBeNull();
     expect(normalizeAddonUrl('javascript:alert(1)')).toBeNull();
   });
+  it('normaliza esquema e host em maiúsculas', () => {
+    expect(normalizeAddonUrl('HTTPS://Addon.TEST/x/manifest.json')).toBe(URL1);
+  });
   it('aceita http só em localhost', () => {
     expect(normalizeAddonUrl('http://127.0.0.1:3102/manifest.json')).toBe('http://127.0.0.1:3102/manifest.json');
   });
@@ -121,6 +124,10 @@ describe('addAddon', () => {
   it('o 11º vira limit', async () => {
     for (let i = 0; i < MAX_ADDONS; i++) await addAddon(`https://addon.test/${i}/manifest.json`, fakeFetch(manifest));
     await expect(addAddon(URL1, fakeFetch(manifest))).rejects.toMatchObject({ code: 'limit' });
+  });
+  it('URL que difere só em maiúsculas de esquema/host vira duplicate', async () => {
+    await addAddon(URL1, fakeFetch(manifest));
+    await expect(addAddon('HTTPS://ADDON.test/x/manifest.json', fakeFetch(manifest))).rejects.toMatchObject({ code: 'duplicate' });
   });
   it('mesma URL vira duplicate', async () => {
     await addAddon(URL1, fakeFetch(manifest));

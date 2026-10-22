@@ -505,7 +505,7 @@ export const EN: Record<string, string> = {
   "Cole a URL do manifesto (termina em /manifest.json)": "Paste the manifest URL (ends in /manifest.json)",
   "Não consegui abrir esse endereço": "Couldn't open that address",
   "Esse addon não oferece streams": "This addon doesn't offer streams",
-  "Limite de 10 addons": "Limit of 10 addons",
+  "Limite de {n} addons": "Limit of {n} addons",
   "Esse addon já foi adicionado": "This addon was already added",
   "Toca": "Plays",
   "Pode falhar": "May fail",

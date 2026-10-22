@@ -72,6 +72,15 @@ describe('título aberto (/detail/<tipo>/<id>)', () => {
     expect(readDetailFromUrl('?season=6', '/detail/series/mal%3A61469/tt2359704%3A6%3A1')).toEqual(ref);
   });
 
+  it('o id do episódio aceita mais que o do título (+, ids compostos), mas não espaço nem /', () => {
+    for (const videoId of ['kitsu:123:1:2', 'ep+1', 'a@b~c']) {
+      const ref = { type: 'series', id: 'tt1', videoId };
+      expect(detailFromPath(detailPath(ref)), videoId).toEqual(ref);
+    }
+    expect(detailFromPath('/detail/series/tt1/a%20b')).toBeNull();
+    expect(detailFromPath('/detail/series/tt1/a%2Fb')).toBeNull();
+  });
+
   it('o link antigo (?detail=) continua sendo lido, inclusive id composto e codificado', () => {
     expect(readDetailFromUrl('?detail=series/tt5607616')).toEqual({ type: 'series', id: 'tt5607616' });
     expect(readDetailFromUrl('?detail=series/mal:31240')).toEqual({ type: 'series', id: 'mal:31240' });
