@@ -38,4 +38,13 @@ describe('detectCodecs', () => {
     expect(detectCodecs({ name: 'Filme DVDRip' }).dolbyVision).toBe(false);
     expect(detectCodecs({ name: 'Filme Dolby Vision' }).dolbyVision).toBe(true);
   });
+
+  it('separa eac3 de ac3', () => {
+    expect(detectCodecs({ description: 'DD+' }).audio).toEqual(['eac3']);
+    expect(detectCodecs({ description: 'E-AC3' }).audio).toEqual(['eac3']);
+    expect(detectCodecs({ description: 'E-AC-3' }).audio).toEqual(['eac3']);
+    expect(detectCodecs({ description: 'DD' }).audio).toEqual(['ac3']);
+    expect(detectCodecs({ description: 'AC3' }).audio).toEqual(['ac3']);
+    expect(detectCodecs({ description: 'DD+ | DD' }).audio).toEqual(['eac3', 'ac3']);
+  });
 });
