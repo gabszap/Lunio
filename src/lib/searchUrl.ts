@@ -67,13 +67,20 @@ export function readDetailFromUrl(
   return slash < 1 ? null : validDetail(raw.slice(0, slash), raw.slice(slash + 1));
 }
 
-/** Grava (ou, nulo, tira) o título aberto: o caminho vira `/detail/<tipo>/<id>` (ou volta a `/catalog`). */
+/**
+ * Grava (ou, nulo, tira) o título aberto: o caminho vira `/detail/<tipo>/<id>` (ou volta a `/catalog`). A rota do título não
+ * leva a busca (`?search=`), como no Stremio: quem a restaura ao fechar é a aba do catálogo.
+ */
 export function writeDetailToUrl(ref: DetailRef | null) {
   if (typeof window === 'undefined') return;
   const url = new URL(window.location.href);
   url.searchParams.delete(DETAIL); // a forma antiga, `?detail=`, deixa de existir
-  if (ref) url.pathname = detailPath(ref);
-  else if (detailFromPath(url.pathname)) url.pathname = '/catalog';
+  if (ref) {
+    url.pathname = detailPath(ref);
+    url.searchParams.delete(PARAM);
+  } else if (detailFromPath(url.pathname)) {
+    url.pathname = '/catalog';
+  }
   const next = url.pathname + url.search + url.hash;
   if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.replaceState(null, '', next);
 }

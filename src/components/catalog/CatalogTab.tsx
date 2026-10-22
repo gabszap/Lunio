@@ -535,10 +535,11 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
     return () => window.clearTimeout(t);
   }, [query]);
 
-  // A busca vai para o endereço (e sai dele quando a aba fecha)
+  // A busca vai para o endereço (e sai dele quando a aba fecha). Com um título aberto a rota é só /detail/…: a busca volta
+  // ao endereço quando o título fecha (ela continua aqui, no estado)
   useEffect(() => {
-    writeSearchToUrl(debounced);
-  }, [debounced]);
+    writeSearchToUrl(selected ? '' : debounced);
+  }, [debounced, selected]);
   useEffect(() => () => writeSearchToUrl(''), []);
   // O título aberto também vai para o endereço
   useEffect(() => {

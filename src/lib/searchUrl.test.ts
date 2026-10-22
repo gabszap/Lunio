@@ -90,13 +90,13 @@ describe('título aberto (/detail/<tipo>/<id>)', () => {
     });
     afterEach(() => vi.unstubAllGlobals());
 
-    it('o título vira o caminho /detail/<tipo>/<id>, mantém a busca e, ao fechar, volta a /catalog', () => {
+    it('o título vira o caminho /detail/<tipo>/<id> (sem a busca) e, ao fechar, volta a /catalog', () => {
       writeDetailToUrl({ type: 'series', id: 'mal:31240' });
-      expect(current).toBe('/detail/series/mal%3A31240?search=re%3A+zero');
+      expect(current).toBe('/detail/series/mal%3A31240'); // a busca não vai junto (a aba a restaura ao fechar)
       writeDetailToUrl({ type: 'series', id: 'tt5607616' });
-      expect(current).toBe('/detail/series/tt5607616?search=re%3A+zero');
+      expect(current).toBe('/detail/series/tt5607616');
       writeDetailToUrl(null);
-      expect(current).toBe('/catalog?search=re%3A+zero');
+      expect(current).toBe('/catalog');
     });
 
     it('troca o link antigo (?detail=) pelo caminho e não mexe numa rota que não é de título', () => {
@@ -118,9 +118,9 @@ describe('temporada aberta (?season=)', () => {
   });
 
   describe('writeSeasonToUrl', () => {
-    let current = '/detail/series/mal%3A31240?search=re';
+    let current = '/detail/series/mal%3A31240';
     beforeEach(() => {
-      current = '/detail/series/mal%3A31240?search=re';
+      current = '/detail/series/mal%3A31240';
       vi.stubGlobal('window', {
         get location() {
           const u = new URL(current, 'https://lunio.test');
@@ -133,11 +133,11 @@ describe('temporada aberta (?season=)', () => {
 
     it('grava a temporada como parâmetro do título (?season=, como no Stremio) e a remove ao fechar', () => {
       writeSeasonToUrl(2);
-      expect(current).toBe('/detail/series/mal%3A31240?search=re&season=2');
+      expect(current).toBe('/detail/series/mal%3A31240?season=2');
       writeSeasonToUrl(0);
-      expect(current).toBe('/detail/series/mal%3A31240?search=re&season=0');
+      expect(current).toBe('/detail/series/mal%3A31240?season=0');
       writeSeasonToUrl(null);
-      expect(current).toBe('/detail/series/mal%3A31240?search=re');
+      expect(current).toBe('/detail/series/mal%3A31240');
     });
   });
 });

@@ -107,4 +107,23 @@ test.describe('Rotas da Home (/catalog, /home, /status)', () => {
     expect(query(page)).toBe('?season=0');
     await page.close();
   });
+
+  test('a rota do título não leva a busca; fechar o título volta à lista da busca (/catalog?search=…)', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await mockCatalog(page);
+    await page.goto('/catalog');
+
+    await page.getByRole('searchbox').fill('re: zero');
+    await expect.poll(() => query(page)).toContain('search=');
+    await page.getByRole('button', { name: /Resultado/ }).click();
+    await expect.poll(() => path(page)).toBe('/detail/series/tt1');
+    expect(query(page)).not.toContain('search'); // só a rota do título (e a temporada), como no Stremio
+
+    await page.getByRole('button', { name: 'Catálogo' }).last().click();
+    await expect.poll(() => path(page)).toBe('/catalog');
+    await expect.poll(() => new URL(page.url()).searchParams.get('search')).toBe('re: zero');
+    await expect(page.getByRole('searchbox')).toHaveValue('re: zero');
+    await expect(page.getByText('Series Search')).toBeVisible(); // os resultados continuam ali
+    await page.close();
+  });
 });
