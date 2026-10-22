@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readDetailFromUrl, readSearchFromUrl, readSeasonFromUrl, writeDetailToUrl, writeSearchToUrl, writeSeasonToUrl } from './searchUrl';
+import { detailFromPath, detailPath, readDetailFromUrl, readSearchFromUrl, readSeasonFromUrl, writeDetailToUrl, writeSearchToUrl, writeSeasonToUrl } from './searchUrl';
 
 describe('readSearchFromUrl', () => {
   it('lê a busca (com acento, dois-pontos e espaço, nas duas formas de codificar)', () => {
@@ -47,8 +47,23 @@ describe('writeSearchToUrl', () => {
   });
 });
 
-describe('título aberto (?detail=)', () => {
-  it('lê tipo e id, inclusive id composto e codificado', () => {
+describe('título aberto (/detail/<tipo>/<id>)', () => {
+  it('lê o caminho, com o id composto codificado como no Stremio', () => {
+    expect(detailFromPath('/detail/series/tt5607616')).toEqual({ type: 'series', id: 'tt5607616' });
+    expect(detailFromPath('/detail/series/mal%3A31240')).toEqual({ type: 'series', id: 'mal:31240' });
+    expect(detailFromPath('/detail/series/mal:31240/')).toEqual({ type: 'series', id: 'mal:31240' });
+    expect(detailFromPath('/detail/anime.series/tmdb.123')).toEqual({ type: 'anime.series', id: 'tmdb.123' });
+    expect(readDetailFromUrl('?season=2', '/detail/series/tt5607616')).toEqual({ type: 'series', id: 'tt5607616' });
+    expect(detailPath({ type: 'series', id: 'mal:31240' })).toBe('/detail/series/mal%3A31240');
+  });
+
+  it('caminho inválido não vira título', () => {
+    for (const bad of ['/detail', '/detail/series', '/detail/series/', '/detail/Series/tt1', '/detail/series/a%20b', '/detail/series/a/b', '/detail/../x/tt1', '/detail/series/%E0%A4%A', '/catalog', '/']) {
+      expect(detailFromPath(bad), bad).toBeNull();
+    }
+  });
+
+  it('o link antigo (?detail=) continua sendo lido, inclusive id composto e codificado', () => {
     expect(readDetailFromUrl('?detail=series/tt5607616')).toEqual({ type: 'series', id: 'tt5607616' });
     expect(readDetailFromUrl('?detail=series/mal:31240')).toEqual({ type: 'series', id: 'mal:31240' });
     expect(readDetailFromUrl('?detail=series%2Fmal%3A31240')).toEqual({ type: 'series', id: 'mal:31240' });
@@ -62,9 +77,9 @@ describe('título aberto (?detail=)', () => {
   });
 
   describe('writeDetailToUrl', () => {
-    let current = '/?search=re%3A+zero';
+    let current = '/catalog?search=re%3A+zero';
     beforeEach(() => {
-      current = '/?search=re%3A+zero';
+      current = '/catalog?search=re%3A+zero';
       vi.stubGlobal('window', {
         get location() {
           const u = new URL(current, 'https://lunio.test');
@@ -75,11 +90,22 @@ describe('título aberto (?detail=)', () => {
     });
     afterEach(() => vi.unstubAllGlobals());
 
-    it('grava legível (/ e : sem codificar), mantém a busca e remove ao fechar', () => {
+    it('o título vira o caminho /detail/<tipo>/<id>, mantém a busca e, ao fechar, volta a /catalog', () => {
       writeDetailToUrl({ type: 'series', id: 'mal:31240' });
-      expect(current).toBe('/?search=re%3A+zero&detail=series/mal:31240');
+      expect(current).toBe('/detail/series/mal%3A31240?search=re%3A+zero');
+      writeDetailToUrl({ type: 'series', id: 'tt5607616' });
+      expect(current).toBe('/detail/series/tt5607616?search=re%3A+zero');
       writeDetailToUrl(null);
-      expect(current).toBe('/?search=re%3A+zero');
+      expect(current).toBe('/catalog?search=re%3A+zero');
+    });
+
+    it('troca o link antigo (?detail=) pelo caminho e não mexe numa rota que não é de título', () => {
+      current = '/?detail=series/tt1&room=ABC';
+      writeDetailToUrl({ type: 'series', id: 'tt1' });
+      expect(current).toBe('/detail/series/tt1?room=ABC');
+      current = '/status';
+      writeDetailToUrl(null);
+      expect(current).toBe('/status');
     });
   });
 });
@@ -92,9 +118,9 @@ describe('temporada aberta (?season=)', () => {
   });
 
   describe('writeSeasonToUrl', () => {
-    let current = '/?search=re&detail=series/mal:31240';
+    let current = '/detail/series/mal%3A31240?search=re';
     beforeEach(() => {
-      current = '/?search=re&detail=series/mal:31240';
+      current = '/detail/series/mal%3A31240?search=re';
       vi.stubGlobal('window', {
         get location() {
           const u = new URL(current, 'https://lunio.test');
@@ -105,13 +131,13 @@ describe('temporada aberta (?season=)', () => {
     });
     afterEach(() => vi.unstubAllGlobals());
 
-    it('grava a temporada mantendo o resto (o detalhe continua legível) e a remove ao fechar', () => {
+    it('grava a temporada como parâmetro do título (?season=, como no Stremio) e a remove ao fechar', () => {
       writeSeasonToUrl(2);
-      expect(current).toBe('/?search=re&detail=series/mal:31240&season=2');
+      expect(current).toBe('/detail/series/mal%3A31240?search=re&season=2');
       writeSeasonToUrl(0);
-      expect(current).toBe('/?search=re&detail=series/mal:31240&season=0');
+      expect(current).toBe('/detail/series/mal%3A31240?search=re&season=0');
       writeSeasonToUrl(null);
-      expect(current).toBe('/?search=re&detail=series/mal:31240');
+      expect(current).toBe('/detail/series/mal%3A31240?search=re');
     });
   });
 });

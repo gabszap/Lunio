@@ -6,6 +6,7 @@ describe('tabFromPath', () => {
     expect(tabFromPath('/catalog')).toBe('catalog');
     expect(tabFromPath('/catalog/')).toBe('catalog');
     expect(tabFromPath('/status')).toBe('status');
+    expect(tabFromPath('/detail/series/tt5607616')).toBe('catalog'); // um título aberto é o catálogo
     expect(tabFromPath('/home')).toBe('room');
     expect(tabFromPath('/')).toBe('room');
     expect(tabFromPath('')).toBe('room');
@@ -59,6 +60,22 @@ describe('endereço das abas', () => {
     expect(current).toBe('/catalog');
     pushTabUrl('status');
     expect(current).toBe('/status');
+  });
+
+  it('o link antigo /?detail=tipo/id vira o caminho /detail/tipo/id', () => {
+    current = '/?detail=series/mal:31240&season=2';
+    canonicalizeCatalogUrl();
+    expect(current).toBe('/detail/series/mal%3A31240?season=2');
+    expect(pushState).not.toHaveBeenCalled();
+  });
+
+  it('sair de um título para outra aba leva o caminho e os parâmetros do catálogo embora', () => {
+    current = '/detail/series/tt1?search=re&season=2';
+    pushTabUrl('room');
+    expect(current).toBe('/home');
+    current = '/detail/series/tt1';
+    pushTabUrl('catalog'); // já está no catálogo
+    expect(pushState).toHaveBeenCalledTimes(1);
   });
 
   it('`/` com busca do catálogo vira /catalog sem criar entrada no histórico', () => {

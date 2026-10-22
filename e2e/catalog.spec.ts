@@ -138,22 +138,22 @@ test.describe('Catálogo (fonte configurada no servidor)', () => {
     await page.close();
   });
 
-  test('o título aberto vai para o endereço (?detail=tipo/id), um link com ele abre direto e fechar o tira', async ({ browser }) => {
+  test('o título aberto vai para o endereço (/detail/tipo/id), um link com ele abre direto e fechar volta a /catalog', async ({ browser }) => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await mockCatalog(page);
     await openCatalog(page);
 
     await page.getByRole('button', { name: /Anime Três/ }).click();
     await expect(page.getByRole('heading', { name: 'Anime Três', level: 1 })).toBeVisible();
-    await expect.poll(() => new URL(page.url()).searchParams.get('detail')).toBe('anime/mal:5114');
-    expect(page.url()).toContain('detail=anime/mal:5114'); // legível: / e : sem codificar
+    // O título é o caminho /detail/<tipo>/<id> (como no Stremio)
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/detail/anime/mal%3A5114');
 
     // Recarregar (ou abrir o link) volta para o mesmo título, já na aba Catálogo
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Anime Três', level: 1 })).toBeVisible();
 
     await page.getByRole('button', { name: 'Catálogo' }).last().click();
-    await expect.poll(() => new URL(page.url()).searchParams.has('detail')).toBe(false);
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/catalog');
     await page.close();
   });
 
@@ -218,7 +218,7 @@ test.describe('Catálogo (fonte configurada no servidor)', () => {
     await page.close();
   });
 
-  test('a temporada aberta vai para o endereço (?season=), um link com ela abre nela e fechar o título a tira', async ({ browser }) => {
+  test('a temporada aberta vai para o endereço (/detail/tipo/id?season=), um link com ela abre nela e fechar o título a tira', async ({ browser }) => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await mockCatalog(page);
     await openCatalog(page);
@@ -227,7 +227,7 @@ test.describe('Catálogo (fonte configurada no servidor)', () => {
     await expect.poll(() => new URL(page.url()).searchParams.get('season')).toBe('1');
     await page.getByRole('tab', { name: 'Especiais' }).click();
     await expect.poll(() => new URL(page.url()).searchParams.get('season')).toBe('0');
-    expect(page.url()).toContain('detail=anime/mal:5114'); // o detalhe continua legível ao lado
+    expect(new URL(page.url()).pathname).toBe('/detail/anime/mal%3A5114'); // a temporada é parâmetro do título
 
     // Recarregar volta na mesma temporada
     await page.reload();

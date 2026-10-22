@@ -1,6 +1,6 @@
 /**
- * A busca e o título aberto no catálogo vão para o endereço, como no Stremio: `/?search=re%3A+zero` e
- * `/?detail=series/mal:31240` (tipo e id da fonte). Dá para compartilhar, recarregar e voltar. Convivem com os outros
+ * A busca e o título aberto no catálogo vão para o endereço, como no Stremio: `/catalog?search=re%3A+zero` e
+ * `/detail/series/mal%3A31240` (tipo e id da fonte). Dá para compartilhar, recarregar e voltar. Convivem com os outros
  * parâmetros (`room`, `t`…) e somem quando a busca é limpa, o título fechado ou a aba muda.
  */
 
@@ -32,24 +32,49 @@ export interface DetailRef {
   id: string;
 }
 
-/** `?detail=<tipo>/<id>` (ex.: `series/tt5607616`, `series/mal:31240`); valor inválido é ignorado. */
-export function readDetailFromUrl(search = typeof window === 'undefined' ? '' : window.location.search): DetailRef | null {
-  const raw = new URLSearchParams(search).get(DETAIL) ?? '';
-  const slash = raw.indexOf('/');
-  if (slash < 1) return null;
-  const type = raw.slice(0, slash);
-  const id = raw.slice(slash + 1);
+/** O caminho do título: `/detail/series/tt5607616`, `/detail/series/mal%3A31240` (como no Stremio). */
+export function detailPath(ref: DetailRef): string {
+  return `/detail/${encodeURIComponent(ref.type)}/${encodeURIComponent(ref.id)}`;
+}
+
+function validDetail(type: string, id: string): DetailRef | null {
   return DETAIL_TYPE.test(type) && DETAIL_ID.test(id) ? { type, id } : null;
 }
 
-/** Grava (ou, nulo, remove) o título aberto; `/` e `:` ficam legíveis, como no Stremio. */
+/** Tipo e id do caminho `/detail/<tipo>/<id>`; qualquer outra coisa é null. */
+export function detailFromPath(pathname: string): DetailRef | null {
+  const m = /^\/detail\/([^/]+)\/([^/]+)\/?$/.exec(pathname);
+  if (!m) return null;
+  try {
+    return validDetail(decodeURIComponent(m[1]), decodeURIComponent(m[2]));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * O título aberto, do caminho `/detail/<tipo>/<id>` ou, nos links antigos, de `?detail=<tipo>/<id>`; valor inválido é
+ * ignorado.
+ */
+export function readDetailFromUrl(
+  search = typeof window === 'undefined' ? '' : window.location.search,
+  pathname = typeof window === 'undefined' ? '' : window.location.pathname
+): DetailRef | null {
+  const fromPath = detailFromPath(pathname);
+  if (fromPath) return fromPath;
+  const raw = new URLSearchParams(search).get(DETAIL) ?? '';
+  const slash = raw.indexOf('/');
+  return slash < 1 ? null : validDetail(raw.slice(0, slash), raw.slice(slash + 1));
+}
+
+/** Grava (ou, nulo, tira) o título aberto: o caminho vira `/detail/<tipo>/<id>` (ou volta a `/catalog`). */
 export function writeDetailToUrl(ref: DetailRef | null) {
   if (typeof window === 'undefined') return;
   const url = new URL(window.location.href);
-  if (ref) url.searchParams.set(DETAIL, `${ref.type}/${ref.id}`);
-  else url.searchParams.delete(DETAIL);
-  const search = url.search.replace(/(detail=)([^&]*)/, (_m, k: string, v: string) => k + v.replace(/%2F/gi, '/').replace(/%3A/gi, ':'));
-  const next = url.pathname + search + url.hash;
+  url.searchParams.delete(DETAIL); // a forma antiga, `?detail=`, deixa de existir
+  if (ref) url.pathname = detailPath(ref);
+  else if (detailFromPath(url.pathname)) url.pathname = '/catalog';
+  const next = url.pathname + url.search + url.hash;
   if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.replaceState(null, '', next);
 }
 
@@ -68,6 +93,6 @@ export function writeSeasonToUrl(season: number | null) {
   const url = new URL(window.location.href);
   if (season === null) url.searchParams.delete(SEASON);
   else url.searchParams.set(SEASON, String(season));
-  const next = url.pathname + url.search.replace(/(detail=)([^&]*)/, (_m, k: string, v: string) => k + v.replace(/%2F/gi, '/').replace(/%3A/gi, ':')) + url.hash;
+  const next = url.pathname + url.search + url.hash;
   if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.replaceState(null, '', next);
 }

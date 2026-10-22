@@ -57,7 +57,7 @@ test.describe('Rotas da Home (/catalog, /home, /status)', () => {
     await page.getByRole('searchbox').fill('re: zero');
     await expect.poll(() => query(page)).toContain('search=');
     await page.getByRole('button', { name: /Resultado/ }).click();
-    await expect.poll(() => query(page)).toContain('detail=series/tt1');
+    await expect.poll(() => path(page)).toBe('/detail/series/tt1');
 
     await page.getByRole('tab', { name: 'Sala' }).click();
     await expect.poll(() => path(page)).toBe('/home');
@@ -71,10 +71,10 @@ test.describe('Rotas da Home (/catalog, /home, /status)', () => {
     await page.close();
   });
 
-  test('abrir direto um título (/catalog?detail=…&season=0), ir à Sala e voltar não reabre aquele título', async ({ browser }) => {
+  test('abrir direto um título (/detail/…?season=0), ir à Sala e voltar não reabre aquele título', async ({ browser }) => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await mockCatalog(page);
-    await page.goto('/catalog?detail=anime/mal:5114&season=0');
+    await page.goto('/detail/anime/mal%3A5114?season=0');
     await expect(page.getByRole('heading', { name: 'Anime Três', level: 1 })).toBeVisible();
     await expect(page.getByRole('tab', { name: 'Especiais', selected: true })).toBeVisible();
 
@@ -95,6 +95,16 @@ test.describe('Rotas da Home (/catalog, /home, /status)', () => {
     await expect(page.getByRole('searchbox')).toHaveValue('naruto');
     await expect.poll(() => path(page)).toBe('/catalog');
     expect(query(page)).toContain('search=naruto');
+    await page.close();
+  });
+
+  test('o link antigo com ?detail= (/?detail=tipo/id) abre o título e vira /detail/tipo/id', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await mockCatalog(page);
+    await page.goto('/?detail=anime/mal:5114&season=0');
+    await expect(page.getByRole('heading', { name: 'Anime Três', level: 1 })).toBeVisible();
+    await expect.poll(() => path(page)).toBe('/detail/anime/mal%3A5114');
+    expect(query(page)).toBe('?season=0');
     await page.close();
   });
 });
