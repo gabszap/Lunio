@@ -219,6 +219,20 @@ describe('fetchStreams', () => {
       expect(res[0].failed).toBe(true);
     });
 
+    it('retry ok mas vazio mantém o primeiro resultado com o dropped', async () => {
+      const f = (async (u: RequestInfo | URL) => {
+        const s = String(u);
+        if (s.includes('/meta/')) return json(meta);
+        if (s.includes('tt2359704%3A6%3A1')) return json({ streams: [] });
+        return json({ streams: [{ name: '[❌] erro', url: 'https://cdn.test/x.mp4' }] });
+      }) as unknown as typeof fetch;
+      const res = await run([a], f, {}, ep);
+      expect(res).toHaveLength(1);
+      expect(res[0].options).toHaveLength(0);
+      expect(res[0].dropped).toBe(1);
+      expect(res[0].failed).toBe(false);
+    });
+
     it('sem episódio no meta ou sem dados de série, não repete', async () => {
       const f = vi.fn(async (u: RequestInfo | URL) =>
         String(u).includes('/meta/') ? json({ meta: { videos: [] } }) : json({}, false),
@@ -235,6 +249,26 @@ describe('fetchStreams', () => {
       await run([a], f, {}, ep);
       expect(f).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('o resultado emitido não carrega a url do addon', async () => {
+    const f = (async (u: RequestInfo | URL) => (String(u).includes('/bad/') ? html() : json(stream('https://cdn.test/v.mp4')))) as unknown as typeof fetch;
+    const res = await run([addon('bad'), addon('good')], f);
+    expect(res).toHaveLength(2);
+    for (const r of res) {
+      const out = JSON.stringify(r);
+      expect(out).not.toContain('addon.test');
+      expect(out).not.toContain('manifestUrl');
+      expect(out).not.toContain('base');
+    }
+  });
+
+  it('a união de duas fontes com a mesma url sai uma vez no sortStreams', async () => {
+    const f = vi.fn(async () => json(stream('https://cdn.test/same.mp4'))) as unknown as typeof fetch;
+    const res = await run([addon('a'), addon('b')], f);
+    const all = res.flatMap((r) => r.options);
+    expect(all).toHaveLength(2);
+    expect(sortStreams(all)).toHaveLength(1);
   });
 
   it('a url do addon não vai para o resultado', async () => {

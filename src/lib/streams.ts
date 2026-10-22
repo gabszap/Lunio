@@ -29,7 +29,8 @@ export interface StreamTarget {
 }
 
 export interface SourceResult {
-  addon: VideoAddon;
+  // Só id e nome: o VideoAddon inteiro carrega a URL (com credenciais) e este resultado vai para o estado do React
+  addon: Pick<VideoAddon, 'id' | 'name'>;
   options: StreamOption[];
   dropped: number;
   failed: boolean;
@@ -89,6 +90,7 @@ export function normalizeStreams(addon: VideoAddon, raw: unknown, support: Brows
   return { options, dropped };
 }
 
+/** Deve rodar sobre a união dos `SourceResult.options`: a mesma `url` de dois addons só é removida aqui. */
 export function sortStreams(options: StreamOption[]): StreamOption[] {
   const seen = new Set<string>();
   const unique = options.filter((o) => !seen.has(o.url) && !!seen.add(o.url));
@@ -132,6 +134,7 @@ function getJson(url: string, fetchImpl: typeof fetch, signal: AbortSignal, time
   });
 }
 
+/** Cada addon entrega o seu resultado; quem junta as fontes precisa passar a união por `sortStreams` para tirar `url` repetida. */
 export async function fetchStreams(
   addons: VideoAddon[],
   target: StreamTarget,
@@ -150,12 +153,13 @@ export async function fetchStreams(
     target.type !== 'movie' && !!target.seriesId && target.season !== undefined && target.episode !== undefined;
 
   const attempt = async (addon: VideoAddon, type: string, id: string): Promise<SourceResult> => {
+    const who = { id: addon.id, name: addon.name };
     try {
       const raw = await getJson(streamRequestUrl(addon, type, id), fetchImpl, signal, timeoutMs);
       if (!isObject(raw) || !Array.isArray(raw.streams)) throw new Error('shape');
-      return { addon, ...normalizeStreams(addon, raw, support), failed: false };
+      return { addon: who, ...normalizeStreams(addon, raw, support), failed: false };
     } catch {
-      return { addon, options: [], dropped: 0, failed: true };
+      return { addon: who, options: [], dropped: 0, failed: true };
     }
   };
 
@@ -180,7 +184,7 @@ export async function fetchStreams(
       const id = await episodeId(addon, type);
       if (id && id !== target.videoId && !signal.aborted) {
         const second = await attempt(addon, type, id);
-        if (!second.failed) result = second;
+        if (second.options.length > 0) result = second;
       }
     }
     if (!signal.aborted) onSource(result);
