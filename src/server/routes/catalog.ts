@@ -5,6 +5,7 @@ import {
   CATALOG_TYPE_RE,
   CatalogUnavailableError,
   getManifest,
+  fetchMalScore,
   getMeta,
   getRow,
   search,
@@ -14,8 +15,9 @@ import {
  * /api/catalog/* — o catálogo (fileiras, busca e detalhes) vindo da fonte configurada em `CATALOG_URL` (padrão: Cinemeta).
  *   GET manifest                              → fileiras da Home e catálogos de busca
  *   GET row?type=&id=[&genre=][&skip=]        → itens de uma fileira
- *   GET search?q=                             → busca nos catálogos de busca da fonte, mesclada e sem repetidos
+ *   GET search?q=                             → busca em cada catálogo de busca da fonte, em grupos (como o Stremio)
  *   GET meta?type=&id=                        → detalhes (com episódios, inclusive a temporada 0)
+ *   GET malscore?id=<id do MyAnimeList>       → nota do anime no MAL (pedida à parte, com tentativas)
  * Respostas servidas do cache antigo (fonte fora do ar) trazem `stale: true`. Nada aqui aceita uma URL do navegador.
  */
 export async function handleCatalog(req: IncomingMessage, res: ServerResponse) {
@@ -54,6 +56,12 @@ export async function handleCatalog(req: IncomingMessage, res: ServerResponse) {
       const id = param('id');
       if (!CATALOG_TYPE_RE.test(type) || !CATALOG_ID_RE.test(id)) return void sendApiError(res, 400, 'bad_request');
       return void sendJson(res, 200, await getMeta(type, id));
+    }
+
+    if (action === 'malscore') {
+      const id = param('id');
+      if (!/^\d{1,10}$/.test(id)) return void sendApiError(res, 400, 'bad_request');
+      return void sendJson(res, 200, await fetchMalScore(id));
     }
 
     sendApiError(res, 404, 'not_found');

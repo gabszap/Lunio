@@ -52,9 +52,9 @@ export class CatalogUnavailableError extends Error {
   }
 }
 
-type Kind = 'manifest' | 'rows' | 'search' | 'meta';
+type Kind = 'manifest' | 'rows' | 'search' | 'meta' | 'mal';
 /** Quanto uma resposta vale sem perguntar de novo à fonte. */
-const FRESH_MS: Record<Kind, number> = { manifest: 60 * 60_000, rows: 15 * 60_000, search: 10 * 60_000, meta: 15 * 60_000 };
+const FRESH_MS: Record<Kind, number> = { manifest: 60 * 60_000, rows: 15 * 60_000, search: 10 * 60_000, meta: 15 * 60_000, mal: 24 * 60 * 60_000 };
 /** Depois disso, mesmo com a fonte fora do ar, a resposta guardada não é mais servida. */
 const STALE_MS = 24 * 60 * 60_000;
 /** Catálogos de streaming (Netflix, HBO…) numa instância fria passam de 10 s. */
@@ -99,16 +99,23 @@ async function persistedGet(key: string): Promise<{ value: any; at: number } | u
   });
 }
 
-function persistedSet(key: string, entry: { value: any; at: number }) {
-  void withRedis<void>(undefined, (r) => r.set(redisKeyOf(key), JSON.stringify(entry), 'PX', STALE_MS).then(() => undefined));
+/** No Redis (128 MB, compartilhado com salas e envios) buscas valem 1 h, que são as que não param de aparecer; o resto, 24 h. */
+const PERSIST_MS: Record<Kind, number> = { manifest: STALE_MS, rows: STALE_MS, meta: STALE_MS, mal: STALE_MS, search: 60 * 60_000 };
+/** Uma resposta enorme não vai para o Redis (fica só na memória do processo). */
+const PERSIST_MAX_BYTES = 512 * 1024;
+
+function persistedSet(key: string, entry: { value: any; at: number }, kind: Kind) {
+  const json = JSON.stringify(entry);
+  if (json.length > PERSIST_MAX_BYTES) return;
+  void withRedis<void>(undefined, (r) => r.set(redisKeyOf(key), json, 'PX', PERSIST_MS[kind]).then(() => undefined));
 }
 
-async function requestJson(url: string): Promise<any> {
+async function requestJson(url: string, timeoutMs = UPSTREAM_TIMEOUT_MS): Promise<any> {
   let res: Response;
   try {
     res = await fetch(url, {
       headers: { Accept: 'application/json', 'User-Agent': 'Lunio/1.0 (+catalog)' },
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     throw new CatalogUnavailableError();
@@ -130,9 +137,9 @@ async function requestJson(url: string): Promise<any> {
  * GET JSON na fonte com cache. Pedidos iguais simultâneos viram um só; se a fonte falhar, serve a última resposta
  * guardada (até 24 h) marcada como `stale`; sem nenhuma guardada, lança `CatalogUnavailableError`.
  */
-export async function fetchCatalogJson(path: string, kind: Kind): Promise<{ data: any; stale: boolean }> {
-  const base = currentCatalogBase();
-  if (!announced) {
+export async function fetchCatalogJson(path: string, kind: Kind, opts: { base?: string; timeoutMs?: number } = {}): Promise<{ data: any; stale: boolean }> {
+  const base = opts.base ?? currentCatalogBase();
+  if (!announced && !opts.base) {
     announced = true;
     console.log(`[Catálogo] Fonte: ${hostLabel(base)} (${isDefaultCatalog() ? 'padrão' : 'configurada em CATALOG_URL'}).`);
   }
@@ -150,7 +157,7 @@ export async function fetchCatalogJson(path: string, kind: Kind): Promise<{ data
   let pending = inflight.get(key);
   if (!pending) {
     pending = limited(async () => {
-      const data = await requestJson(key);
+      const data = await requestJson(key, opts.timeoutMs);
       if (isErrorPayload(data)) throw new CatalogUnavailableError();
       return data;
     }).finally(() => inflight.delete(key));
@@ -160,7 +167,7 @@ export async function fetchCatalogJson(path: string, kind: Kind): Promise<{ data
     const data = await pending;
     const entry = { value: data, at: Date.now() };
     store.set(key, entry);
-    persistedSet(key, entry);
+    persistedSet(key, entry, kind);
     return { data, stale: false };
   } catch (err) {
     if (hit) {
@@ -180,6 +187,8 @@ export interface CatalogDef {
   name: string;
   /** Gêneros aceitos como filtro (vazio = a fileira não filtra). */
   genres: string[];
+  /** A fileira exige um gênero e só tem um: ele é preenchido sozinho (ex.: "MAL Melhores Séries"). */
+  fixedGenre?: string;
 }
 
 export interface CatalogManifest {
@@ -187,13 +196,14 @@ export interface CatalogManifest {
   /** Fileiras para a Home: catálogos que não exigem nenhum parâmetro (como `search`). */
   rows: CatalogDef[];
   /** Catálogos que respondem a busca. */
-  searchCatalogs: Array<{ type: string; id: string }>;
+  searchCatalogs: Array<{ type: string; id: string; name: string }>;
   isDefault: boolean;
   stale: boolean;
 }
 
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
-const TYPE_RE = /^[a-z][a-z0-9_-]{1,19}$/;
+// Tipos de catálogo podem ter ponto (`anime.series`, `anime.movie`)
+const TYPE_RE = /^[a-z][a-z0-9_.-]{1,29}$/;
 const ID_RE = /^[A-Za-z0-9_.:-]{1,100}$/;
 
 /** Os formatos antigo (`extraSupported`/`extraRequired`) e novo (`extra: [{ name, isRequired, options }]`) do Stremio. */
@@ -217,14 +227,17 @@ function extraInfo(cat: any): { supported: Set<string>; required: Set<string>; g
 
 export function summarizeManifest(manifest: any): Omit<CatalogManifest, 'isDefault' | 'stale'> {
   const rows: CatalogDef[] = [];
-  const searchCatalogs: Array<{ type: string; id: string }> = [];
+  const searchCatalogs: Array<{ type: string; id: string; name: string }> = [];
   for (const cat of Array.isArray(manifest?.catalogs) ? manifest.catalogs : []) {
-    const type = str(cat?.type, 20);
+    const type = str(cat?.type, 30);
     const id = str(cat?.id, 100);
     if (!TYPE_RE.test(type) || !ID_RE.test(id)) continue;
     const { supported, required, genres } = extraInfo(cat);
-    if (supported.has('search')) searchCatalogs.push({ type, id });
-    if (required.size === 0) rows.push({ type, id, name: str(cat?.name, 120) || id, genres });
+    const name = str(cat?.name, 120) || id;
+    if (supported.has('search')) searchCatalogs.push({ type, id, name });
+    if (required.size === 0) rows.push({ type, id, name, genres });
+    // Só o gênero é obrigatório e há uma única opção: dá para pedir a fileira com ela
+    else if (required.size === 1 && required.has('genre') && genres.length === 1) rows.push({ type, id, name, genres, fixedGenre: genres[0] });
   }
   return { name: str(manifest?.name, 80) || 'Catálogo', rows, searchCatalogs };
 }
@@ -302,32 +315,45 @@ export async function getRow(q: RowQuery): Promise<{ metas: CatalogItem[]; stale
 /** No máximo isto de catálogos de busca por pesquisa (uma instância pode declarar dezenas). */
 const MAX_SEARCH_CATALOGS = 8;
 
-export async function search(query: string): Promise<{ metas: CatalogItem[]; stale: boolean }> {
+export interface SearchGroup {
+  type: string;
+  id: string;
+  /** Nome do catálogo de busca, como a fonte o declara (ex.: "Anime Series Search"). */
+  name: string;
+  metas: CatalogItem[];
+}
+
+/**
+ * Como no Stremio: cada catálogo de busca da fonte devolve o seu grupo (anime, séries, filmes, pessoas…), na ordem do
+ * manifesto, sem mesclar nem esconder repetidos entre grupos (o mesmo título pode ter um id de cada fonte). Grupos vazios
+ * ficam de fora; se todos os catálogos falharem, é falha.
+ */
+export async function search(query: string): Promise<{ groups: SearchGroup[]; stale: boolean }> {
   const manifest = await getManifest();
   const catalogs = manifest.searchCatalogs.slice(0, MAX_SEARCH_CATALOGS);
-  if (catalogs.length === 0) return { metas: [], stale: manifest.stale };
+  if (catalogs.length === 0) return { groups: [], stale: manifest.stale };
 
   const q = encodeURIComponent(query);
   const results = await Promise.allSettled(
-    catalogs.map((c) => fetchCatalogJson(`/catalog/${c.type}/${encodeURIComponent(c.id)}/search=${q}.json`, 'search').then((r) => ({ ...r, type: c.type })))
+    catalogs.map((c) => fetchCatalogJson(`/catalog/${c.type}/${encodeURIComponent(c.id)}/search=${q}.json`, 'search').then((r) => ({ ...r, catalog: c })))
   );
-  const ok = results.filter((r): r is PromiseFulfilledResult<{ data: any; stale: boolean; type: string }> => r.status === 'fulfilled');
+  const ok = results.filter((r): r is PromiseFulfilledResult<{ data: any; stale: boolean; catalog: (typeof catalogs)[number] }> => r.status === 'fulfilled');
   if (ok.length === 0) throw new CatalogUnavailableError();
 
-  // Mesclada na ordem dos catálogos; o mesmo título vindo de dois (mesmo IMDb, ou mesmo nome e ano) aparece uma vez
-  const seen = new Set<string>();
-  const metas: CatalogItem[] = [];
+  const groups: SearchGroup[] = [];
   for (const r of ok) {
-    for (const raw of Array.isArray(r.value.data?.metas) ? r.value.data.metas : []) {
-      const item = toItem(raw, r.value.type);
-      if (!item) continue;
-      const key = item.imdbId || `${item.name.toLowerCase()}|${item.year ?? ''}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+    const { catalog, data } = r.value;
+    const seen = new Set<string>();
+    const metas: CatalogItem[] = [];
+    for (const raw of Array.isArray(data?.metas) ? data.metas : []) {
+      const item = toItem(raw, catalog.type);
+      if (!item || seen.has(item.id)) continue;
+      seen.add(item.id);
       metas.push(item);
     }
+    if (metas.length) groups.push({ type: catalog.type, id: catalog.id, name: catalog.name, metas });
   }
-  return { metas, stale: manifest.stale || ok.some((r) => r.value.stale) };
+  return { groups, stale: manifest.stale || ok.some((r) => r.value.stale) };
 }
 
 export interface CatalogEpisode {
@@ -346,8 +372,117 @@ export interface CatalogMeta extends CatalogItem {
   runtime?: string;
   background?: string;
   imdbRating?: string;
+  /** Id do anime no MyAnimeList (da própria fonte: `_malId` ou o `mal:<id>` do item), para o link da página dele. */
+  malId?: string;
+  /** Nota (0–10), quantas pessoas votaram e posição no ranking do MyAnimeList, da API do MAL (ausentes se ela não respondeu). */
+  malScore?: number;
+  malScoredBy?: number;
+  malRank?: number;
   /** Inclui a temporada 0 (especiais): quem exibe decide onde colocá-la. */
   episodes: CatalogEpisode[];
+}
+
+/** O id numérico do MyAnimeList: `_malId` do detalhe ou, num item `mal:<id>`, o próprio id. Só dígitos. */
+function malIdOf(m: any, id: string): string | undefined {
+  const raw = str(m?._malId ?? (id.startsWith('mal:') ? id.slice(4) : ''), 12);
+  return /^\d{1,10}$/.test(raw) ? raw : undefined;
+}
+
+// ───────────── nota do MyAnimeList ─────────────
+
+export const DEFAULT_JIKAN_URL = 'https://jikan.lucashdo.com/v1';
+
+export interface MalStats {
+  score: number;
+  scoredBy?: number;
+  rank?: number;
+}
+
+/** Tentativas da nota (prazo de cada uma e espera antes da seguinte). Mutável só para os testes não esperarem de verdade. */
+export const malRetry = { timeouts: [7000, 10000, 12000], delays: [1000, 2000] };
+/** Depois de esgotar as tentativas, não tenta de novo o mesmo anime por este tempo. */
+const MAL_FAIL_WINDOW_MS = 60_000;
+const malFailedAt = new BoundedCache<number>(500, MAL_FAIL_WINDOW_MS, () => Date.now());
+
+export interface MalScoreResult {
+  /** Nota 0–10, ou null: sem nota (anime ainda sem votos) ou a API não respondeu (`failed`). */
+  score: number | null;
+  scoredBy?: number;
+  rank?: number;
+  /** A API não respondeu nas tentativas: vale tentar de novo daqui a pouco. */
+  failed: boolean;
+}
+
+const jikanBase = () => normalizeCatalogBase(config.jikanUrl) || DEFAULT_JIKAN_URL;
+
+function parseMal(data: any): MalStats | undefined {
+  const d = data?.data ?? data;
+  const score = Number(d?.score);
+  if (!Number.isFinite(score) || score <= 0 || score > 10) return undefined;
+  const scoredBy = Number(d?.scoredBy ?? d?.scored_by);
+  const rank = Number(d?.rank);
+  return { score, scoredBy: Number.isFinite(scoredBy) && scoredBy > 0 ? scoredBy : undefined, rank: Number.isFinite(rank) && rank > 0 ? rank : undefined };
+}
+
+/** Só o que já está guardado (memória ou Redis): não vai à rede. Serve para o detalhe já vir com a nota quando ela é conhecida. */
+async function cachedMalStats(malId: string): Promise<MalStats | undefined> {
+  const key = `${jikanBase()}/anime/${malId}`;
+  let hit = store.get(key);
+  if (!hit) hit = await persistedGet(key);
+  return hit && Date.now() - hit.at < FRESH_MS.mal ? parseMal(hit.value) : undefined;
+}
+
+/**
+ * Nota do anime no MyAnimeList, pela API configurada em `JIKAN_URL` (instância compatível com o Jikan: `GET <base>/anime/<id>`
+ * com `data.score`). Até 3 tentativas com espera entre elas (a instância pode estar fria ou limitando); guardada por 24 h.
+ * É pedida à parte do detalhe: a página nunca espera por ela.
+ */
+export async function fetchMalScore(malId: string): Promise<MalScoreResult> {
+  if (!/^\d{1,10}$/.test(malId)) return { score: null, failed: false };
+  const cached = await cachedMalStats(malId);
+  if (cached) return { ...cached, failed: false };
+  if (malFailedAt.get(malId)) return { score: null, failed: true };
+
+  const path = `/anime/${malId}`;
+  for (let attempt = 0; attempt < malRetry.timeouts.length; attempt++) {
+    try {
+      const { data } = await fetchCatalogJson(path, 'mal', { base: jikanBase(), timeoutMs: malRetry.timeouts[attempt] });
+      const stats = parseMal(data);
+      return stats ? { ...stats, failed: false } : { score: null, failed: false };
+    } catch {
+      if (attempt < malRetry.timeouts.length - 1) await new Promise((r) => setTimeout(r, malRetry.delays[attempt] ?? 0));
+    }
+  }
+  malFailedAt.set(malId, Date.now());
+  console.warn(`[Catálogo] Sem a nota do MAL para ${malId} depois de ${malRetry.timeouts.length} tentativas.`);
+  return { score: null, failed: true };
+}
+
+/** Anime pelo que o detalhe diz: idioma original japonês ou gênero de animação. */
+function looksLikeAnime(m: any, genres: string[]): boolean {
+  return str(m?._originalLanguage, 10).toLowerCase() === 'ja' || genres.some((g) => /anim/i.test(g));
+}
+
+/**
+ * O IMDb não diz qual é o anime no MyAnimeList. Os itens do catálogo de busca de anime da fonte trazem os dois ids
+ * (`mal:<id>` com o `imdb_id` junto): procura pelo nome e fica com o que tem o mesmo IMDb (a 1ª temporada, na ordem da fonte).
+ */
+async function resolveMalId(type: string, name: string, imdbId: string): Promise<string | undefined> {
+  try {
+    const wanted = type === 'movie' ? 'movie' : 'series';
+    const manifest = await getManifest();
+    const catalogs = manifest.searchCatalogs.filter((c) => c.type.startsWith('anime') && (c.type === 'anime' || c.type.includes(wanted))).slice(0, 2);
+    for (const c of catalogs) {
+      const { data } = await fetchCatalogJson(`/catalog/${c.type}/${encodeURIComponent(c.id)}/search=${encodeURIComponent(name.slice(0, 100))}.json`, 'search');
+      for (const raw of Array.isArray(data?.metas) ? data.metas : []) {
+        const item = toItem(raw, c.type);
+        if (item?.imdbId === imdbId && item.id.startsWith('mal:') && /^\d{1,10}$/.test(item.id.slice(4))) return item.id.slice(4);
+      }
+    }
+  } catch {
+    // sem o id do MAL o detalhe só fica sem a nota
+  }
+  return undefined;
 }
 
 export async function getMeta(type: string, id: string): Promise<{ meta: CatalogMeta; stale: boolean }> {
@@ -370,6 +505,11 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
     .sort((a: CatalogEpisode, b: CatalogEpisode) => a.season - b.season || a.episode - b.episode);
 
   const genres = (Array.isArray(m?.genres) ? m.genres : Array.isArray(m?.genre) ? m.genre : []).filter((g: unknown) => typeof g === 'string').slice(0, 30);
+  let malId = malIdOf(m, item.id);
+  // Título do IMDb (tt…) que é anime e não diz o id do MAL: acha pelo catálogo de busca de anime da própria fonte
+  if (!malId && item.imdbId && looksLikeAnime(m, genres)) malId = await resolveMalId(type, item.name, item.imdbId);
+  // A nota não atrasa o detalhe: vem junto só se já estiver guardada; senão o cliente a pede em /api/catalog/malscore
+  const stats = malId ? await cachedMalStats(malId) : undefined;
   return {
     meta: {
       ...item,
@@ -378,6 +518,10 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
       runtime: str(m?.runtime, 40) || undefined,
       background: httpUrl(m?.background),
       imdbRating: str(m?.imdbRating, 10) || undefined,
+      malId,
+      malScore: stats?.score,
+      malScoredBy: stats?.scoredBy,
+      malRank: stats?.rank,
       episodes,
     },
     stale,

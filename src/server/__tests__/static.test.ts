@@ -57,7 +57,7 @@ function get(rawPath: string, method = 'GET'): Promise<{ status: number; type: s
 
 describe('rotas do app e arquivos reais', () => {
   it('a home e as rotas do SPA recebem o index.html', async () => {
-    for (const p of ['/', '/sala/ABCD1234', '/qualquer-rota']) {
+    for (const p of ['/', '/catalog', '/home', '/status', '/catalog/', '/detail/series/tt5607616', '/detail/series/mal%3A31240', '/detail/series/tmdb.123', '/sala/ABCD1234', '/qualquer-rota']) {
       const res = await get(p);
       expect(res.status, p).toBe(200);
       expect(res.body, p).toContain('<title>Lunio</title>');

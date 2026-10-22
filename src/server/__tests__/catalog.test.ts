@@ -24,7 +24,7 @@ vi.mock('../media/redis', async (importOriginal) => {
 const { startApi } = await import('./helpers');
 const { createApiRouter } = await import('../app');
 const { config } = await import('../config');
-const { DEFAULT_CATALOG_URL, normalizeCatalogBase, resetCatalogCache, summarizeManifest } = await import('../catalog');
+const { DEFAULT_CATALOG_URL, malRetry, normalizeCatalogBase, resetCatalogCache, summarizeManifest } = await import('../catalog');
 
 /** Manifesto no formato do AIOMetadata/Stremio: fileiras, catálogos de busca (search obrigatório) e uma fileira que exige parâmetro. */
 const MANIFEST = {
@@ -36,7 +36,10 @@ const MANIFEST = {
     { type: 'anime', id: 'mal.airing', name: 'Animes no ar', extra: [] },
     { type: 'movie', id: 'tmdb.search', name: 'Busca de filmes', extra: [{ name: 'search', isRequired: true }] },
     { type: 'series', id: 'tvdb.search', name: 'Busca de séries', extra: [{ name: 'search', isRequired: true }] },
-    { type: 'movie', id: 'so-com-genero', name: 'Exige gênero', extra: [{ name: 'genre', isRequired: true }] },
+    { type: 'movie', id: 'so-com-genero', name: 'Exige gênero', extra: [{ name: 'genre', isRequired: true, options: ['Ação', 'Drama'] }] },
+    // tipos com ponto e uma fileira que exige gênero mas só tem uma opção
+    { type: 'anime.series', id: 'search.anime_series', name: 'Anime Series Search', extra: [{ name: 'search', isRequired: true }] },
+    { type: 'anime', id: 'mal.top_series', name: 'MAL Melhores Séries', extra: [{ name: 'genre', isRequired: true, options: ['Top'] }] },
   ],
 };
 
@@ -44,6 +47,9 @@ let upstream: http.Server;
 let base: string;
 let hits: Record<string, number>;
 let failing: boolean;
+let jikanDown: boolean;
+let jikanFailures: number; // quantas respostas 429 antes de acertar
+let jikanNoScore: boolean;
 let errorItem: boolean; // a fonte responde 200 com um item de erro no lugar da lista
 let emptyList: boolean;
 let concurrent = 0;
@@ -60,6 +66,11 @@ beforeAll(async () => {
   upstream = http.createServer((req, res) => {
     const path = decodeURIComponent(req.url || '');
     hits[path] = (hits[path] || 0) + 1;
+    // API do MyAnimeList (Jikan ou compatível): GET /anime/<id> com data.score
+    if (path.startsWith('/jikan/anime/')) {
+      if (jikanDown || jikanFailures-- > 0) return respond(res, { error: { code: 'RATE_LIMITED' } }, 429);
+      return respond(res, { data: jikanNoScore ? { score: null } : { score: 8.25, scoredBy: 1607019, rank: 400 } });
+    }
     if (failing) return respond(res, { erro: 'fora' }, 503);
     // O caminho da fonte tem o UUID e a configuração da pessoa
     if (!path.startsWith('/stremio/UUID-SECRETO/CONFIG-SECRETA')) return respond(res, {}, 404);
@@ -81,6 +92,14 @@ beforeAll(async () => {
         { id: 'tmdb:2', type: 'movie', name: 'Outro Filme', poster: 'javascript:alert(1)', year: '2019' },
       ] });
     }
+    // Busca por nome de um anime que só se conhece pelo IMDb: o item do MAL vem com o imdb_id junto
+    if (rest.startsWith('/catalog/anime.series/search.anime_series/search=Anime IMDb')) {
+      return respond(res, { metas: [{ id: 'mal:99', type: 'series', imdb_id: 'tt0000003', name: 'Outro' }, { id: 'mal:777', type: 'series', imdb_id: 'tt0000002', name: 'Anime IMDb' }, { id: 'mal:778', type: 'series', imdb_id: 'tt0000002', name: 'Anime IMDb 2' }] });
+    }
+    if (rest.startsWith('/catalog/anime.series/search.anime_series/search=')) {
+      return respond(res, { metas: [{ id: 'mal:31240', imdb_id: 'tt5607616', type: 'series', name: 'Re:ZERO (anime)', releaseInfo: '2016', poster: 'https://cdn.myanimelist.net/x.jpg' }] });
+    }
+    if (rest.startsWith('/catalog/anime/mal.top_series/genre=Top')) return respond(res, { metas: [{ id: 'mal:1', type: 'series', name: 'Top 1' }] });
     if (rest.startsWith('/catalog/series/tvdb.search/search=')) {
       return respond(res, { metas: [
         { id: 'tvdb:9', imdb_id: 'tt0000001', type: 'series', name: 'Link Click', releaseInfo: '2021–' }, // o mesmo título (mesmo IMDb)
@@ -89,6 +108,10 @@ beforeAll(async () => {
     }
     if (rest.startsWith('/catalog/movie/tmdb.popular')) return respond(res, { metas: [{ id: 'tt1', type: 'movie', name: 'Popular 1' }, { id: 'tt2', name: '' }, { type: 'movie' }] });
     if (rest.startsWith('/catalog/anime/mal.airing')) return respond(res, { metas: [{ id: 'mal:5114', type: 'anime', name: 'Anime A', poster: 'https://cdn.myanimelist.net/x.jpg' }] });
+    if (rest.startsWith('/meta/series/tt0000001')) return respond(res, { meta: { id: 'tt0000001', type: 'series', name: 'Link Click', _malId: '5114', videos: [] } });
+    if (rest.startsWith('/meta/series/tt0000002')) return respond(res, { meta: { id: 'tt0000002', imdb_id: 'tt0000002', type: 'series', name: 'Anime IMDb', _originalLanguage: 'ja', videos: [] } });
+    if (rest.startsWith('/meta/series/tt0000004')) return respond(res, { meta: { id: 'tt0000004', imdb_id: 'tt0000004', type: 'series', name: 'Série Normal', _originalLanguage: 'en', genres: ['Drama'], videos: [] } });
+    if (rest.startsWith('/meta/movie/tt0000009')) return respond(res, { meta: { id: 'tt0000009', type: 'movie', name: 'Sem MAL', videos: [] } });
     if (rest.startsWith('/meta/anime/')) {
       return respond(res, { meta: {
         id: 'mal:5114', type: 'anime', name: 'Anime A', description: 'Sinopse', genres: ['Ação'], runtime: '24 min', background: 'https://x/bg.jpg',
@@ -128,9 +151,17 @@ describe('summarizeManifest', () => {
   it('fileiras = catálogos sem parâmetro obrigatório; busca = quem declara search', () => {
     const s = summarizeManifest(MANIFEST);
     expect(s.name).toBe('AIOMetadata');
-    expect(s.rows.map((r) => r.id)).toEqual(['tmdb.popular', 'tmdb.trending', 'mal.airing']);
+    // `so-com-genero` exige gênero com 2 opções: fora. `mal.top_series` exige gênero com uma só: entra com ele preenchido
+    expect(s.rows.map((r) => r.id)).toEqual(['tmdb.popular', 'tmdb.trending', 'mal.airing', 'mal.top_series']);
     expect(s.rows[0].genres).toEqual(['Ação', 'Drama']);
-    expect(s.searchCatalogs).toEqual([{ type: 'movie', id: 'tmdb.search' }, { type: 'series', id: 'tvdb.search' }]);
+    expect(s.rows[3]).toMatchObject({ type: 'anime', fixedGenre: 'Top' });
+    expect(s.rows[0].fixedGenre).toBeUndefined();
+    // inclui os catálogos de tipo com ponto (`anime.series`), que antes eram descartados
+    expect(s.searchCatalogs).toEqual([
+      { type: 'movie', id: 'tmdb.search', name: 'Busca de filmes' },
+      { type: 'series', id: 'tvdb.search', name: 'Busca de séries' },
+      { type: 'anime.series', id: 'search.anime_series', name: 'Anime Series Search' },
+    ]);
   });
 
   it('entende o formato antigo (extraSupported/extraRequired) e o Cinemeta', () => {
@@ -159,10 +190,15 @@ describe('/api/catalog/*', () => {
   afterAll(async () => {
     await api?.close();
     config.catalogUrl = '';
+    config.jikanUrl = '';
   });
   beforeEach(() => {
     hits = {};
     failing = false;
+    jikanDown = false;
+    jikanFailures = 0;
+    jikanNoScore = false;
+    malRetry.delays = [0, 0]; // sem esperar de verdade entre as tentativas
     errorItem = false;
     emptyList = false;
     concurrent = 0;
@@ -170,6 +206,7 @@ describe('/api/catalog/*', () => {
     fakeRedis.data.clear();
     resetCatalogCache();
     config.catalogUrl = `${base}/stremio/UUID-SECRETO/CONFIG-SECRETA/manifest.json`;
+    config.jikanUrl = `${base}/jikan`;
   });
 
   it('exige o token de sessão', async () => {
@@ -185,8 +222,8 @@ describe('/api/catalog/*', () => {
     expect(text).not.toContain(base);
     const body = JSON.parse(text);
     expect(body).toMatchObject({ name: 'AIOMetadata', isDefault: false, stale: false });
-    expect(body.rows).toHaveLength(3);
-    expect(body.searchCatalogs).toHaveLength(2);
+    expect(body.rows).toHaveLength(4);
+    expect(body.searchCatalogs).toHaveLength(3);
   });
 
   it('row: monta o caminho com gênero e skip, e devolve itens limpos (sem nome, descarta; id preservado)', async () => {
@@ -206,12 +243,38 @@ describe('/api/catalog/*', () => {
     expect((await get('nada')).status).toBe(404);
   });
 
-  it('search: junta os catálogos de busca, sem repetir o mesmo título, e descarta pôster que não é http(s)', async () => {
+  it('search: um grupo por catálogo de busca (como o Stremio), na ordem do manifesto, com os de tipo com ponto, sem pôster que não é http(s)', async () => {
     const body = await json(await get('search?q=Link%20Click'));
-    expect(body.metas.map((m: any) => m.id)).toEqual(['tmdb:1', 'tmdb:2', 'tvdb:10']); // tvdb:9 é o mesmo IMDb de tmdb:1
-    expect(body.metas[0]).toMatchObject({ imdbId: 'tt0000001', year: '2021' });
-    expect(body.metas[1].poster).toBeUndefined(); // javascript:… não passa
-    expect(Object.keys(hits).filter((p) => p.includes('search='))).toHaveLength(2);
+    expect(body.groups.map((g: any) => [g.id, g.name, g.metas.map((m: any) => m.id)])).toEqual([
+      ['tmdb.search', 'Busca de filmes', ['tmdb:1', 'tmdb:2']],
+      ['tvdb.search', 'Busca de séries', ['tvdb:9', 'tvdb:10']],
+      ['search.anime_series', 'Anime Series Search', ['mal:31240']],
+    ]);
+    // O mesmo título em dois catálogos aparece nos dois (cada fonte tem o seu id), e o item de anime é uma série com o IMDb junto
+    expect(body.groups[0].metas[0]).toMatchObject({ imdbId: 'tt0000001', year: '2021' });
+    expect(body.groups[1].metas[0]).toMatchObject({ imdbId: 'tt0000001' });
+    expect(body.groups[2].metas[0]).toMatchObject({ id: 'mal:31240', type: 'series', imdbId: 'tt5607616' });
+    expect(body.groups[0].metas[1].poster).toBeUndefined(); // javascript:… não passa
+    expect(Object.keys(hits).filter((p) => p.includes('search='))).toHaveLength(3);
+  });
+
+  it('search: catálogo sem resultado não vira grupo vazio', async () => {
+    const body = await json(await get('search?q=zzzz'));
+    expect(body.groups.length).toBeGreaterThan(0);
+    expect(body.groups.every((g: any) => g.metas.length > 0)).toBe(true);
+  });
+
+  it('row: fileira que exige um gênero de uma só opção é pedida com ele', async () => {
+    const manifest = await json(await get('manifest'));
+    const row = manifest.rows.find((r: any) => r.id === 'mal.top_series');
+    expect(row).toMatchObject({ type: 'anime', fixedGenre: 'Top' });
+    const body = await json(await get(`row?type=${row.type}&id=${row.id}&genre=${encodeURIComponent(row.fixedGenre)}`));
+    expect(body.metas[0]).toMatchObject({ id: 'mal:1', type: 'series' });
+  });
+
+  it('o tipo com ponto (anime.series) é aceito nas rotas', async () => {
+    expect((await get('row?type=anime.series&id=search.anime_series')).status).not.toBe(400);
+    expect((await get('row?type=a..b/c&id=x')).status).toBe(400);
   });
 
   it('meta: id composto vai codificado, episódios ordenados com a temporada 0 e sem os que não têm temporada', async () => {
@@ -327,6 +390,78 @@ describe('/api/catalog/*', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  const malScore = async (id: string) => json(await get(`malscore?id=${id}`));
+
+  it('o detalhe do anime traz o id do MAL mas não espera a nota; a nota vem à parte (malscore) e depois já vem junto', async () => {
+    const first = await json(await get(`meta?type=anime&id=${encodeURIComponent('mal:5114')}`));
+    expect(first.meta).toMatchObject({ malId: '5114' });
+    expect(first.meta.malScore).toBeUndefined();
+    expect(hits['/jikan/anime/5114']).toBeUndefined(); // o detalhe não foi à API do MAL
+
+    expect(await malScore('5114')).toEqual({ score: 8.25, scoredBy: 1607019, rank: 400, failed: false });
+    expect(hits['/jikan/anime/5114']).toBe(1);
+
+    // guardada: o detalhe seguinte já traz a nota e a rota não volta à API
+    const again = await json(await get(`meta?type=anime&id=${encodeURIComponent('mal:5114')}`));
+    expect(again.meta).toMatchObject({ malScore: 8.25, malRank: 400, malScoredBy: 1607019 });
+    await malScore('5114');
+    expect(hits['/jikan/anime/5114']).toBe(1);
+  });
+
+  it('item do IMDb com _malId no detalhe também tem o id do MAL para a nota', async () => {
+    const body = await json(await get('meta?type=series&id=tt0000001'));
+    expect(body.meta).toMatchObject({ id: 'tt0000001', malId: '5114' });
+    expect((await malScore('5114')).score).toBe(8.25);
+  });
+
+  it('título do IMDb que é anime (idioma original ja) acha o id do MAL pela busca de anime da fonte', async () => {
+    const body = await json(await get('meta?type=series&id=tt0000002'));
+    // o item com o mesmo IMDb e a 1ª temporada na ordem da fonte (mal:777, não o mal:99 de outro IMDb)
+    expect(body.meta).toMatchObject({ id: 'tt0000002', malId: '777' });
+    expect((await malScore('777')).score).toBe(8.25);
+  });
+
+  it('série que não é anime não gasta uma busca nem tem id do MAL', async () => {
+    const body = await json(await get('meta?type=series&id=tt0000004'));
+    expect(body.meta.malId).toBeUndefined();
+    expect(Object.keys(hits).filter((p) => p.includes('search=') || p.startsWith('/jikan'))).toEqual([]);
+  });
+
+  it('a API do MAL falha na 1ª tentativa (429) e a nota vem na 2ª', async () => {
+    jikanFailures = 1;
+    expect(await malScore('5114')).toMatchObject({ score: 8.25, failed: false });
+    expect(hits['/jikan/anime/5114']).toBe(2);
+  });
+
+  it('API do MAL fora do ar: 3 tentativas, `failed: true`, e por 1 min não insiste (o detalhe nunca esperou por isso)', async () => {
+    jikanDown = true;
+    const detail = await get(`meta?type=anime&id=${encodeURIComponent('mal:5114')}`);
+    expect(detail.status).toBe(200);
+    expect((await json(detail)).meta).toMatchObject({ name: 'Anime A', malId: '5114' });
+
+    expect(await malScore('5114')).toEqual({ score: null, failed: true });
+    expect(hits['/jikan/anime/5114']).toBe(3);
+    expect(await malScore('5114')).toEqual({ score: null, failed: true });
+    expect(hits['/jikan/anime/5114']).toBe(3); // dentro da janela: sem novas tentativas
+
+    // a API volta e, passada a janela, a nota aparece
+    jikanDown = false;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + 90_000);
+      expect(await malScore('5114')).toMatchObject({ score: 8.25, failed: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('id inválido na rota da nota: 400; anime sem nota (sem votos) não é falha', async () => {
+    expect((await get('malscore?id=abc')).status).toBe(400);
+    expect((await get('malscore?id=1;2')).status).toBe(400);
+    jikanNoScore = true;
+    expect(await malScore('42')).toEqual({ score: null, failed: false });
   });
 
   it('/api/status traz o estado do catálogo (ok, nome) e, fora do ar, ok false', async () => {

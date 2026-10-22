@@ -166,7 +166,9 @@ describe.skipIf(!URL)('com um Redis de verdade', () => {
     expect(await waitRedisReady(5000)).toBe(true);
     // Derruba as conexões "normais" de todo mundo menos a do admin: o cliente do Lunio vê a queda e reconecta
     await admin.call('CLIENT', 'KILL', 'TYPE', 'normal', 'SKIPME', 'yes');
-    await expect.poll(async () => (await getRedisStatus()).connected, { timeout: 8000 }).toBe(true);
-    expect(await withRedis('caiu no disco', (r) => r.ping())).toBe('PONG');
+    // Logo depois do KILL o status ainda diz "conectado" (a queda não foi notada): esperar só por ele deixava o `ping` cair numa
+    // conexão já morta e o teste falhava de vez em quando. O que importa é o comando voltar a funcionar, então espera-se o PONG.
+    await expect.poll(() => withRedis('caiu no disco', (r) => r.ping()), { timeout: 15_000, interval: 250 }).toBe('PONG');
+    expect((await getRedisStatus()).connected).toBe(true);
   });
 });
