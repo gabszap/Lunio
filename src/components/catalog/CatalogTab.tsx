@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Film, Play, Search, SearchX, Star, Tv, Users, X, RefreshCw } from 'lucide-react';
+import { Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Film, Play, Puzzle, Search, SearchX, Star, Tv, Users, X, RefreshCw } from 'lucide-react';
 import {
   CatalogItem,
   CatalogManifest,
@@ -25,6 +25,7 @@ import { GhostButton, IconButton, PillTabs, PrimaryButton, Spinner, TextButton, 
 import { t } from '../../lib/i18n';
 import { DetailRef, writeDetailToUrl, writeSearchToUrl, writeSeasonToUrl } from '../../lib/searchUrl';
 import { ImdbIcon, MalIcon } from './BrandIcons';
+import { AddonsPanel } from './AddonsPanel';
 
 export interface WatchIntent {
   title: string;
@@ -518,6 +519,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   /** As fileiras vêm do manifesto da fonte configurada no servidor (na ordem dela). */
   const [manifest, setManifest] = useState<CatalogManifest | null | 'error'>(null);
   const [manifestTry, setManifestTry] = useState(0);
+  const [addonsOpen, setAddonsOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -592,7 +594,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex justify-center">
+      <div className="flex flex-wrap items-center justify-center gap-3">
         <div className="flex items-center gap-3 w-[640px] max-w-full h-[52px] pl-[18px] pr-2 rounded-[14px] bg-lu-surface border border-lu-border focus-within:border-lu-accent focus-within:shadow-[0_0_0_3px_var(--color-lu-tint)]">
           <span className="flex text-lu-muted">
             <Search size={20} />
@@ -611,7 +613,12 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
             </IconButton>
           )}
         </div>
+        <GhostButton onClick={() => setAddonsOpen(true)}>
+          <Puzzle size={16} />
+          <span>{t('Addons')}</span>
+        </GhostButton>
       </div>
+      <AddonsPanel open={addonsOpen} onClose={() => setAddonsOpen(false)} onChange={() => {}} />
 
       {debounced ? (
         results === null && !searchError ? (
