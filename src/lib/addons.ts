@@ -104,28 +104,34 @@ export function addonHost(addon: VideoAddon): string {
 
 // Fonte da verdade na sessão; o localStorage é persistência de melhor esforço
 let memory: VideoAddon[] = [];
+// Última gravação falhou: o armazenado está defasado e não pode sobrescrever a memória
+let writeFailed = false;
 
 export function resetAddonsMemory() {
   memory = [];
+  writeFailed = false;
 }
 
 export function loadAddons(): VideoAddon[] {
-  try {
-    const saved = localStorage.getItem(ADDONS_KEY);
-    const list = saved ? JSON.parse(saved) : [];
-    memory = Array.isArray(list) ? list : [];
-    return memory;
-  } catch {
-    return memory;
+  if (!writeFailed) {
+    try {
+      const saved = localStorage.getItem(ADDONS_KEY);
+      const list = saved ? JSON.parse(saved) : [];
+      memory = Array.isArray(list) ? list : [];
+    } catch {
+      // armazenamento indisponível: vale a memória
+    }
   }
+  return [...memory];
 }
 
 function saveAddons(list: VideoAddon[]) {
   memory = list;
   try {
     localStorage.setItem(ADDONS_KEY, JSON.stringify(list));
+    writeFailed = false;
   } catch {
-    // armazenamento indisponível: a lista fica só na memória
+    writeFailed = true;
   }
 }
 

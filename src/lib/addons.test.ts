@@ -144,6 +144,11 @@ describe('robustez', () => {
     vi.stubGlobal('localStorage', { getItem: () => { throw new Error('x'); } });
     expect(loadAddons().map((x) => x.id)).toEqual([a.id]);
   });
+  it('setItem lançando com getItem devolvendo a lista antiga mantém o novo addon', async () => {
+    vi.stubGlobal('localStorage', { getItem: () => '[]', setItem: () => { throw new Error('cheio'); } });
+    const a = await addAddon(URL1, fakeFetch(manifest));
+    expect(loadAddons().map((x) => x.id)).toEqual([a.id]);
+  });
   it('dois adds simultâneos da mesma URL deixam um só', async () => {
     const r = await Promise.allSettled([addAddon(URL1, fakeFetch(manifest)), addAddon(URL1, fakeFetch(manifest))]);
     expect(r.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
