@@ -9,6 +9,7 @@ import {
   parseManifest,
   removeAddon,
   refreshAddon,
+  resetAddonsMemory,
   streamTypeFor,
   type VideoAddon,
 } from './addons';
@@ -32,6 +33,7 @@ function fakeFetch(json: unknown, ok = true): typeof fetch {
 const manifest = { name: 'Addon', types: ['movie', 'series'], idPrefixes: ['tt'], resources: ['stream'] };
 
 beforeEach(() => {
+  resetAddonsMemory();
   installStorage();
 });
 
@@ -126,6 +128,34 @@ describe('addAddon', () => {
   });
   it('URL inválida vira invalid_url', async () => {
     await expect(addAddon('nada', fakeFetch(manifest))).rejects.toMatchObject({ code: 'invalid_url' });
+  });
+});
+
+describe('robustez', () => {
+  it('URL com query ou fragmento é inválida', async () => {
+    expect(normalizeAddonUrl(`${URL1}?k=v`)).toBeNull();
+    expect(normalizeAddonUrl(`${URL1}#x`)).toBeNull();
+    expect(() => parseManifest(`${URL1}?k=v`, manifest)).toThrow(AddonError);
+    await expect(addAddon(`${URL1}?k=v`, fakeFetch(manifest))).rejects.toMatchObject({ code: 'invalid_url' });
+  });
+  it('setItem lançando mantém a lista na memória', async () => {
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => { throw new Error('cheio'); } });
+    const a = await addAddon(URL1, fakeFetch(manifest));
+    vi.stubGlobal('localStorage', { getItem: () => { throw new Error('x'); } });
+    expect(loadAddons().map((x) => x.id)).toEqual([a.id]);
+  });
+  it('dois adds simultâneos da mesma URL deixam um só', async () => {
+    const r = await Promise.allSettled([addAddon(URL1, fakeFetch(manifest)), addAddon(URL1, fakeFetch(manifest))]);
+    expect(r.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
+    expect(r.find((x) => x.status === 'rejected')).toMatchObject({ reason: { code: 'duplicate' } });
+    expect(loadAddons()).toHaveLength(1);
+  });
+  it('11 adds simultâneos terminam com no máximo 10', async () => {
+    const r = await Promise.allSettled(
+      Array.from({ length: MAX_ADDONS + 1 }, (_, i) => addAddon(`https://addon.test/${i}/manifest.json`, fakeFetch(manifest)))
+    );
+    expect(r.filter((x) => x.status === 'rejected')).toHaveLength(1);
+    expect(loadAddons()).toHaveLength(MAX_ADDONS);
   });
 });
 

@@ -39,6 +39,8 @@ export function normalizeAddonUrl(input: string): string | null {
   const local = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
   if (u.protocol !== 'https:' && !(u.protocol === 'http:' && local)) return null;
   if (!u.pathname.endsWith(SUFFIX)) return null;
+  // URL de instalação do Stremio não usa query nem fragmento; aceitar quebraria o `base`
+  if (u.search || u.hash) return null;
   return s;
 }
 
@@ -60,13 +62,21 @@ export function parseManifest(manifestUrl: string, json: unknown): VideoAddon {
   const resources = Array.isArray(m.resources) ? m.resources : [];
   const res = resources.find((r) => r === 'stream' || (r && typeof r === 'object' && (r as { name?: unknown }).name === 'stream'));
   if (!name || res === undefined) throw new AddonError('no_stream');
+  let base: string;
+  try {
+    const u = new URL(manifestUrl);
+    if (u.search || u.hash || !u.pathname.endsWith(SUFFIX)) throw new Error('url');
+    base = u.origin + u.pathname.slice(0, -SUFFIX.length);
+  } catch {
+    throw new AddonError('invalid_url');
+  }
   // Recurso longo traz os próprios types/idPrefixes (regra do stremio-core)
   const src = typeof res === 'object' ? (res as Record<string, unknown>) : m;
   return {
     id: fnv1a(manifestUrl),
     name,
     manifestUrl,
-    base: manifestUrl.slice(0, -SUFFIX.length),
+    base,
     stream: { types: strings(src.types), idPrefixes: strings(src.idPrefixes) },
   };
 }
@@ -92,21 +102,30 @@ export function addonHost(addon: VideoAddon): string {
   }
 }
 
+// Fonte da verdade na sessão; o localStorage é persistência de melhor esforço
+let memory: VideoAddon[] = [];
+
+export function resetAddonsMemory() {
+  memory = [];
+}
+
 export function loadAddons(): VideoAddon[] {
   try {
     const saved = localStorage.getItem(ADDONS_KEY);
     const list = saved ? JSON.parse(saved) : [];
-    return Array.isArray(list) ? list : [];
+    memory = Array.isArray(list) ? list : [];
+    return memory;
   } catch {
-    return [];
+    return memory;
   }
 }
 
 function saveAddons(list: VideoAddon[]) {
+  memory = list;
   try {
     localStorage.setItem(ADDONS_KEY, JSON.stringify(list));
   } catch {
-    // armazenamento indisponível
+    // armazenamento indisponível: a lista fica só na memória
   }
 }
 
@@ -129,7 +148,11 @@ export async function addAddon(input: string, fetchImpl: typeof fetch = fetch): 
   if (list.length >= MAX_ADDONS) throw new AddonError('limit');
   if (list.some((a) => a.manifestUrl === url)) throw new AddonError('duplicate');
   const addon = await fetchManifest(url, fetchImpl);
-  saveAddons([...loadAddons(), addon]);
+  // Outro add pode ter terminado durante a espera
+  const current = loadAddons();
+  if (current.length >= MAX_ADDONS) throw new AddonError('limit');
+  if (current.some((a) => a.manifestUrl === url)) throw new AddonError('duplicate');
+  saveAddons([...current, addon]);
   return addon;
 }
 
