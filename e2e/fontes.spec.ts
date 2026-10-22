@@ -71,4 +71,38 @@ test.describe('Addons de vídeo', () => {
     await expect(page.getByRole('dialog', { name: 'Addons' }).getByText('Addon de teste')).toHaveCount(0);
     await page.close();
   });
+
+  test('falha ao atualizar aparece na linha do addon, sem marcar o campo de URL como inválido', async ({ browser }) => {
+    const port = 3103;
+    const url = `http://127.0.0.1:${port}/manifest.json`;
+    const second = spawn('node', ['e2e/fake-addon.mjs', String(port)], { stdio: 'ignore' });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    try {
+      for (let i = 0; i < 50; i++) {
+        try {
+          if ((await fetch(url)).ok) break;
+        } catch {
+          // ainda subindo
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      await mockCatalog(page);
+      await page.goto('/catalog');
+      await page.getByRole('button', { name: 'Addons' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Addons' });
+      await dialog.getByLabel('URL do manifesto').fill(url);
+      await dialog.getByRole('button', { name: 'Adicionar' }).click();
+      await expect(dialog.getByText(`127.0.0.1:${port}`, { exact: true })).toBeVisible();
+
+      second.kill();
+      await expect.poll(() => fetch(url).then(() => true, () => false)).toBe(false);
+      await dialog.getByRole('button', { name: 'Atualizar Addon de teste' }).click();
+      await expect(dialog.getByRole('alert')).toHaveText('Não consegui abrir esse endereço');
+      await expect(dialog.getByLabel('URL do manifesto')).not.toHaveAttribute('aria-invalid', 'true');
+      await dialog.getByRole('button', { name: 'Remover Addon de teste' }).click();
+    } finally {
+      second.kill();
+      await page.close();
+    }
+  });
 });

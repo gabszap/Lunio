@@ -34,12 +34,15 @@ export const AddonsPanel: React.FC<AddonsPanelProps> = ({ open, onClose, onChang
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
   const [refreshing, setRefreshing] = useState<string | null>(null);
+  // Falha de atualização fica na linha do addon, separada do erro do campo de URL
+  const [rowError, setRowError] = useState<{ id: string; text: string } | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setAddons(loadAddons());
     setUrl('');
     setError('');
+    setRowError(null);
   }, [open]);
 
   const update = (list: VideoAddon[]) => {
@@ -65,11 +68,11 @@ export const AddonsPanel: React.FC<AddonsPanelProps> = ({ open, onClose, onChang
 
   const refresh = async (id: string) => {
     setRefreshing(id);
-    setError('');
+    setRowError(null);
     try {
       update(await refreshAddon(id));
     } catch (err) {
-      setError(errorText(err));
+      setRowError({ id, text: errorText(err) });
     } finally {
       setRefreshing(null);
     }
@@ -115,19 +118,25 @@ export const AddonsPanel: React.FC<AddonsPanelProps> = ({ open, onClose, onChang
       {addons.length > 0 ? (
         <ul className="m-0 p-0 list-none flex flex-col gap-2">
           {addons.map((a) => (
-            <li key={a.id} className="flex items-center gap-3 p-3 rounded-[12px] bg-lu-bg2 border border-lu-border">
+            <li key={a.id} className="flex flex-wrap items-center gap-x-3 p-3 rounded-[12px] bg-lu-bg2 border border-lu-border">
               <span className="flex flex-col min-w-0 flex-1">
                 <span className="text-[14px] font-semibold truncate">{a.name}</span>
                 <span className="text-[12px] text-lu-muted truncate">{addonHost(a)}</span>
               </span>
-              <TextButton size="sm" disabled={refreshing === a.id} onClick={() => refresh(a.id)}>
+              <TextButton size="sm" aria-label={`${t('Atualizar')} ${a.name}`} disabled={refreshing === a.id} onClick={() => refresh(a.id)}>
                 {refreshing === a.id ? <Spinner size={14} /> : <RefreshCw size={14} />}
                 {t('Atualizar')}
               </TextButton>
-              <TextButton size="sm" onClick={() => update(removeAddon(a.id))}>
+              <TextButton size="sm" aria-label={`${t('Remover')} ${a.name}`} onClick={() => update(removeAddon(a.id))}>
                 <Trash2 size={14} />
                 {t('Remover')}
               </TextButton>
+              {rowError?.id === a.id && (
+                <Hint role="alert" tone="error" className="basis-full">
+                  <CircleAlert size={14} />
+                  {rowError.text}
+                </Hint>
+              )}
             </li>
           ))}
         </ul>
