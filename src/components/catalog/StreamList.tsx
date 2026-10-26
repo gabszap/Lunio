@@ -45,22 +45,22 @@ const BADGE_TONE: Record<Playability, string> = {
 
 // Título e descrição vão como o addon mandou; a URL do stream nunca aparece
 const StreamRow: React.FC<{ option: StreamOption; onPlay: (s: StreamOption) => void }> = ({ option, onPlay }) => (
-  <li>
+  <li className="flex">
     <button
       type="button"
       onClick={() => onPlay(option)}
       className={cx(
-        'w-full flex items-start gap-3 p-3 rounded-[12px] bg-lu-bg2 border border-lu-border text-left cursor-pointer',
-        'hover:bg-white/8 text-lu-text',
+        'w-full flex items-start justify-between gap-3 p-3.5 rounded-[12px] bg-lu-bg2 border border-lu-border text-left cursor-pointer transition-colors',
+        'hover:bg-white/8 hover:border-lu-border-strong text-lu-text',
         option.level === 'no' && 'opacity-70',
       )}
     >
-      <span className="flex flex-col min-w-0 flex-1 gap-0.5">
+      <span className="flex flex-col min-w-0 flex-1 gap-1">
         <span className="text-[12px] text-lu-muted truncate">{option.sourceName}</span>
         {option.title && <span className="text-[14px] font-semibold whitespace-pre-line break-words">{option.title}</span>}
-        {option.description && <span className="text-[12px] text-lu-muted whitespace-pre-line break-words">{option.description}</span>}
+        {option.description && <span className="text-[12px] leading-relaxed text-lu-muted whitespace-pre-line break-words">{option.description}</span>}
       </span>
-      <Badge className={BADGE_TONE[option.level]}>
+      <Badge className={cx('flex-none', BADGE_TONE[option.level])}>
         <span title={option.reasons.map(reasonText).join('\n') || undefined}>{levelLabel(option.level)}</span>
       </Badge>
     </button>
@@ -97,7 +97,7 @@ export const StreamList: React.FC<StreamListProps> = ({ addons, target, onPlay, 
       ) : (
         <>
           {playable.length > 0 && (
-            <ul aria-label={t('Onde assistir')} className="m-0 p-0 list-none flex flex-col gap-2">
+            <ul aria-label={t('Onde assistir')} className="m-0 p-0 list-none grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
               {playable.map((o) => (
                 <StreamRow key={o.key} option={o} onPlay={onPlay} />
               ))}
@@ -106,7 +106,7 @@ export const StreamList: React.FC<StreamListProps> = ({ addons, target, onPlay, 
 
           {rest.length > 0 &&
             (showRest ? (
-              <ul className="m-0 p-0 list-none flex flex-col gap-2">
+              <ul className="m-0 p-0 list-none grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {rest.map((o) => (
                   <StreamRow key={o.key} option={o} onPlay={onPlay} />
                 ))}

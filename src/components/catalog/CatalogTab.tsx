@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Film, Play, Puzzle, Search, SearchX, Star, Tv, Users, X, RefreshCw } from 'lucide-react';
+import { Bookmark, BookmarkCheck, Check, CheckCheck, ChevronLeft, ChevronRight, Film, Play, Puzzle, Search, SearchX, Star, Tv, Users, X, RefreshCw } from 'lucide-react';
 import {
+  CatalogEpisode,
   CatalogItem,
   CatalogManifest,
   CatalogMeta,
@@ -20,6 +21,7 @@ import {
   searchCatalog,
   seasonOrder,
   toggleMyList,
+  useWatchedEpisodes,
 } from '../../lib/catalog';
 import { GhostButton, IconButton, PillTabs, PrimaryButton, Spinner, TextButton, cx } from '../ui';
 import { t } from '../../lib/i18n';
@@ -236,6 +238,32 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
   const [season, setSeason] = useState<number>(initialSeason ?? 1);
   const [malStats, setMalStats] = useState<{ score: number; rank?: number } | null>(null);
   const [saved, setSaved] = useState(() => isInMyList(item.id));
+  const { isWatched, toggleWatched, setEpisodesWatched } = useWatchedEpisodes();
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; episode: CatalogEpisode } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    const onScroll = () => {
+      setContextMenu(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [contextMenu]);
 
   useEffect(() => {
     // Resposta de um título anterior não pode mexer no atual
@@ -435,17 +463,35 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
         </div>
       </section>
 
-      {!isSeries && !error && <section className="px-4 sm:px-12 pt-2 max-w-[820px]">{streamsList}</section>}
+      {!isSeries && !error && <section className="px-4 sm:px-12 pt-2">{streamsList}</section>}
 
       {isSeries && openEpisode && (
-        <section aria-label={t('Onde assistir')} className="px-4 sm:px-12 pt-2 flex flex-col gap-4 max-w-[820px]">
-          <div className="flex flex-wrap items-center gap-3">
+        <section aria-label={t('Onde assistir')} className="px-4 sm:px-12 pt-2 flex flex-col gap-4">
+          <div
+            className="flex flex-wrap items-center gap-3 cursor-context-menu"
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setContextMenu({ x: e.clientX, y: e.clientY, episode: openEpisode });
+            }}
+          >
             <TextButton onClick={() => onEpisodeChange(null)} className="!pl-2 -ml-2">
               <ChevronLeft size={18} />
               <span>{t('Episódios')}</span>
             </TextButton>
-            <h2 className="m-0 text-[18px] font-semibold">
-              {episodeTag(openEpisode.season, openEpisode.episode)} · {openEpisode.title || t('Episódio {v1}', { v1: openEpisode.episode })}
+            <h2 className="m-0 text-[18px] font-semibold flex items-center gap-2">
+              <span>
+                {episodeTag(openEpisode.season, openEpisode.episode)} · {openEpisode.title || t('Episódio {v1}', { v1: openEpisode.episode })}
+              </span>
+              {isWatched(openEpisode.id) && (
+                <span
+                  title={t('Assistido')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[13px] font-semibold bg-lu-tint text-lu-accent border border-lu-accent/40 shadow-sm"
+                >
+                  <Check size={14} strokeWidth={2.5} />
+                  <span>{t('Assistido')}</span>
+                </span>
+              )}
             </h2>
           </div>
           {streamsList}
@@ -458,7 +504,29 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
       {isSeries && !openEpisode && seasons.length > 0 && (
         <section aria-label={t('Episódios')} className="px-4 sm:px-12 pt-2 flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="m-0 text-[18px] font-semibold">{t('Episódios')}</h2>
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="m-0 text-[18px] font-semibold">{t('Episódios')}</h2>
+              {episodes.length > 0 && (
+                <TextButton
+                  size="sm"
+                  onClick={() => {
+                    const allWatched = episodes.every((ep) => isWatched(ep.id));
+                    setEpisodesWatched(episodes.map((ep) => ep.id), !allWatched);
+                  }}
+                  className="text-[13px]"
+                >
+                  <CheckCheck
+                    size={16}
+                    className={episodes.every((ep) => isWatched(ep.id)) ? 'text-lu-accent' : 'text-lu-muted'}
+                  />
+                  <span>
+                    {episodes.every((ep) => isWatched(ep.id))
+                      ? t('Marcar temporada como não assistida')
+                      : t('Marcar temporada como assistida')}
+                  </span>
+                </TextButton>
+              )}
+            </div>
             <div className="max-w-full overflow-x-auto no-scrollbar">
               <PillTabs
                 label={t('Temporadas')}
@@ -470,37 +538,115 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
             </div>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {episodes.map((ep) => (
-              <button
-                key={ep.id}
-                type="button"
-                onClick={() => onEpisodeChange(ep.id)}
-                className="group flex items-start gap-4 p-3 rounded-[14px] bg-lu-bg2 border border-lu-border hover:bg-white/6 text-left w-full"
-              >
-                <span
-                  className="relative w-[128px] sm:w-[176px] aspect-video flex-none rounded-[10px] overflow-hidden flex items-center justify-center"
-                  style={{ background: gradientFor(ep.id) }}
-                >
-                  {ep.thumbnail && (
-                    <img src={ep.thumbnail} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" onError={(e) => (e.currentTarget.style.display = 'none')} />
+            {episodes.map((ep) => {
+              const watched = isWatched(ep.id);
+              return (
+                <button
+                  key={ep.id}
+                  type="button"
+                  onClick={() => onEpisodeChange(ep.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setContextMenu({ x: e.clientX, y: e.clientY, episode: ep });
+                  }}
+                  className={cx(
+                    'group flex items-start gap-4 p-3 rounded-[14px] bg-lu-bg2 border border-lu-border hover:bg-white/6 text-left w-full transition-colors',
+                    watched && 'border-lu-border-strong',
                   )}
-                  <span className="relative opacity-0 group-hover:opacity-100 transition-opacity w-10 h-10 rounded-full bg-lu-video/70 flex items-center justify-center">
-                    <Play size={18} />
+                >
+                  <span
+                    className="relative w-[128px] sm:w-[176px] aspect-video flex-none rounded-[10px] overflow-hidden flex items-center justify-center"
+                    style={{ background: gradientFor(ep.id) }}
+                  >
+                    {ep.thumbnail && (
+                      <img
+                        src={ep.thumbnail}
+                        alt=""
+                        loading="lazy"
+                        className={cx('absolute inset-0 w-full h-full object-cover', watched && 'opacity-85')}
+                        onError={(e) => (e.currentTarget.style.display = 'none')}
+                      />
+                    )}
+                    {watched && (
+                      <span
+                        title={t('Assistido')}
+                        className="absolute top-2 right-2 z-10 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-lu-bg/95 border border-lu-accent/60 text-lu-accent text-[12px] font-semibold shadow-lg backdrop-blur-sm"
+                      >
+                        <Check size={14} strokeWidth={2.5} />
+                        <span>{t('Assistido')}</span>
+                      </span>
+                    )}
+                    <span className="relative opacity-0 group-hover:opacity-100 transition-opacity w-10 h-10 rounded-full bg-lu-video/70 flex items-center justify-center">
+                      <Play size={18} />
+                    </span>
                   </span>
-                </span>
-                <span className="flex flex-col gap-1 min-w-0">
-                  <span className="text-[14px] font-semibold">
-                    {ep.episode}. {ep.title || t('Episódio {v1}', { v1: ep.episode })}
+                  <span className="flex flex-col gap-1 min-w-0">
+                    <span className="text-[14px] font-semibold">
+                      {ep.episode}. {ep.title || t('Episódio {v1}', { v1: ep.episode })}
+                    </span>
+                    <span className="text-[12px] text-lu-muted flex items-center gap-1.5 flex-wrap">
+                      <span>{episodeTag(ep.season, ep.episode)}</span>
+                      {watched && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span className="inline-flex items-center gap-1 text-lu-accent text-[12px] font-semibold">
+                            <Check size={13} strokeWidth={2.5} />
+                            {t('Assistido')}
+                          </span>
+                        </>
+                      )}
+                      {ep.released && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span>{new Date(ep.released).toLocaleDateString('pt-BR')}</span>
+                        </>
+                      )}
+                    </span>
+                    {ep.overview && <span className="text-[13px] leading-snug text-lu-muted line-clamp-2">{ep.overview}</span>}
                   </span>
-                  <span className="text-[12px] text-lu-muted">
-                    {[episodeTag(ep.season, ep.episode), ep.released ? new Date(ep.released).toLocaleDateString('pt-BR') : null].filter(Boolean).join(' · ')}
-                  </span>
-                  {ep.overview && <span className="text-[13px] leading-snug text-lu-muted line-clamp-2">{ep.overview}</span>}
-                </span>
-              </button>
-            ))}
+                </button>
+              );
+            })}
           </div>
         </section>
+      )}
+
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          style={{
+            position: 'fixed',
+            left: Math.max(12, Math.min(contextMenu.x, window.innerWidth - 220 - 12)),
+            top: Math.max(12, Math.min(contextMenu.y, window.innerHeight - 56 - 12)),
+          }}
+          className="z-50 min-w-[210px] p-1.5 rounded-[12px] bg-lu-elevated border border-lu-border shadow-[0_16px_40px_rgba(0,0,0,0.6)] text-lu-text backdrop-blur-md"
+          onClick={(e) => e.stopPropagation()}
+          role="menu"
+          aria-label={t('Opções do episódio')}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              toggleWatched(contextMenu.episode.id);
+              setContextMenu(null);
+            }}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[8px] text-[13px] font-medium text-left transition-colors hover:bg-white/8 hover:text-lu-text cursor-pointer text-lu-text"
+          >
+            {isWatched(contextMenu.episode.id) ? (
+              <>
+                <X size={15} className="text-lu-muted flex-none" />
+                <span>{t('Marcar como não assistido')}</span>
+              </>
+            ) : (
+              <>
+                <Check size={15} className="text-lu-accent flex-none" />
+                <span>{t('Marcar como assistido')}</span>
+              </>
+            )}
+          </button>
+        </div>
       )}
     </div>
   );

@@ -1,4 +1,5 @@
-import { t, msg } from './/i18n';
+import React, { useEffect, useState } from 'react';
+import { t, msg } from './i18n';
 import { apiFetch } from './access';
 /**
  * Catálogo de filmes e séries. Quem fala com a fonte (um addon do Stremio configurado em `CATALOG_URL`) é o servidor
@@ -214,3 +215,90 @@ export const GENRES_PT: Record<string, string> = {
 
 export const episodeTag = (season: number, episode: number) =>
   `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+
+// ───────────── Episódios assistidos (local) ─────────────
+
+const WATCHED_EPISODES_KEY = 'lunio_watched_episodes';
+const WATCHED_CHANGE_EVENT = 'lunio:watched-episodes-changed';
+
+export function getWatchedEpisodes(): Set<string> {
+  try {
+    const raw = localStorage.getItem(WATCHED_EPISODES_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function isEpisodeWatched(episodeId: string): boolean {
+  return getWatchedEpisodes().has(episodeId);
+}
+
+export function toggleEpisodeWatched(episodeId: string): boolean {
+  const watched = getWatchedEpisodes();
+  const next = !watched.has(episodeId);
+  if (next) {
+    watched.add(episodeId);
+  } else {
+    watched.delete(episodeId);
+  }
+  try {
+    localStorage.setItem(WATCHED_EPISODES_KEY, JSON.stringify(Array.from(watched)));
+    window.dispatchEvent(new CustomEvent(WATCHED_CHANGE_EVENT));
+  } catch {
+    // armazenamento indisponível
+  }
+  return next;
+}
+
+export function setEpisodeWatched(episodeId: string, isWatched: boolean): void {
+  const watched = getWatchedEpisodes();
+  if (isWatched) {
+    watched.add(episodeId);
+  } else {
+    watched.delete(episodeId);
+  }
+  try {
+    localStorage.setItem(WATCHED_EPISODES_KEY, JSON.stringify(Array.from(watched)));
+    window.dispatchEvent(new CustomEvent(WATCHED_CHANGE_EVENT));
+  } catch {
+    // armazenamento indisponível
+  }
+}
+
+export function setEpisodesWatched(episodeIds: string[], isWatched: boolean): void {
+  const watched = getWatchedEpisodes();
+  for (const id of episodeIds) {
+    if (isWatched) {
+      watched.add(id);
+    } else {
+      watched.delete(id);
+    }
+  }
+  try {
+    localStorage.setItem(WATCHED_EPISODES_KEY, JSON.stringify(Array.from(watched)));
+    window.dispatchEvent(new CustomEvent(WATCHED_CHANGE_EVENT));
+  } catch {
+    // armazenamento indisponível
+  }
+}
+
+export function useWatchedEpisodes() {
+  const [watched, setWatched] = useState<Set<string>>(() => getWatchedEpisodes());
+
+  useEffect(() => {
+    const onUpdate = () => setWatched(getWatchedEpisodes());
+    window.addEventListener(WATCHED_CHANGE_EVENT, onUpdate);
+    window.addEventListener('storage', onUpdate);
+    return () => {
+      window.removeEventListener(WATCHED_CHANGE_EVENT, onUpdate);
+      window.removeEventListener('storage', onUpdate);
+    };
+  }, []);
+
+  return {
+    isWatched: (id: string) => watched.has(id),
+    toggleWatched: (id: string) => toggleEpisodeWatched(id),
+    setEpisodesWatched: (ids: string[], isWatched: boolean) => setEpisodesWatched(ids, isWatched),
+  };
+}

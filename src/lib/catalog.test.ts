@@ -1,5 +1,17 @@
-import { describe, expect, it } from 'vitest';
-import { isSeriesType, mergeGroups, rowTitles, seasonOrder, type CatalogRow, type SearchGroup } from './catalog';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
+import {
+  getWatchedEpisodes,
+  isEpisodeWatched,
+  isSeriesType,
+  mergeGroups,
+  rowTitles,
+  seasonOrder,
+  setEpisodeWatched,
+  setEpisodesWatched,
+  toggleEpisodeWatched,
+  type CatalogRow,
+  type SearchGroup,
+} from './catalog';
 import { t } from './i18n';
 
 const row = (type: string, id: string, name: string): CatalogRow => ({ type, id, name, genres: [] });
@@ -61,5 +73,53 @@ describe('mergeGroups (busca unificada)', () => {
 
   it('sem grupos, vazio', () => {
     expect(mergeGroups([])).toEqual([]);
+  });
+});
+
+describe('episódios assistidos', () => {
+  beforeEach(() => {
+    const data = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => data.get(k) ?? null,
+      setItem: (k: string, v: string) => void data.set(k, v),
+      removeItem: (k: string) => void data.delete(k),
+    });
+    vi.stubGlobal('window', {
+      dispatchEvent: vi.fn(),
+    });
+  });
+
+  it('episódio começa como não assistido', () => {
+    expect(isEpisodeWatched('ep1')).toBe(false);
+  });
+
+  it('toggleEpisodeWatched alterna entre assistido e não assistido', () => {
+    expect(toggleEpisodeWatched('ep1')).toBe(true);
+    expect(isEpisodeWatched('ep1')).toBe(true);
+    expect(getWatchedEpisodes().has('ep1')).toBe(true);
+
+    expect(toggleEpisodeWatched('ep1')).toBe(false);
+    expect(isEpisodeWatched('ep1')).toBe(false);
+    expect(getWatchedEpisodes().has('ep1')).toBe(false);
+  });
+
+  it('setEpisodeWatched define explicitamente o estado', () => {
+    setEpisodeWatched('ep2', true);
+    expect(isEpisodeWatched('ep2')).toBe(true);
+
+    setEpisodeWatched('ep2', false);
+    expect(isEpisodeWatched('ep2')).toBe(false);
+  });
+
+  it('setEpisodesWatched define múltiplos episódios de uma vez', () => {
+    setEpisodesWatched(['ep1', 'ep2', 'ep3'], true);
+    expect(isEpisodeWatched('ep1')).toBe(true);
+    expect(isEpisodeWatched('ep2')).toBe(true);
+    expect(isEpisodeWatched('ep3')).toBe(true);
+
+    setEpisodesWatched(['ep1', 'ep3'], false);
+    expect(isEpisodeWatched('ep1')).toBe(false);
+    expect(isEpisodeWatched('ep2')).toBe(true);
+    expect(isEpisodeWatched('ep3')).toBe(false);
   });
 });
