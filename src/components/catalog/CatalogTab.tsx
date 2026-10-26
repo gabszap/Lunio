@@ -70,13 +70,16 @@ const gradientFor = (id: string) => {
 
 const Poster: React.FC<{ item: CatalogItem; className?: string; iconSize?: number }> = ({ item, className, iconSize = 32 }) => {
   const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+  }, [item.poster]);
   return (
     <span
       className={cx('relative flex-none rounded-xl border border-lu-border overflow-hidden flex items-center justify-center text-lu-text/35', className)}
       style={{ background: gradientFor(item.id) }}
     >
       {item.poster && !failed ? (
-        <img src={item.poster} alt="" loading="lazy" onError={() => setFailed(true)} className="absolute inset-0 w-full h-full object-cover" />
+        <img key={item.poster} src={item.poster} alt="" loading="lazy" onError={() => setFailed(true)} className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300" />
       ) : (
         <Film size={iconSize} />
       )}
@@ -292,7 +295,16 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
     };
   }, [item]);
 
-  // A nota do MyAnimeList vem à parte, com novas tentativas (a API pode estar fria ou limitando): o detalhe nunca espera por ela
+  // Notas do MAL por temporada (guardadas em cache para alternância instantânea)
+  const [seasonScores, setSeasonScores] = useState<Record<string, { score: number; rank?: number; malId: string }>>({});
+
+  useEffect(() => {
+    if (meta?.seasonMalScores) {
+      setSeasonScores((prev) => ({ ...prev, ...meta.seasonMalScores }));
+    }
+  }, [meta?.seasonMalScores]);
+
+  // A nota do MyAnimeList da série vem à parte, com novas tentativas: o detalhe nunca espera por ela
   useEffect(() => {
     setMalStats(null);
     const malId = meta?.malId;
@@ -332,6 +344,43 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
   }, [season, isSeries, seasons.length]);
   useEffect(() => () => writeSeasonToUrl(null), []);
   const firstEpisode = data.episodes.find((e) => e.season >= 1) ?? data.episodes[0];
+
+  // Capa e nota correspondentes à temporada atualmente selecionada
+  const currentSeasonStr = String(season);
+  const activePoster = (isSeries && data.seasonPosters?.[currentSeasonStr]) || item.poster || data.poster;
+  const currentMalId = (isSeries && data.seasonMalIds?.[currentSeasonStr]) || data.malId;
+  const currentMalScore = seasonScores[currentSeasonStr] ?? (currentMalId && currentMalId === data.malId && malStats ? { score: malStats.score, rank: malStats.rank, malId: currentMalId } : null);
+
+  // Busca nota da temporada ativa se ainda não estiver no cache
+  useEffect(() => {
+    if (!currentMalId) return;
+    if (seasonScores[currentSeasonStr]) return;
+    if (currentMalId === data.malId && data.malScore !== undefined) {
+      setSeasonScores((prev) => ({
+        ...prev,
+        [currentSeasonStr]: { score: data.malScore!, rank: data.malRank, malId: currentMalId },
+      }));
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetchMalScore(currentMalId);
+        if (cancelled) return;
+        if (r.score !== null) {
+          setSeasonScores((prev) => ({
+            ...prev,
+            [currentSeasonStr]: { score: r.score!, rank: r.rank, malId: currentMalId },
+          }));
+        }
+      } catch {
+        // silencioso
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentMalId, currentSeasonStr, seasonScores, data.malId, data.malScore, data.malRank]);
 
   const watchTitle = (preferSolo: boolean) => {
     const title = isSeries && firstEpisode ? `${data.name} · ${episodeTag(firstEpisode.season, firstEpisode.episode)}` : data.name;
@@ -405,7 +454,7 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
             <span>{t('Catálogo')}</span>
           </TextButton>
           <div className="flex flex-col sm:flex-row gap-6 sm:gap-10 mt-4 sm:items-end">
-            <Poster item={data} iconSize={48} className="w-[160px] sm:w-[240px] aspect-[2/3]" />
+            <Poster item={{ ...data, poster: activePoster }} iconSize={48} className="w-[160px] sm:w-[240px] aspect-[2/3]" />
             <div className="flex-1 min-w-0 flex flex-col gap-3.5 sm:pb-2">
               <span className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-lu-tint text-lu-accent text-[12px] font-semibold self-start">
                 {isSeries ? <Tv size={14} /> : <Film size={14} />}
@@ -429,17 +478,23 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
                       {data.imdbRating ?? 'IMDb'}
                     </BrandBadge>
                   )}
-                  {data.malId && (
+                  {currentMalId && (
                     <BrandBadge
-                      href={`https://myanimelist.net/anime/${data.malId}`}
+                      href={`https://myanimelist.net/anime/${currentMalId}`}
                       label={
-                        malStats
-                          ? `${t('Nota do MyAnimeList')}: ${malStats.score.toFixed(2)}${malStats.rank ? ` · ${t('ranking')} #${malStats.rank}` : ''}`
-                          : t('Abrir no MyAnimeList')
+                        currentMalScore
+                          ? `${t('Nota do MyAnimeList')}: ${currentMalScore.score.toFixed(2)}${currentMalScore.rank ? ` · ${t('ranking')} #${currentMalScore.rank}` : ''}`
+                          : malStats
+                            ? `${t('Nota do MyAnimeList')}: ${malStats.score.toFixed(2)}${malStats.rank ? ` · ${t('ranking')} #${malStats.rank}` : ''}`
+                            : t('Abrir no MyAnimeList')
                       }
                       icon={<MalIcon />}
                     >
-                      {malStats ? malStats.score.toFixed(2) : 'MyAnimeList'}
+                      {currentMalScore
+                        ? currentMalScore.score.toFixed(2)
+                        : malStats
+                          ? malStats.score.toFixed(2)
+                          : 'MyAnimeList'}
                     </BrandBadge>
                   )}
                 </p>

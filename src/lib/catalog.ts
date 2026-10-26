@@ -45,6 +45,12 @@ export interface CatalogMeta extends CatalogItem {
   malScore?: number;
   malScoredBy?: number;
   malRank?: number;
+  /** Capas de cada temporada (da fonte, ex.: AIOMetadata app_extras.seasonPosters). */
+  seasonPosters?: Record<string, string>;
+  /** Ids do anime no MyAnimeList para cada temporada ("1": "14719", "2": "20899"...). */
+  seasonMalIds?: Record<string, string>;
+  /** Notas já conhecidas no cache para cada temporada. */
+  seasonMalScores?: Record<string, { score: number; scoredBy?: number; rank?: number; malId: string }>;
   /** A temporada 0 são os especiais. */
   episodes: CatalogEpisode[];
 }

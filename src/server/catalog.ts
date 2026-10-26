@@ -378,6 +378,12 @@ export interface CatalogMeta extends CatalogItem {
   malScore?: number;
   malScoredBy?: number;
   malRank?: number;
+  /** Capas de cada temporada (da fonte, ex.: AIOMetadata app_extras.seasonPosters). */
+  seasonPosters?: Record<string, string>;
+  /** Ids do anime no MyAnimeList para cada temporada ("1": "14719", "2": "20899"...). */
+  seasonMalIds?: Record<string, string>;
+  /** Notas já conhecidas no cache para cada temporada. */
+  seasonMalScores?: Record<string, { score: number; scoredBy?: number; rank?: number; malId: string }>;
   /** Inclui a temporada 0 (especiais): quem exibe decide onde colocá-la. */
   episodes: CatalogEpisode[];
 }
@@ -463,26 +469,57 @@ function looksLikeAnime(m: any, genres: string[]): boolean {
   return str(m?._originalLanguage, 10).toLowerCase() === 'ja' || genres.some((g) => /anim/i.test(g));
 }
 
+interface ResolvedMalInfo {
+  malId?: string;
+  seasonMalIds?: Record<string, string>;
+}
+
 /**
  * O IMDb não diz qual é o anime no MyAnimeList. Os itens do catálogo de busca de anime da fonte trazem os dois ids
- * (`mal:<id>` com o `imdb_id` junto): procura pelo nome e fica com o que tem o mesmo IMDb (a 1ª temporada, na ordem da fonte).
+ * (`mal:<id>` com o `imdb_id` junto): procura pelo nome, agrupa as temporadas com o mesmo IMDb e mapeia cada
+ * uma para seu ID correspondente no MyAnimeList em ordem cronológica de lançamento (IDs menores = temporadas anteriores).
  */
-async function resolveMalId(type: string, name: string, imdbId: string): Promise<string | undefined> {
+async function resolveMalInfo(type: string, name: string, imdbId: string): Promise<ResolvedMalInfo> {
   try {
     const wanted = type === 'movie' ? 'movie' : 'series';
     const manifest = await getManifest();
     const catalogs = manifest.searchCatalogs.filter((c) => c.type.startsWith('anime') && (c.type === 'anime' || c.type.includes(wanted))).slice(0, 2);
+    const matches: Array<{ malId: string; name: string }> = [];
+
     for (const c of catalogs) {
       const { data } = await fetchCatalogJson(`/catalog/${c.type}/${encodeURIComponent(c.id)}/search=${encodeURIComponent(name.slice(0, 100))}.json`, 'search');
       for (const raw of Array.isArray(data?.metas) ? data.metas : []) {
         const item = toItem(raw, c.type);
-        if (item?.imdbId === imdbId && item.id.startsWith('mal:') && /^\d{1,10}$/.test(item.id.slice(4))) return item.id.slice(4);
+        if (item?.imdbId === imdbId && item.id.startsWith('mal:') && /^\d{1,10}$/.test(item.id.slice(4))) {
+          const malId = item.id.slice(4);
+          if (!matches.some((m) => m.malId === malId)) {
+            matches.push({ malId, name: item.name || '' });
+          }
+        }
       }
+      if (matches.length > 0) break;
     }
+
+    if (matches.length === 0) return {};
+
+    // Ordena de forma cronológica por ID do MAL crescente (temporadas iniciais têm IDs menores)
+    const sorted = [...matches].sort((a, b) => Number(a.malId) - Number(b.malId));
+    const malId = sorted[0]?.malId;
+
+    const seasonMalIds: Record<string, string> = {};
+    sorted.forEach((item, idx) => {
+      seasonMalIds[String(idx + 1)] = item.malId;
+    });
+
+    return { malId, seasonMalIds: Object.keys(seasonMalIds).length > 0 ? seasonMalIds : undefined };
   } catch {
-    // sem o id do MAL o detalhe só fica sem a nota
+    return {};
   }
-  return undefined;
+}
+
+async function resolveMalId(type: string, name: string, imdbId: string): Promise<string | undefined> {
+  const r = await resolveMalInfo(type, name, imdbId);
+  return r.malId;
 }
 
 export async function getMeta(type: string, id: string): Promise<{ meta: CatalogMeta; stale: boolean }> {
@@ -506,10 +543,64 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
 
   const genres = (Array.isArray(m?.genres) ? m.genres : Array.isArray(m?.genre) ? m.genre : []).filter((g: unknown) => typeof g === 'string').slice(0, 30);
   let malId = malIdOf(m, item.id);
-  // Título do IMDb (tt…) que é anime e não diz o id do MAL: acha pelo catálogo de busca de anime da própria fonte
-  if (!malId && item.imdbId && looksLikeAnime(m, genres)) malId = await resolveMalId(type, item.name, item.imdbId);
+  let seasonMalIds: Record<string, string> | undefined;
+
+  // Título do IMDb (tt…) que é anime: descobre os IDs do MyAnimeList para a série e cada temporada
+  if (item.imdbId && looksLikeAnime(m, genres)) {
+    const resolved = await resolveMalInfo(type, item.name, item.imdbId);
+    if (!malId && resolved.malId) malId = resolved.malId;
+    if (resolved.seasonMalIds) seasonMalIds = resolved.seasonMalIds;
+  }
+
+  // Capas por temporada (ex.: app_extras.seasonPosters do AIOMetadata ou seasonPosters)
+  const rawPosters = m?.app_extras?.seasonPosters ?? m?.seasonPosters;
+  let seasonPosters: Record<string, string> = {};
+  if (rawPosters && typeof rawPosters === 'object') {
+    for (const [k, v] of Object.entries(rawPosters)) {
+      const u = httpUrl(v);
+      if (u) seasonPosters[k] = u;
+    }
+  }
+
+  // Para animes ocidentalizados: se o item for IMDb (tt...) ou não tiver capas ocidentais,
+  // consulta os metadados do ID do MAL para puxar as capas ocidentais (TheTVDB em inglês/pt)
+  if (malId && (id.startsWith('tt') || !Object.keys(seasonPosters).length)) {
+    try {
+      const { data: malData } = await fetchCatalogJson(`/meta/${type}/${encodeURIComponent(`mal:${malId}`)}.json`, 'meta');
+      const malPosters = malData?.meta?.app_extras?.seasonPosters ?? malData?.meta?.seasonPosters;
+      if (malPosters && typeof malPosters === 'object') {
+        const westernPosters: Record<string, string> = {};
+        for (const [k, v] of Object.entries(malPosters)) {
+          const u = httpUrl(v);
+          if (u) westernPosters[k] = u;
+        }
+        if (Object.keys(westernPosters).length > 0) {
+          seasonPosters = { ...seasonPosters, ...westernPosters };
+          const malPosterUrl = httpUrl(malData?.meta?.poster);
+          if (malPosterUrl) {
+            item.poster = malPosterUrl;
+          }
+        }
+      }
+    } catch {
+      // silencioso se a consulta complementar do MAL falhar
+    }
+  }
+
   // A nota não atrasa o detalhe: vem junto só se já estiver guardada; senão o cliente a pede em /api/catalog/malscore
   const stats = malId ? await cachedMalStats(malId) : undefined;
+
+  // Pré-preenche notas em cache para as temporadas
+  const seasonMalScores: Record<string, { score: number; scoredBy?: number; rank?: number; malId: string }> = {};
+  if (seasonMalIds) {
+    for (const [sKey, sId] of Object.entries(seasonMalIds)) {
+      const sStat = await cachedMalStats(sId);
+      if (sStat) {
+        seasonMalScores[sKey] = { ...sStat, malId: sId };
+      }
+    }
+  }
+
   return {
     meta: {
       ...item,
@@ -522,6 +613,9 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
       malScore: stats?.score,
       malScoredBy: stats?.scoredBy,
       malRank: stats?.rank,
+      seasonPosters: Object.keys(seasonPosters).length > 0 ? seasonPosters : undefined,
+      seasonMalIds,
+      seasonMalScores: Object.keys(seasonMalScores).length > 0 ? seasonMalScores : undefined,
       episodes,
     },
     stale,
