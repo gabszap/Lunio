@@ -14,14 +14,18 @@ import {
   RotateCw,
   Plus,
   SkipForward,
+  Tv,
 } from 'lucide-react';
-import { Chapter, SubtitleTrack, AudioTrackOption } from '../types/media';
+import { Chapter, SubtitleTrack, AudioTrackOption, CatalogSeriesContext } from '../types/media';
+import type { CatalogEpisode } from '../lib/catalog';
+import type { StreamOption } from '../lib/streams';
 import { formatTime, getCurrentChapter } from '../lib/chapters';
 import { SeekButtons } from './SeekButtons';
 import { VolumeDisplay } from './VolumeDisplay';
 import { SettingsMenu, formatMs } from './SettingsMenu';
 import { ChapterTimeline } from './ChapterTimeline';
 import { ChapterList } from './ChapterList';
+import { EpisodesOverlay } from './EpisodesMenu';
 import { t, msg } from '../lib/i18n';
 import {
   Badge,
@@ -87,6 +91,8 @@ interface PlayerControlsProps {
   unreadChatCount?: number;
   onBack?: () => void;
   onAddSubtitle?: () => void;
+  seriesContext?: CatalogSeriesContext | null;
+  onSelectEpisodeStream?: (episode: CatalogEpisode, stream: StreamOption) => void;
   /** Próximo da fila da sala (só existe dentro de uma sala, para o Host). Sem itens na fila o botão fica desativado. */
   onNext?: () => void;
   hasNext?: boolean;
@@ -186,7 +192,7 @@ const ASPECT_LABEL: Record<'fit' | 'fill' | 'stretch', string> = {
   stretch: msg('Ajuste de tela: esticar (Z)'),
 };
 
-type MenuId = 'subs' | 'audio' | 'chapters' | 'settings' | null;
+type MenuId = 'subs' | 'audio' | 'chapters' | 'episodes' | 'settings' | null;
 
 export const PlayerControls: React.FC<PlayerControlsProps> = ({
   title,
@@ -236,6 +242,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   unreadChatCount = 0,
   onBack,
   onAddSubtitle,
+  seriesContext,
+  onSelectEpisodeStream,
   onNext,
   hasNext = false,
   onMenuOpenChange,
@@ -302,6 +310,17 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           {volumeBoost > 100 && <Badge className="text-lu-success">Boost {volumeBoost}%</Badge>}
         </div>
       </div>
+
+      {/* Overlay lateral de episódios */}
+      {seriesContext && onSelectEpisodeStream && (
+        <EpisodesOverlay
+          seriesContext={seriesContext}
+          open={openMenu === 'episodes'}
+          onClose={closeMenu}
+          onSelectEpisodeStream={onSelectEpisodeStream}
+          isViewer={isViewer}
+        />
+      )}
 
       {/* Centro: clique pausa, duplo clique tela cheia */}
       <div
@@ -550,6 +569,19 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   </MenuPanel>
                 )}
               </div>
+            )}
+
+            {seriesContext && onSelectEpisodeStream && (
+              <IconButton
+                id="btn-episodes-menu-toggle"
+                label={t('Episódios')}
+                aria-expanded={openMenu === 'episodes'}
+                active={openMenu === 'episodes'}
+                onClick={() => toggleMenu('episodes')}
+                className="hidden sm:inline-flex"
+              >
+                <Tv size={20} />
+              </IconButton>
             )}
 
             <ChapterList

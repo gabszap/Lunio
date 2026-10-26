@@ -22,7 +22,8 @@ import { StatusTab } from './components/home/StatusTab';
 import type { WatchIntent } from './components/catalog/CatalogTab';
 import type { StreamOption } from './lib/streams';
 import type { CommitMode, CommitOptions } from './components/home/types';
-import { MediaPayload, SubtitleTrack } from './types/media';
+import { MediaPayload, SubtitleTrack, CatalogSeriesContext } from './types/media';
+import { CatalogEpisode, episodeTag, loadActiveSeriesContext, saveActiveSeriesContext } from './lib/catalog';
 import type { PlaylistItem } from './types/sync';
 import { PlaylistPanel } from './components/PlaylistPanel';
 import { logger } from './lib/logger';
@@ -94,6 +95,7 @@ export default function App() {
   const [isWatchPartyOpen, setIsWatchPartyOpen] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [kickBanAlert, setKickBanAlert] = useState<{ title: string; message: string; type: 'kicked' | 'banned' } | null>(null);
+  const [seriesContext, setSeriesContext] = useState<CatalogSeriesContext | null>(() => loadActiveSeriesContext());
 
   // Com a Home aberta e a rede livre, já baixa o player: entrar numa sala fica instantâneo
   useEffect(() => {
@@ -175,6 +177,8 @@ export default function App() {
     if (!discordManager.isDiscordActivity()) syncManager.leaveRoom();
     setRoomInUrl(null);
     setCurrentPayload(EMPTY_PAYLOAD);
+    setSeriesContext(null);
+    saveActiveSeriesContext(null);
     setPendingSubtitles([]);
     setUnreadChatCount(0);
     goHome('room');
@@ -381,7 +385,11 @@ export default function App() {
   };
 
   /** Um stream escolhido no detalhe do catálogo ("Onde assistir"): cria a sala e abre o player. */
-  const playStream = (stream: StreamOption, title: string) => {
+  const playStream = (stream: StreamOption, title: string, context?: CatalogSeriesContext) => {
+    if (context) {
+      setSeriesContext(context);
+      saveActiveSeriesContext(context);
+    }
     const { mimeType, isMkv } = streamMediaInfo(stream.url, stream.filename);
     commitMedia(
       {
@@ -395,6 +403,24 @@ export default function App() {
       },
       'room'
     );
+  };
+
+  /** Seleciona outro episódio a partir do menu de episódios no player. */
+  const playEpisodeStream = (episode: CatalogEpisode, stream: StreamOption) => {
+    if (seriesContext) {
+      const updated: CatalogSeriesContext = {
+        ...seriesContext,
+        currentEpisodeId: episode.id,
+        season: episode.season,
+        episode: episode.episode,
+      };
+      setSeriesContext(updated);
+      saveActiveSeriesContext(updated);
+      const title = `${updated.seriesTitle} · ${episodeTag(episode.season, episode.episode)}`;
+      playStream(stream, title, updated);
+    } else {
+      playStream(stream, stream.title || '');
+    }
   };
 
   /** Fila da sala: o Host toca um item (o servidor tira da fila; o vídeo vai para todos como um media:set normal). */
@@ -577,6 +603,8 @@ export default function App() {
               onBack={leaveToHome}
               onLeaveRoom={leaveToHome}
               autoPlay={autoPlayNext}
+              seriesContext={seriesContext}
+              onSelectEpisodeStream={playEpisodeStream}
               onPlayPlaylistItem={playPlaylistItem}
               onAddSubtitle={() => setSubtitleModal('current')}
               onChooseVideo={() => goHome('room')}

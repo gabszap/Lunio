@@ -31,6 +31,7 @@ import { AddonsPanel } from './AddonsPanel';
 import { StreamList } from './StreamList';
 import { loadAddons, type VideoAddon } from '../../lib/addons';
 import type { StreamOption } from '../../lib/streams';
+import type { CatalogSeriesContext } from '../../types/media';
 import { discordManager } from '../../lib/discord';
 
 export interface WatchIntent {
@@ -46,7 +47,7 @@ interface CatalogTabProps {
   initialSeason?: number | null;
   onWatch: (intent: WatchIntent) => void;
   /** Um stream escolhido na lista "Onde assistir" (o App cria a sala e abre o player). */
-  onPlayStream: (stream: StreamOption, title: string) => void;
+  onPlayStream: (stream: StreamOption, title: string, seriesContext?: CatalogSeriesContext) => void;
   onCreateRoom: () => void;
 }
 
@@ -229,7 +230,7 @@ interface DetailProps {
   onOpenAddons: () => void;
   onBack: () => void;
   onWatch: (intent: WatchIntent) => void;
-  onPlayStream: (stream: StreamOption, title: string) => void;
+  onPlayStream: (stream: StreamOption, title: string, seriesContext?: CatalogSeriesContext) => void;
 }
 
 const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, onEpisodeChange, addons, onOpenAddons, onBack, onWatch, onPlayStream }) => {
@@ -353,7 +354,21 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
             : null
           : { type: 'movie', videoId: item.id }
       }
-      onPlay={(stream) => onPlayStream(stream, episodeTitle)}
+      onPlay={(stream) => {
+        const seriesContext: CatalogSeriesContext | undefined =
+          isSeries && openEpisode
+            ? {
+                seriesId: item.id,
+                seriesTitle: data.name,
+                seriesType: item.type,
+                currentEpisodeId: openEpisode.id,
+                season: openEpisode.season,
+                episode: openEpisode.episode,
+                episodes: data.episodes,
+              }
+            : undefined;
+        onPlayStream(stream, episodeTitle, seriesContext);
+      }}
       onOpenAddons={onOpenAddons}
     />
   );

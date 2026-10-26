@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { t, msg } from './i18n';
 import { apiFetch } from './access';
+import type { CatalogSeriesContext } from '../types/media';
 /**
  * Catálogo de filmes e séries. Quem fala com a fonte (um addon do Stremio configurado em `CATALOG_URL`) é o servidor
  * (`/api/catalog/*`, com cache); aqui só se consome o que ele devolve. Só metadados: pôster, sinopse, temporadas e
@@ -301,4 +302,24 @@ export function useWatchedEpisodes() {
     toggleWatched: (id: string) => toggleEpisodeWatched(id),
     setEpisodesWatched: (ids: string[], isWatched: boolean) => setEpisodesWatched(ids, isWatched),
   };
+}
+
+const ACTIVE_SERIES_CONTEXT_KEY = 'lunio_active_series_context';
+
+export function saveActiveSeriesContext(ctx: CatalogSeriesContext | null): void {
+  try {
+    if (ctx) sessionStorage.setItem(ACTIVE_SERIES_CONTEXT_KEY, JSON.stringify(ctx));
+    else sessionStorage.removeItem(ACTIVE_SERIES_CONTEXT_KEY);
+  } catch {
+    // sessionStorage indisponível
+  }
+}
+
+export function loadActiveSeriesContext(): CatalogSeriesContext | null {
+  try {
+    const raw = sessionStorage.getItem(ACTIVE_SERIES_CONTEXT_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
 }
