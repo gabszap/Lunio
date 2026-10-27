@@ -236,11 +236,29 @@ interface DetailProps {
   onPlayStream: (stream: StreamOption, title: string, seriesContext?: CatalogSeriesContext) => void;
 }
 
+/** Nota do MyAnimeList com novas tentativas (a API pode estar fria ou limitando). `null`: sem nota, desistiu ou foi cancelado. */
+async function fetchMalScoreRetrying(malId: string, cancelled: () => boolean): Promise<{ score: number; rank?: number } | null> {
+  for (const wait of [0, 5000, 15000]) {
+    if (wait) await new Promise((r) => setTimeout(r, wait));
+    if (cancelled()) return null;
+    try {
+      const r = await fetchMalScore(malId);
+      if (cancelled()) return null;
+      if (r.score !== null) return { score: r.score, rank: r.rank };
+      if (!r.failed) return null; // sem nota (ainda sem votos): não adianta insistir
+    } catch {
+      // tenta de novo
+    }
+  }
+  return null;
+}
+
 const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, onEpisodeChange, addons, onOpenAddons, onBack, onWatch, onPlayStream }) => {
   const [meta, setMeta] = useState<CatalogMeta | null>(null);
   const [error, setError] = useState(false);
   const [season, setSeason] = useState<number>(initialSeason ?? 1);
-  const [malStats, setMalStats] = useState<{ score: number; rank?: number } | null>(null);
+  /** Notas do MyAnimeList já conhecidas, por id do MAL (a série e cada temporada que tem o seu). */
+  const [malScores, setMalScores] = useState<Record<string, { score: number; rank?: number }>>({});
   const [saved, setSaved] = useState(() => isInMyList(item.id));
   const { isWatched, toggleWatched, setEpisodesWatched } = useWatchedEpisodes();
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; episode: CatalogEpisode } | null>(null);
@@ -295,43 +313,16 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
     };
   }, [item]);
 
-  // Notas do MAL por temporada (guardadas em cache para alternância instantânea)
-  const [seasonScores, setSeasonScores] = useState<Record<string, { score: number; rank?: number; malId: string }>>({});
-
+  // As notas que o servidor já tinha guardadas vêm junto do detalhe (as demais são pedidas abaixo, uma vez por id do MAL)
   useEffect(() => {
-    if (meta?.seasonMalScores) {
-      setSeasonScores((prev) => ({ ...prev, ...meta.seasonMalScores }));
-    }
-  }, [meta?.seasonMalScores]);
-
-  // A nota do MyAnimeList da série vem à parte, com novas tentativas: o detalhe nunca espera por ela
-  useEffect(() => {
-    setMalStats(null);
-    const malId = meta?.malId;
-    if (!malId) return;
-    if (meta.malScore !== undefined) {
-      setMalStats({ score: meta.malScore, rank: meta.malRank });
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      for (const wait of [0, 5000, 15000]) {
-        if (wait) await new Promise((r) => setTimeout(r, wait));
-        if (cancelled) return;
-        try {
-          const r = await fetchMalScore(malId);
-          if (cancelled) return;
-          if (r.score !== null) return void setMalStats({ score: r.score, rank: r.rank });
-          if (!r.failed) return; // sem nota (ainda sem votos): não adianta insistir
-        } catch {
-          // tenta de novo
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [meta?.malId, meta?.malScore, meta?.malRank]);
+    if (!meta) return;
+    setMalScores((prev) => {
+      const next = { ...prev };
+      if (meta.malId && meta.malScore !== undefined) next[meta.malId] = { score: meta.malScore, rank: meta.malRank };
+      for (const s of Object.values(meta.seasonMalScores ?? {})) next[s.malId] = { score: s.score, rank: s.rank };
+      return next;
+    });
+  }, [meta]);
 
   const data = meta ?? { ...item, genres: [], episodes: [] as CatalogMeta['episodes'], description: undefined, runtime: undefined, imdbRating: undefined, background: undefined };
   // 1, 2, 3… e os especiais (temporada 0) no fim
@@ -349,38 +340,20 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
   const currentSeasonStr = String(season);
   const activePoster = (isSeries && data.seasonPosters?.[currentSeasonStr]) || item.poster || data.poster;
   const currentMalId = (isSeries && data.seasonMalIds?.[currentSeasonStr]) || data.malId;
-  const currentMalScore = seasonScores[currentSeasonStr] ?? (currentMalId && currentMalId === data.malId && malStats ? { score: malStats.score, rank: malStats.rank, malId: currentMalId } : null);
+  const currentMalScore = (currentMalId && malScores[currentMalId]) || null;
 
-  // Busca nota da temporada ativa se ainda não estiver no cache
+  // Nota do MAL que ainda não se conhece: pedida à parte, com novas tentativas (o detalhe nunca espera por ela). Um pedido por id
+  const hasCurrentScore = currentMalScore !== null;
   useEffect(() => {
-    if (!currentMalId) return;
-    if (seasonScores[currentSeasonStr]) return;
-    if (currentMalId === data.malId && data.malScore !== undefined) {
-      setSeasonScores((prev) => ({
-        ...prev,
-        [currentSeasonStr]: { score: data.malScore!, rank: data.malRank, malId: currentMalId },
-      }));
-      return;
-    }
+    if (!currentMalId || hasCurrentScore) return;
     let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetchMalScore(currentMalId);
-        if (cancelled) return;
-        if (r.score !== null) {
-          setSeasonScores((prev) => ({
-            ...prev,
-            [currentSeasonStr]: { score: r.score!, rank: r.rank, malId: currentMalId },
-          }));
-        }
-      } catch {
-        // silencioso
-      }
-    })();
+    void fetchMalScoreRetrying(currentMalId, () => cancelled).then((r) => {
+      if (r) setMalScores((prev) => ({ ...prev, [currentMalId]: r }));
+    });
     return () => {
       cancelled = true;
     };
-  }, [currentMalId, currentSeasonStr, seasonScores, data.malId, data.malScore, data.malRank]);
+  }, [currentMalId, hasCurrentScore]);
 
   const watchTitle = (preferSolo: boolean) => {
     const title = isSeries && firstEpisode ? `${data.name} · ${episodeTag(firstEpisode.season, firstEpisode.episode)}` : data.name;
@@ -484,17 +457,11 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
                       label={
                         currentMalScore
                           ? `${t('Nota do MyAnimeList')}: ${currentMalScore.score.toFixed(2)}${currentMalScore.rank ? ` · ${t('ranking')} #${currentMalScore.rank}` : ''}`
-                          : malStats
-                            ? `${t('Nota do MyAnimeList')}: ${malStats.score.toFixed(2)}${malStats.rank ? ` · ${t('ranking')} #${malStats.rank}` : ''}`
-                            : t('Abrir no MyAnimeList')
+                          : t('Abrir no MyAnimeList')
                       }
                       icon={<MalIcon />}
                     >
-                      {currentMalScore
-                        ? currentMalScore.score.toFixed(2)
-                        : malStats
-                          ? malStats.score.toFixed(2)
-                          : 'MyAnimeList'}
+                      {currentMalScore ? currentMalScore.score.toFixed(2) : 'MyAnimeList'}
                     </BrandBadge>
                   )}
                 </p>
