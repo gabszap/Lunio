@@ -96,6 +96,10 @@ beforeAll(async () => {
     if (rest.startsWith('/catalog/anime.series/search.anime_series/search=Anime IMDb')) {
       return respond(res, { metas: [{ id: 'mal:99', type: 'series', imdb_id: 'tt0000003', name: 'Outro' }, { id: 'mal:777', type: 'series', imdb_id: 'tt0000002', name: 'Anime IMDb' }, { id: 'mal:778', type: 'series', imdb_id: 'tt0000002', name: 'Anime IMDb 2' }] });
     }
+    // Anime do IMDb com várias entradas no MAL (as de /meta/ ficam mais abaixo): a ordem do id não é a das temporadas
+    if (rest.startsWith('/catalog/anime.series/search.anime_series/search=Anime Longo')) {
+      return respond(res, { metas: [350, 300, 200, 100].map((n) => ({ id: `mal:${n}`, type: 'series', imdb_id: 'tt0000005', name: `Anime Longo ${n}` })) });
+    }
     if (rest.startsWith('/catalog/anime.series/search.anime_series/search=')) {
       return respond(res, { metas: [{ id: 'mal:31240', imdb_id: 'tt5607616', type: 'series', name: 'Re:ZERO (anime)', releaseInfo: '2016', poster: 'https://cdn.myanimelist.net/x.jpg' }] });
     }
@@ -110,6 +114,16 @@ beforeAll(async () => {
     if (rest.startsWith('/catalog/anime/mal.airing')) return respond(res, { metas: [{ id: 'mal:5114', type: 'anime', name: 'Anime A', poster: 'https://cdn.myanimelist.net/x.jpg' }] });
     if (rest.startsWith('/meta/series/tt0000001')) return respond(res, { meta: { id: 'tt0000001', type: 'series', name: 'Link Click', _malId: '5114', videos: [] } });
     if (rest.startsWith('/meta/series/tt0000002')) return respond(res, { meta: { id: 'tt0000002', imdb_id: 'tt0000002', type: 'series', name: 'Anime IMDb', _originalLanguage: 'ja', videos: [] } });
+    // Anime do IMDb com várias entradas no MAL: a ordem do id não é a das temporadas (200 é uma OVA, 300 e 350 são partes da 2ª)
+    if (rest.startsWith('/meta/series/tt0000005')) {
+      return respond(res, { meta: { id: 'tt0000005', imdb_id: 'tt0000005', type: 'series', name: 'Anime Longo', _originalLanguage: 'ja', poster: 'https://image.tmdb.org/ocidental.jpg', videos: [], app_extras: { seasonPosters: { '1': 'https://image.tmdb.org/s1-proprio.jpg' } } } });
+    }
+    if (rest.startsWith('/meta/series/mal%3A100') || rest.startsWith('/meta/series/mal:100')) {
+      return respond(res, { meta: { id: 'mal:100', type: 'series', name: 'Anime Longo T1', poster: 'https://cdn.myanimelist.net/japones.jpg', app_extras: { seasonPosters: { '1': 'https://thetvdb.test/s1.jpg', '2': 'https://thetvdb.test/s2.jpg' } }, videos: [{ id: 'tt0000005:1:1', season: 1, episode: 1 }] } });
+    }
+    if (rest.startsWith('/meta/series/mal%3A200') || rest.startsWith('/meta/series/mal:200')) return respond(res, { meta: { id: 'mal:200', type: 'series', name: 'OVA', videos: [{ id: 'tt0000005:0:1', season: 0, episode: 1 }] } });
+    if (rest.startsWith('/meta/series/mal%3A300') || rest.startsWith('/meta/series/mal:300')) return respond(res, { meta: { id: 'mal:300', type: 'series', name: 'T2 parte 1', videos: [{ id: 'tt0000005:2:1', season: 2, episode: 1 }] } });
+    if (rest.startsWith('/meta/series/mal%3A350') || rest.startsWith('/meta/series/mal:350')) return respond(res, { meta: { id: 'mal:350', type: 'series', name: 'T2 parte 2', videos: [{ id: 'tt0000005:2:13', season: 2, episode: 13 }] } });
     if (rest.startsWith('/meta/series/tt0000004')) return respond(res, { meta: { id: 'tt0000004', imdb_id: 'tt0000004', type: 'series', name: 'Série Normal', _originalLanguage: 'en', genres: ['Drama'], videos: [] } });
     if (rest.startsWith('/meta/movie/tt0000009')) return respond(res, { meta: { id: 'tt0000009', type: 'movie', name: 'Sem MAL', videos: [] } });
     if (rest.startsWith('/meta/anime/')) {
@@ -421,6 +435,24 @@ describe('/api/catalog/*', () => {
     // o item com o mesmo IMDb e a 1ª temporada na ordem da fonte (mal:777, não o mal:99 de outro IMDb)
     expect(body.meta).toMatchObject({ id: 'tt0000002', malId: '777' });
     expect((await malScore('777')).score).toBe(8.25);
+  });
+
+  it('anime do IMDb com várias entradas no MAL: a temporada vem do meta de cada entrada, não da ordem do id (OVA fica de fora, partes ficam com a de menor id)', async () => {
+    const body = await json(await get('meta?type=series&id=tt0000005'));
+    expect(body.meta.seasonMalIds).toEqual({ '1': '100', '2': '300' }); // pela ordem do id seria 1:100, 2:200 (a OVA), 3:300, 4:350
+    expect(body.meta.malId).toBe('100');
+  });
+
+  it('capas por temporada: as do próprio item valem; as do MAL só preenchem o que falta, e o pôster do item não é trocado', async () => {
+    const body = await json(await get('meta?type=series&id=tt0000005'));
+    expect(body.meta.seasonPosters).toEqual({ '1': 'https://image.tmdb.org/s1-proprio.jpg', '2': 'https://thetvdb.test/s2.jpg' });
+    expect(body.meta.poster).toBe('https://image.tmdb.org/ocidental.jpg');
+  });
+
+  it('o meta de uma entrada do MAL que falha só deixa aquela temporada sem id (o detalhe responde)', async () => {
+    const body = await json(await get('meta?type=series&id=tt0000002')); // mal:777 e mal:778 não têm meta no fake
+    expect(body.meta).toMatchObject({ id: 'tt0000002', malId: '777' });
+    expect(body.meta.seasonMalIds).toBeUndefined();
   });
 
   it('série que não é anime não gasta uma busca nem tem id do MAL', async () => {
