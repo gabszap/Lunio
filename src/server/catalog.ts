@@ -564,12 +564,58 @@ async function resolveMalInfo(type: string, name: string, imdbId: string, season
   }
 }
 
+/** Anos em que cada temporada foi ao ar (pelos episódios com data): ligam a temporada à entrada do MAL. */
+function seasonYearsOf(episodes: CatalogEpisode[]): Record<number, SeasonYears> {
+  const out: Record<number, SeasonYears> = {};
+  for (const e of episodes) {
+    const y = e.released ? Number(e.released.slice(0, 4)) : NaN;
+    if (e.season < 1 || !Number.isInteger(y)) continue;
+    const cur = out[e.season];
+    out[e.season] = cur ? { from: Math.min(cur.from, y), to: Math.max(cur.to, y) } : { from: y, to: y };
+  }
+  return out;
+}
+
+/**
+ * Tem fonte (TMDB, Crunchyroll) que põe o anime inteiro numa temporada só ("1x59"). A TheTVDB, que vem no meta do `mal:`, divide
+ * por temporada (24 + 23 + 12…). Se os episódios do item estão todos numa temporada e a TheTVDB tem mais de uma, cada episódio
+ * recebe temporada, número e id da TheTVDB, na ordem de exibição; título, sinopse e miniatura continuam os do item. Só vale se a
+ * conta fecha (a TheTVDB não pode ter menos) e as datas batem (±3 dias, por causa do fuso); senão volta `undefined` e nada muda.
+ * Os especiais (temporada 0) ficam como estão.
+ */
+export function regroupSeasons(episodes: CatalogEpisode[], tvdbVideos: unknown): CatalogEpisode[] | undefined {
+  const regular = episodes.filter((e) => e.season >= 1);
+  if (regular.length < 2 || new Set(regular.map((e) => e.season)).size !== 1 || !Array.isArray(tvdbVideos)) return undefined;
+  const tvdb = tvdbVideos
+    .map((v: any) => ({ id: str(v?.id, 100), season: Number(v?.season), episode: Number(v?.episode ?? v?.number), released: str(v?.released, 40) }))
+    .filter((v) => v.id && Number.isInteger(v.season) && v.season >= 1 && Number.isInteger(v.episode) && v.episode >= 1)
+    .sort((a, b) => a.season - b.season || a.episode - b.episode);
+  if (new Set(tvdb.map((v) => v.season)).size < 2 || tvdb.length < regular.length) return undefined;
+
+  const ordered = [...regular].sort((a, b) => a.episode - b.episode);
+  const DAY = 86_400_000;
+  let compared = 0;
+  for (let i = 0; i < ordered.length; i++) {
+    const a = Date.parse(ordered[i].released ?? '');
+    const b = Date.parse(tvdb[i].released);
+    if (Number.isNaN(a) || Number.isNaN(b)) continue;
+    compared++;
+    if (Math.abs(a - b) > 3 * DAY) return undefined;
+  }
+  if (compared < Math.ceil(ordered.length / 2)) return undefined;
+
+  const remap = new Map(ordered.map((e, i) => [e, { id: tvdb[i].id, season: tvdb[i].season, episode: tvdb[i].episode }]));
+  return episodes
+    .map((e) => (remap.has(e) ? { ...e, ...remap.get(e)! } : e))
+    .sort((a, b) => a.season - b.season || a.episode - b.episode);
+}
+
 export async function getMeta(type: string, id: string): Promise<{ meta: CatalogMeta; stale: boolean }> {
   const { data, stale } = await fetchCatalogJson(`/meta/${type}/${encodeURIComponent(id)}.json`, 'meta');
   const m = data?.meta;
   const item = toItem({ ...m, id: m?.id ?? id }, type);
   if (!item) throw new CatalogUnavailableError();
-  const episodes: CatalogEpisode[] = (Array.isArray(m?.videos) ? m.videos : [])
+  let episodes: CatalogEpisode[] = (Array.isArray(m?.videos) ? m.videos : [])
     .slice(0, 3000)
     .map((v: any) => ({
       id: str(v?.id, 100),
@@ -591,18 +637,18 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
   // Anime com IMDb: descobre o MyAnimeList de cada temporada. Vale também para o item `mal:`: a fonte devolve a série inteira
   // (todas as temporadas) para qualquer entrada, então a nota e a arte mudam com a temporada escolhida nos dois casos
   if (item.imdbId && looksLikeAnime(m, genres)) {
-    // Anos em que cada temporada foi ao ar (pelos episódios com data): ligam a temporada à entrada do MAL
-    const seasonYears: Record<number, SeasonYears> = {};
-    for (const e of episodes) {
-      const y = e.released ? Number(e.released.slice(0, 4)) : NaN;
-      if (e.season < 1 || !Number.isInteger(y)) continue;
-      const cur = seasonYears[e.season];
-      seasonYears[e.season] = cur ? { from: Math.min(cur.from, y), to: Math.max(cur.to, y) } : { from: y, to: y };
-    }
-    const resolved = await resolveMalInfo(type, item.name, item.imdbId, seasonYears);
+    const resolved = await resolveMalInfo(type, item.name, item.imdbId, seasonYearsOf(episodes));
     if (!malId && resolved.malId) malId = resolved.malId;
     seasonMalIds = resolved.seasonMalIds;
     malMeta = resolved.meta;
+
+    // Anime que o item põe todo numa temporada: divide pelas temporadas da TheTVDB e liga cada nova temporada à sua entrada do MAL
+    const regrouped = regroupSeasons(episodes, malMeta?.videos);
+    if (regrouped) {
+      episodes = regrouped;
+      const again = await resolveMalInfo(type, item.name, item.imdbId, seasonYearsOf(episodes));
+      if (again.seasonMalIds) seasonMalIds = again.seasonMalIds;
+    }
   }
 
   // Capas por temporada (ex.: app_extras.seasonPosters do AIOMetadata ou seasonPosters)

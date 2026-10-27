@@ -451,6 +451,36 @@ describe('/api/catalog/*', () => {
     expect(body.meta.malId).toBe('100');
   });
 
+  it('regroupSeasons: anime inteiro numa temporada vira as temporadas da TheTVDB (formato real de Jujutsu Kaisen)', async () => {
+    const { regroupSeasons } = await import('../catalog');
+    const day = (n: number) => new Date(Date.UTC(2020, 9, 3) + n * 7 * 86_400_000).toISOString();
+    // item: 59 episódios na temporada 1 e um especial; TheTVDB: 24 + 23 + 12 (datas um dia antes, fuso) e um futuro sem data
+    const episodes = [
+      { id: 'tt1:0:1', season: 0, episode: 1, title: 'Especial', released: day(0) },
+      ...Array.from({ length: 59 }, (_, i) => ({ id: `tt1:1:${i + 1}`, season: 1, episode: i + 1, title: `Ep ${i + 1}`, thumbnail: `https://t/${i + 1}.jpg`, released: day(i) })),
+    ];
+    const sizes = [24, 23, 12];
+    const tvdb = sizes.flatMap((n, s) => Array.from({ length: n }, (_, i) => ({ id: `tt1:${s + 1}:${i + 1}`, season: s + 1, episode: i + 1, released: day(sizes.slice(0, s).reduce((a, b) => a + b, 0) + i) })));
+    tvdb.forEach((v) => (v.released = new Date(Date.parse(v.released) - 86_400_000).toISOString()));
+    tvdb.push({ id: 'tt1:4:1', season: 4, episode: 1, released: '' });
+
+    const out = regroupSeasons(episodes, tvdb)!;
+    expect(out).toBeDefined();
+    const count = (s: number) => out.filter((e) => e.season === s).length;
+    expect([count(0), count(1), count(2), count(3)]).toEqual([1, 24, 23, 12]);
+    const ep25 = out.find((e) => e.title === 'Ep 25')!;
+    expect(ep25).toMatchObject({ id: 'tt1:2:1', season: 2, episode: 1, thumbnail: 'https://t/25.jpg' }); // título e miniatura do item
+    expect(out.find((e) => e.title === 'Ep 59')).toMatchObject({ season: 3, episode: 12 });
+    expect(out.find((e) => e.season === 0)!.id).toBe('tt1:0:1');
+
+    // Não mexe quando não dá para ter certeza
+    expect(regroupSeasons(episodes, tvdb.slice(0, 40))).toBeUndefined(); // TheTVDB com menos episódios
+    expect(regroupSeasons(episodes, tvdb.filter((v) => v.season === 1))).toBeUndefined(); // TheTVDB também com uma temporada só
+    expect(regroupSeasons(episodes, tvdb.map((v) => (v.released ? { ...v, released: '2001-01-01T00:00:00.000Z' } : v)))).toBeUndefined(); // datas não batem
+    expect(regroupSeasons(out, tvdb)).toBeUndefined(); // já dividido
+    expect(regroupSeasons(episodes, undefined)).toBeUndefined();
+  });
+
   it('matchSeasonsToMal: entrada de um ano antes da temporada, partes e OVAs (dados reais de JoJo)', async () => {
     const { matchSeasonsToMal } = await import('../catalog');
     // anos em que cada temporada do IMDb foi ao ar e as entradas do MAL (id: ano de estreia)
