@@ -100,7 +100,7 @@ const PosterCard: React.FC<{ item: CatalogItem; onOpen: (item: CatalogItem) => v
   >
     <Poster item={item} className="w-full aspect-[2/3] transition-transform group-hover:-translate-y-0.5" />
     <span className="flex flex-col min-w-0 w-full">
-      <span className="text-[13px] font-semibold text-lu-text truncate">{item.name}</span>
+      <span className="text-[13px] font-semibold text-lu-text truncate" title={item.name}>{item.name}</span>
       <span className="text-[12px] text-lu-muted">
         {showType ? `${isSeriesType(item.type) ? t('Série') : t('Filme')}${item.year ? ` · ${item.year}` : ''}` : item.year || ' '}
       </span>
@@ -253,6 +253,17 @@ async function fetchMalScoreRetrying(malId: string, cancelled: () => boolean): P
   return null;
 }
 
+type ArtSource = 'tvdb' | 'tmdb';
+const ART_SOURCE_KEY = 'lunio_art_source';
+
+function readArtSource(): ArtSource {
+  try {
+    return localStorage.getItem(ART_SOURCE_KEY) === 'tmdb' ? 'tmdb' : 'tvdb';
+  } catch {
+    return 'tvdb';
+  }
+}
+
 const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, onEpisodeChange, addons, onOpenAddons, onBack, onWatch, onPlayStream }) => {
   const [meta, setMeta] = useState<CatalogMeta | null>(null);
   const [error, setError] = useState(false);
@@ -338,7 +349,14 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
 
   // Capa e nota correspondentes à temporada atualmente selecionada
   const currentSeasonStr = String(season);
-  const activePoster = (isSeries && data.seasonPosters?.[currentSeasonStr]) || data.poster || item.poster;
+  const hasAltArt = Boolean(data.altPoster || data.altSeasonPosters);
+  const [artSource, setArtSource] = useState<ArtSource>(readArtSource);
+  const useAlt = hasAltArt && artSource === 'tmdb';
+  const activePoster =
+    (useAlt && ((isSeries && data.altSeasonPosters?.[currentSeasonStr]) || data.altPoster)) ||
+    (isSeries && data.seasonPosters?.[currentSeasonStr]) ||
+    data.poster ||
+    item.poster;
   const currentMalId = (isSeries && data.seasonMalIds?.[currentSeasonStr]) || data.malId;
   const currentMalScore = (currentMalId && malScores[currentMalId]) || null;
 
@@ -427,7 +445,28 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
             <span>{t('Catálogo')}</span>
           </TextButton>
           <div className="flex flex-col sm:flex-row gap-6 sm:gap-10 mt-4 sm:items-end">
-            <Poster item={{ ...data, poster: activePoster }} iconSize={48} className="w-[160px] sm:w-[240px] aspect-[2/3]" />
+            <div className="flex flex-col gap-3 items-start flex-none">
+              <Poster item={{ ...data, poster: activePoster }} iconSize={48} className="w-[160px] sm:w-[240px] aspect-[2/3]" />
+              {hasAltArt && (
+                <PillTabs
+                  size="sm"
+                  label={t('Origem das capas')}
+                  value={artSource}
+                  onChange={(v) => {
+                    setArtSource(v);
+                    try {
+                      localStorage.setItem(ART_SOURCE_KEY, v);
+                    } catch {
+                      /* sem armazenamento: vale só nesta página */
+                    }
+                  }}
+                  options={[
+                    { value: 'tvdb', label: 'TVDB' },
+                    { value: 'tmdb', label: 'TMDB' },
+                  ]}
+                />
+              )}
+            </div>
             <div className="flex-1 min-w-0 flex flex-col gap-3.5 sm:pb-2">
               <span className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-lu-tint text-lu-accent text-[12px] font-semibold self-start">
                 {isSeries ? <Tv size={14} /> : <Film size={14} />}

@@ -380,6 +380,9 @@ export interface CatalogMeta extends CatalogItem {
   malRank?: number;
   /** Capas de cada temporada (da fonte, ex.: AIOMetadata app_extras.seasonPosters). */
   seasonPosters?: Record<string, string>;
+  /** Arte do próprio item (TMDB) quando a do MAL (TheTVDB) a substituiu: o cliente deixa escolher. */
+  altPoster?: string;
+  altSeasonPosters?: Record<string, string>;
   /** Ids do anime no MyAnimeList para cada temporada ("1": "14719", "2": "20899"...). */
   seasonMalIds?: Record<string, string>;
   /** Notas já conhecidas no cache para cada temporada. */
@@ -615,14 +618,21 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
     return out;
   };
   let seasonPosters = posterMap(m);
+  let altPoster: string | undefined;
+  let altSeasonPosters: Record<string, string> | undefined;
 
-  // Título do IMDb: o IMDb/TMDB só traz arte japonesa; a do MAL (TheTVDB, no idioma da fonte: pt, senão inglês) vale no lugar dela,
-  // tanto o pôster da série quanto o de cada temporada. O que o MAL não tem fica com o do próprio item
+  // Título do IMDb: a arte do MAL (TheTVDB, no idioma da fonte: pt, senão inglês) vale no lugar da do TMDB, tanto o pôster da série quanto
+  // o de cada temporada. O que o MAL não tem fica com o do próprio item. A arte do item segue junto (`alt*`) para o cliente poder trocar
   if (malMeta) {
     const western = posterMap(malMeta);
-    if (Object.keys(western).length > 0) seasonPosters = { ...seasonPosters, ...western };
     const westernPoster = httpUrl(malMeta.poster);
-    if (westernPoster) item.poster = westernPoster;
+    const own = seasonPosters;
+    if (Object.keys(western).length > 0) seasonPosters = { ...own, ...western };
+    if (westernPoster) {
+      if (item.poster && item.poster !== westernPoster) altPoster = item.poster;
+      item.poster = westernPoster;
+    }
+    if (Object.keys(own).length > 0 && JSON.stringify(own) !== JSON.stringify(seasonPosters)) altSeasonPosters = own;
   }
 
   // A nota não atrasa o detalhe: vem junto só se já estiver guardada (e sem esperar uma por uma); senão o cliente a pede em /api/catalog/malscore
@@ -647,6 +657,8 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
       malScoredBy: stats?.scoredBy,
       malRank: stats?.rank,
       seasonPosters: Object.keys(seasonPosters).length > 0 ? seasonPosters : undefined,
+      altPoster,
+      altSeasonPosters,
       seasonMalIds,
       seasonMalScores: Object.keys(seasonMalScores).length > 0 ? seasonMalScores : undefined,
       episodes,

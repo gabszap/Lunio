@@ -471,6 +471,9 @@ describe('/api/catalog/*', () => {
   it('item do IMDb: a arte do MAL (ocidental) vale no lugar da japonesa, no pôster da série e no de cada temporada', async () => {
     const body = await json(await get('meta?type=series&id=tt0000005'));
     expect(body.meta.poster).toBe('https://thetvdb.test/serie.jpg');
+    // A arte do próprio item segue junto para o cliente poder trocar
+    expect(body.meta.altPoster).toBe('https://image.tmdb.org/japones.jpg');
+    expect(body.meta.altSeasonPosters['1']).toBe('https://image.tmdb.org/s1-japones.jpg');
     // as temporadas que o MAL tem trocam; a que só o item tem (4) continua com a do item
     expect(body.meta.seasonPosters).toEqual({ '1': 'https://thetvdb.test/s1.jpg', '2': 'https://thetvdb.test/s2.jpg', '3': 'https://thetvdb.test/s3.jpg', '4': 'https://image.tmdb.org/s4-japones.jpg' });
   });
