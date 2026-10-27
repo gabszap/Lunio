@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Bookmark, BookmarkCheck, Check, CheckCheck, ChevronLeft, ChevronRight, Film, Play, Puzzle, Search, SearchX, Star, Tv, Users, X, RefreshCw } from 'lucide-react';
+import { Bookmark, BookmarkCheck, CalendarDays, Check, CheckCheck, ChevronLeft, ChevronRight, Film, Play, Puzzle, Search, SearchX, Star, Tv, Users, X, RefreshCw } from 'lucide-react';
 import {
   CatalogEpisode,
   CatalogItem,
@@ -100,7 +100,7 @@ const PosterCard: React.FC<{ item: CatalogItem; onOpen: (item: CatalogItem) => v
   >
     <Poster item={item} className="w-full aspect-[2/3] transition-transform group-hover:-translate-y-0.5" />
     <span className="flex flex-col min-w-0 w-full">
-      <span className="text-[13px] font-semibold text-lu-text truncate" title={item.name}>{item.name}</span>
+      <span className="text-[13px] font-semibold text-lu-text leading-snug line-clamp-2 break-words" title={item.name}>{item.name}</span>
       <span className="text-[12px] text-lu-muted">
         {showType ? `${isSeriesType(item.type) ? t('Série') : t('Filme')}${item.year ? ` · ${item.year}` : ''}` : item.year || ' '}
       </span>
@@ -936,6 +936,10 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
         <GhostButton onClick={() => setAddonsOpen(true)}>
           <Puzzle size={16} />
           <span>{t('Addons')}</span>
+        </GhostButton>
+        <GhostButton disabled title={t('Em breve')}>
+          <CalendarDays size={16} />
+          <span>{t('Calendário')}</span>
         </GhostButton>
       </div>
       <AddonsPanel open={addonsOpen} onClose={() => setAddonsOpen(false)} onChange={setAddons} />

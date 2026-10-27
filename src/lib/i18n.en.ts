@@ -45,6 +45,7 @@ export const EN: Record<string, string> = {
   "Abrir no MyAnimeList": "Open on MyAnimeList",
   "Nota do MyAnimeList": "MyAnimeList score",
   "Origem das capas": "Cover source",
+  "Calendário": "Calendar",
   "ranking": "rank",
   "Modo de busca": "Search mode",
   "Por grupos": "By group",
