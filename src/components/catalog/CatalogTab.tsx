@@ -352,9 +352,11 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
   const hasAltArt = Boolean(data.altPoster || data.altSeasonPosters);
   const [artSource, setArtSource] = useState<ArtSource>(readArtSource);
   const useAlt = hasAltArt && artSource === 'tmdb';
+  // O TMDB costuma ter capa só da 1ª temporada (a fonte o vê como uma só): as demais usam a da TheTVDB antes de repetir a da série
+  const seasonArt = isSeries ? data.seasonPosters?.[currentSeasonStr] : undefined;
   const activePoster =
-    (useAlt && ((isSeries && data.altSeasonPosters?.[currentSeasonStr]) || data.altPoster)) ||
-    (isSeries && data.seasonPosters?.[currentSeasonStr]) ||
+    (useAlt && ((isSeries && data.altSeasonPosters?.[currentSeasonStr]) || seasonArt || data.altPoster)) ||
+    seasonArt ||
     data.poster ||
     item.poster;
   const currentMalId = (isSeries && data.seasonMalIds?.[currentSeasonStr]) || data.malId;
