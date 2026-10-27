@@ -535,5 +535,6 @@ export const EN: Record<string, string> = {
   "1 addon falhou": "1 addon failed",
   "{n} addons falharam": "{n} addons failed",
   "Colar o link do vídeo": "Paste the video link",
+  "Nenhum addon configurado. Adicione um na aba Catálogo.": "No addons set up. Add one in the Catalog tab.",
   "Os addons não estão disponíveis no Discord. Cole o link do vídeo.": "Addons are not available in Discord. Paste the video link instead.",
 };

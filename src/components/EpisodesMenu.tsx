@@ -8,11 +8,14 @@ import type { StreamOption, StreamTarget } from '../lib/streams';
 import { useStreams } from './catalog/useStreams';
 import { Badge, IconButton, Spinner, cx, useDismiss } from './ui';
 import { t } from '../lib/i18n';
+import { discordManager } from '../lib/discord';
 
 interface EpisodesOverlayProps {
   seriesContext: CatalogSeriesContext;
   open: boolean;
   onClose: () => void;
+  /** Botão que abre o overlay: um clique nele não conta como "fora" (senão o mousedown fecha e o click reabre). */
+  toggleRef?: React.RefObject<HTMLElement | null>;
   onSelectEpisodeStream: (episode: CatalogEpisode, stream: StreamOption) => void;
   isViewer?: boolean;
 }
@@ -27,11 +30,12 @@ export const EpisodesOverlay: React.FC<EpisodesOverlayProps> = ({
   seriesContext,
   open,
   onClose,
+  toggleRef,
   onSelectEpisodeStream,
   isViewer = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  useDismiss(open, onClose, containerRef);
+  useDismiss(open, onClose, containerRef, toggleRef);
 
   const [selectedSeason, setSelectedSeason] = useState<number>(seriesContext.season || 1);
   const [targetEpisode, setTargetEpisode] = useState<CatalogEpisode | null>(null);
@@ -75,7 +79,8 @@ export const EpisodesOverlay: React.FC<EpisodesOverlayProps> = ({
     };
   }, [targetEpisode, seriesContext]);
 
-  const { state: streamsState } = useStreams(addons, streamTarget);
+  const { state: streamsState, retry } = useStreams(addons, streamTarget);
+  const inDiscord = discordManager.isDiscordActivity();
 
   if (!open) return null;
 
@@ -122,14 +127,20 @@ export const EpisodesOverlay: React.FC<EpisodesOverlayProps> = ({
             <span>{t('Voltar aos episódios')}</span>
           </button>
 
-          {streamsState.status === 'loading' && (
+          {inDiscord ? (
+            <p className="m-0 text-center text-[13px] text-lu-muted py-6">{t('Os addons não estão disponíveis no Discord. Cole o link do vídeo.')}</p>
+          ) : addons.length === 0 ? (
+            <p className="m-0 text-center text-[13px] text-lu-muted py-6">{t('Nenhum addon configurado. Adicione um na aba Catálogo.')}</p>
+          ) : null}
+
+          {!inDiscord && addons.length > 0 && streamsState.status === 'loading' && (
             <div className="flex-1 flex flex-col items-center justify-center py-8 gap-2">
               <Spinner size={24} className="text-lu-accent" />
               <span className="text-[13px] text-lu-muted">{t('Buscando streams…')}</span>
             </div>
           )}
 
-          {streamsState.status === 'done' && streamsState.options.length === 0 && (
+          {!inDiscord && addons.length > 0 && streamsState.status === 'done' && streamsState.options.length === 0 && (
             <div className="flex-1 flex items-center justify-center">
               <p className="m-0 text-center text-[13px] text-lu-muted py-6">
                 {t('Nenhum stream encontrado')}
@@ -137,7 +148,16 @@ export const EpisodesOverlay: React.FC<EpisodesOverlayProps> = ({
             </div>
           )}
 
-          {streamsState.options.length > 0 && (
+          {!inDiscord && addons.length > 0 && streamsState.failedSources > 0 && (
+            <div className="flex items-center gap-2 text-[12px] text-lu-muted flex-none">
+              <span>{streamsState.failedSources === 1 ? t('1 addon falhou') : t('{n} addons falharam', { n: streamsState.failedSources })}</span>
+              <button type="button" onClick={retry} className="text-lu-accent hover:text-lu-accent-hover cursor-pointer">
+                {t('Tentar de novo')}
+              </button>
+            </div>
+          )}
+
+          {!inDiscord && streamsState.options.length > 0 && (
             <div className="flex-1 flex flex-col gap-2.5 overflow-y-auto overflow-x-hidden custom-scrollbar pr-1">
               {streamsState.options.map((option) => (
                 <button
@@ -226,7 +246,8 @@ export const EpisodesOverlay: React.FC<EpisodesOverlayProps> = ({
                 <div
                   key={ep.id}
                   role="button"
-                  tabIndex={0}
+                  tabIndex={isViewer ? -1 : 0}
+                  aria-disabled={isViewer}
                   onClick={() => {
                     if (isViewer) return;
                     setTargetEpisode(ep);
@@ -234,12 +255,15 @@ export const EpisodesOverlay: React.FC<EpisodesOverlayProps> = ({
                   onKeyDown={(e) => {
                     if (isViewer) return;
                     if (e.key === 'Enter' || e.key === ' ') {
+                      // Sem isto o Espaço também chegaria aos atalhos do player (play/pause)
                       e.preventDefault();
+                      e.stopPropagation();
                       setTargetEpisode(ep);
                     }
                   }}
                   className={cx(
-                    'w-full flex items-center gap-3 p-2 rounded-[14px] text-left transition-all cursor-pointer group select-none',
+                    'w-full flex items-center gap-3 p-2 rounded-[14px] text-left transition-all group select-none',
+                    isViewer ? 'cursor-default' : 'cursor-pointer',
                     isCurrent
                       ? 'bg-lu-tint/70 border border-lu-accent/40 text-lu-text'
                       : 'bg-white/[0.03] hover:bg-white/8 text-lu-text border border-white/5',

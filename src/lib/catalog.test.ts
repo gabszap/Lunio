@@ -1,12 +1,11 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import {
   getWatchedEpisodes,
-  isEpisodeWatched,
   isSeriesType,
   mergeGroups,
+  parseSeriesContext,
   rowTitles,
   seasonOrder,
-  setEpisodeWatched,
   setEpisodesWatched,
   toggleEpisodeWatched,
   type CatalogRow,
@@ -90,36 +89,53 @@ describe('episódios assistidos', () => {
   });
 
   it('episódio começa como não assistido', () => {
-    expect(isEpisodeWatched('ep1')).toBe(false);
+    expect(getWatchedEpisodes().has('ep1')).toBe(false);
   });
 
   it('toggleEpisodeWatched alterna entre assistido e não assistido', () => {
     expect(toggleEpisodeWatched('ep1')).toBe(true);
-    expect(isEpisodeWatched('ep1')).toBe(true);
     expect(getWatchedEpisodes().has('ep1')).toBe(true);
 
     expect(toggleEpisodeWatched('ep1')).toBe(false);
-    expect(isEpisodeWatched('ep1')).toBe(false);
     expect(getWatchedEpisodes().has('ep1')).toBe(false);
-  });
-
-  it('setEpisodeWatched define explicitamente o estado', () => {
-    setEpisodeWatched('ep2', true);
-    expect(isEpisodeWatched('ep2')).toBe(true);
-
-    setEpisodeWatched('ep2', false);
-    expect(isEpisodeWatched('ep2')).toBe(false);
   });
 
   it('setEpisodesWatched define múltiplos episódios de uma vez', () => {
     setEpisodesWatched(['ep1', 'ep2', 'ep3'], true);
-    expect(isEpisodeWatched('ep1')).toBe(true);
-    expect(isEpisodeWatched('ep2')).toBe(true);
-    expect(isEpisodeWatched('ep3')).toBe(true);
+    expect([...getWatchedEpisodes()].sort()).toEqual(['ep1', 'ep2', 'ep3']);
 
     setEpisodesWatched(['ep1', 'ep3'], false);
-    expect(isEpisodeWatched('ep1')).toBe(false);
-    expect(isEpisodeWatched('ep2')).toBe(true);
-    expect(isEpisodeWatched('ep3')).toBe(false);
+    expect([...getWatchedEpisodes()]).toEqual(['ep2']);
+  });
+});
+
+describe('parseSeriesContext', () => {
+  const valid = {
+    seriesId: 'tt1',
+    seriesTitle: 'Série',
+    seriesType: 'series',
+    currentEpisodeId: 'tt1:1:2',
+    season: 1,
+    episode: 2,
+    episodes: [
+      { id: 'tt1:1:1', season: 1, episode: 1, title: 'Primeiro' },
+      { id: 'tt1:1:2', season: 1, episode: 2, title: 'Segundo', thumbnail: 'https://x.test/a.jpg' },
+    ],
+  };
+
+  it('aceita um contexto completo', () => {
+    expect(parseSeriesContext(valid)).toMatchObject({ seriesId: 'tt1', currentEpisodeId: 'tt1:1:2', episodes: [{ id: 'tt1:1:1' }, { id: 'tt1:1:2', thumbnail: 'https://x.test/a.jpg' }] });
+  });
+
+  it('forma errada (versão antiga, cortado, não é objeto) vira null em vez de derrubar o player', () => {
+    for (const bad of [null, undefined, 'x', 7, [], {}, { ...valid, episodes: undefined }, { ...valid, episodes: 'x' }, { ...valid, season: 'um' }, { ...valid, currentEpisodeId: 3 }]) {
+      expect(parseSeriesContext(bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  it('descarta só os episódios inválidos e completa o título que falta', () => {
+    const ctx = parseSeriesContext({ ...valid, episodes: [valid.episodes[0], null, { id: '', season: 1, episode: 1 }, { id: 'x', season: 'a', episode: 1 }, { id: 'tt1:1:3', season: 1, episode: 3 }] });
+    expect(ctx?.episodes.map((e) => e.id)).toEqual(['tt1:1:1', 'tt1:1:3']);
+    expect(ctx?.episodes[1].title).toBe('');
   });
 });

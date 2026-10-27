@@ -251,6 +251,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   const [openMenu, setOpenMenuState] = useState<MenuId>(null);
   const subMenuRef = useRef<HTMLDivElement>(null);
   const audioMenuRef = useRef<HTMLDivElement>(null);
+  const episodesToggleRef = useRef<HTMLDivElement>(null);
 
   const setOpenMenu = useCallback(
     (id: MenuId) => {
@@ -317,6 +318,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           seriesContext={seriesContext}
           open={openMenu === 'episodes'}
           onClose={closeMenu}
+          toggleRef={episodesToggleRef}
           onSelectEpisodeStream={onSelectEpisodeStream}
           isViewer={isViewer}
         />
@@ -572,16 +574,17 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             )}
 
             {seriesContext && onSelectEpisodeStream && (
-              <IconButton
-                id="btn-episodes-menu-toggle"
-                label={t('Episódios')}
-                aria-expanded={openMenu === 'episodes'}
-                active={openMenu === 'episodes'}
-                onClick={() => toggleMenu('episodes')}
-                className="hidden sm:inline-flex"
-              >
-                <Tv size={20} />
-              </IconButton>
+              <div ref={episodesToggleRef} className="hidden sm:inline-flex">
+                <IconButton
+                  id="btn-episodes-menu-toggle"
+                  label={t('Episódios')}
+                  aria-expanded={openMenu === 'episodes'}
+                  active={openMenu === 'episodes'}
+                  onClick={() => toggleMenu('episodes')}
+                >
+                  <Tv size={20} />
+                </IconButton>
+              </div>
             )}
 
             <ChapterList

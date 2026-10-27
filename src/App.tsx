@@ -172,17 +172,22 @@ export default function App() {
     }
   }, []);
 
+  /** Série do vídeo em reprodução (menu de episódios): o estado e o `sessionStorage` andam juntos. */
+  const updateSeriesContext = useCallback((ctx: CatalogSeriesContext | null) => {
+    setSeriesContext(ctx);
+    saveActiveSeriesContext(ctx);
+  }, []);
+
   /** Sai da sala de verdade: desconecta, limpa ?room=, descarrega o vídeo e volta para a tela inicial. */
   const leaveToHome = useCallback(() => {
     if (!discordManager.isDiscordActivity()) syncManager.leaveRoom();
     setRoomInUrl(null);
     setCurrentPayload(EMPTY_PAYLOAD);
-    setSeriesContext(null);
-    saveActiveSeriesContext(null);
+    updateSeriesContext(null);
     setPendingSubtitles([]);
     setUnreadChatCount(0);
     goHome('room');
-  }, [goHome]);
+  }, [goHome, updateSeriesContext]);
 
   /** Entra numa sala, pedindo o apelido antes se for preciso. */
   const requestJoin = useCallback(
@@ -366,6 +371,8 @@ export default function App() {
     setAutoPlayNext(false);
     setCurrentPayload(merged);
     setWatchIntent(null);
+    // O menu de episódios só vale para o vídeo que veio de um episódio do catálogo; qualquer outro (link colado, filme, envio) o zera
+    updateSeriesContext(options.seriesContext ?? null);
     if (options.recent) setRecentStreams((prev) => pushRecentStream(prev, merged.url, merged.title || ''));
     logger.info(`[Mídia] Abrindo "${merged.title}"`, { url: merged.url });
 
@@ -386,10 +393,6 @@ export default function App() {
 
   /** Um stream escolhido no detalhe do catálogo ("Onde assistir"): cria a sala e abre o player. */
   const playStream = (stream: StreamOption, title: string, context?: CatalogSeriesContext) => {
-    if (context) {
-      setSeriesContext(context);
-      saveActiveSeriesContext(context);
-    }
     const { mimeType, isMkv } = streamMediaInfo(stream.url, stream.filename);
     commitMedia(
       {
@@ -401,7 +404,8 @@ export default function App() {
         audioTracks: [],
         isMkv,
       },
-      'room'
+      'room',
+      { seriesContext: context }
     );
   };
 
@@ -414,8 +418,6 @@ export default function App() {
         season: episode.season,
         episode: episode.episode,
       };
-      setSeriesContext(updated);
-      saveActiveSeriesContext(updated);
       const title = `${updated.seriesTitle} · ${episodeTag(episode.season, episode.episode)}`;
       playStream(stream, title, updated);
     } else {
@@ -439,6 +441,7 @@ export default function App() {
     logger.info(`[Fila] Tocando "${item.title}"`);
     setPendingSubtitles([]);
     setAutoPlayNext(true);
+    updateSeriesContext(null); // item da fila não vem do catálogo: sem menu de episódios
     setCurrentPayload(payload);
     emitCurrentMedia(payload);
   };

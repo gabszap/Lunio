@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { submitName } from './helpers';
+import { FIXTURE_URL, submitName } from './helpers';
 
 const ADDON_PORT = 3102;
 const MANIFEST_URL = `http://127.0.0.1:${ADDON_PORT}/manifest.json`;
@@ -238,6 +238,82 @@ test.describe('Streams no detalhe (Onde assistir)', () => {
     await page.goto('/detail/movie/tt1');
     await page.getByRole('button', { name: 'Adicionar um addon' }).click();
     await expect(page.getByRole('dialog', { name: 'Addons' })).toBeVisible();
+    await page.close();
+  });
+});
+
+// ───────────── menu de episódios dentro do player ─────────────
+
+/** Abre o episódio 1 pelo detalhe, escolhe o stream H.264 e chega ao player (o contexto da série fica guardado). */
+async function playEpisodeOne(page: Page) {
+  await withAddon(page);
+  await mockTitles(page);
+  await page.goto('/detail/series/tt2/tt2%3A1%3A1');
+  await page.getByRole('button', { name: /Filme\.1080p\.H264\.mkv/ }).click();
+  await submitName(page, 'Ana');
+  await expect(page).toHaveURL(/\?room=[A-Z0-9]+/);
+  await expect(page.locator('video')).toBeAttached();
+}
+
+const episodesToggle = (page: Page) => page.locator('#btn-episodes-menu-toggle');
+const episodesOverlay = (page: Page) => page.locator('#player-episodes-overlay');
+
+test.describe('Menu de episódios no player', () => {
+  test('o botão que abre o overlay também o fecha (o clique não reabre)', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await playEpisodeOne(page);
+    await page.mouse.move(640, 360); // mostra os controles
+
+    await episodesToggle(page).click();
+    await expect(episodesOverlay(page)).toBeVisible();
+    await episodesToggle(page).click();
+    await expect(episodesOverlay(page)).toHaveCount(0);
+    await page.waitForTimeout(300); // um reabrir tardio apareceria aqui
+    await expect(episodesOverlay(page)).toHaveCount(0);
+    await page.close();
+  });
+
+  test('um vídeo que não veio de um episódio (link colado) tira o menu de episódios, mesmo depois de recarregar', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await playEpisodeOne(page);
+    await page.mouse.move(640, 360); // mostra os controles
+    await expect(episodesToggle(page)).toBeVisible();
+
+    // O contexto da série fica no sessionStorage: recarregar a Home o traz de volta ao estado e o link colado tem de descartá-lo
+    await page.goto('/');
+    await page.getByRole('button', { name: /Colar link de stream/ }).click();
+    await page.getByRole('textbox', { name: 'URL do stream' }).fill(FIXTURE_URL);
+    await page.getByRole('button', { name: 'Criar sala' }).click();
+    await submitName(page, 'Ana');
+    await expect(page).toHaveURL(/\?room=[A-Z0-9]+/);
+    await expect(page.locator('video')).toBeAttached();
+    await page.mouse.move(640, 360); // mostra os controles
+    await expect(episodesToggle(page)).toHaveCount(0);
+    await page.close();
+  });
+
+  test('sem addons o escolher episódio explica o que fazer, em vez de ficar em branco', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await playEpisodeOne(page);
+    await page.evaluate(() => localStorage.removeItem('lunio_addons'));
+    await page.mouse.move(640, 360); // mostra os controles
+    await episodesToggle(page).click();
+    await episodesOverlay(page).getByText('Segundo').click();
+    await expect(episodesOverlay(page).getByText('Nenhum addon configurado. Adicione um na aba Catálogo.')).toBeVisible();
+    await page.close();
+  });
+
+  test('Espaço numa linha de episódio abre as fontes e não dá play/pause no vídeo', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await playEpisodeOne(page);
+    await page.mouse.move(640, 360); // mostra os controles
+    await episodesToggle(page).click();
+    const before = await page.locator('video').evaluate((v: HTMLVideoElement) => v.paused);
+
+    await episodesOverlay(page).getByRole('button', { name: /Segundo/ }).focus();
+    await page.keyboard.press('Space');
+    await expect(episodesOverlay(page).getByText('Escolha uma fonte para assistir')).toBeVisible();
+    expect(await page.locator('video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(before);
     await page.close();
   });
 });

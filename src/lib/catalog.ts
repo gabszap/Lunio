@@ -237,50 +237,12 @@ export function getWatchedEpisodes(): Set<string> {
   }
 }
 
-export function isEpisodeWatched(episodeId: string): boolean {
-  return getWatchedEpisodes().has(episodeId);
-}
-
-export function toggleEpisodeWatched(episodeId: string): boolean {
-  const watched = getWatchedEpisodes();
-  const next = !watched.has(episodeId);
-  if (next) {
-    watched.add(episodeId);
-  } else {
-    watched.delete(episodeId);
-  }
-  try {
-    localStorage.setItem(WATCHED_EPISODES_KEY, JSON.stringify(Array.from(watched)));
-    window.dispatchEvent(new CustomEvent(WATCHED_CHANGE_EVENT));
-  } catch {
-    // armazenamento indisponível
-  }
-  return next;
-}
-
-export function setEpisodeWatched(episodeId: string, isWatched: boolean): void {
-  const watched = getWatchedEpisodes();
-  if (isWatched) {
-    watched.add(episodeId);
-  } else {
-    watched.delete(episodeId);
-  }
-  try {
-    localStorage.setItem(WATCHED_EPISODES_KEY, JSON.stringify(Array.from(watched)));
-    window.dispatchEvent(new CustomEvent(WATCHED_CHANGE_EVENT));
-  } catch {
-    // armazenamento indisponível
-  }
-}
-
+/** Marca (ou desmarca) vários episódios de uma vez e avisa as telas abertas. */
 export function setEpisodesWatched(episodeIds: string[], isWatched: boolean): void {
   const watched = getWatchedEpisodes();
   for (const id of episodeIds) {
-    if (isWatched) {
-      watched.add(id);
-    } else {
-      watched.delete(id);
-    }
+    if (isWatched) watched.add(id);
+    else watched.delete(id);
   }
   try {
     localStorage.setItem(WATCHED_EPISODES_KEY, JSON.stringify(Array.from(watched)));
@@ -288,6 +250,13 @@ export function setEpisodesWatched(episodeIds: string[], isWatched: boolean): vo
   } catch {
     // armazenamento indisponível
   }
+}
+
+/** Alterna um episódio e devolve o novo estado (`true` = assistido). */
+export function toggleEpisodeWatched(episodeId: string): boolean {
+  const next = !getWatchedEpisodes().has(episodeId);
+  setEpisodesWatched([episodeId], next);
+  return next;
 }
 
 export function useWatchedEpisodes() {
@@ -321,10 +290,44 @@ export function saveActiveSeriesContext(ctx: CatalogSeriesContext | null): void 
   }
 }
 
+/** Confere o que veio do `sessionStorage` (pode ser de uma versão antiga ou estar cortado): forma errada vira `null`, episódio inválido é descartado. */
+export function parseSeriesContext(value: unknown): CatalogSeriesContext | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  const text = (x: unknown) => (typeof x === 'string' ? x : null);
+  const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+  const seriesId = text(v.seriesId);
+  const seriesTitle = text(v.seriesTitle);
+  const seriesType = text(v.seriesType);
+  const currentEpisodeId = text(v.currentEpisodeId);
+  const season = num(v.season);
+  const episode = num(v.episode);
+  if (seriesId === null || seriesTitle === null || seriesType === null || currentEpisodeId === null || season === null || episode === null) return null;
+  if (!Array.isArray(v.episodes)) return null;
+  const episodes: CatalogSeriesContext['episodes'] = [];
+  for (const raw of v.episodes) {
+    const e = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const id = text(e.id);
+    const s = num(e.season);
+    const n = num(e.episode);
+    if (!id || s === null || n === null) continue;
+    episodes.push({
+      id,
+      season: s,
+      episode: n,
+      title: text(e.title) ?? '',
+      overview: text(e.overview) ?? undefined,
+      thumbnail: text(e.thumbnail) ?? undefined,
+      released: text(e.released) ?? undefined,
+    });
+  }
+  return { seriesId, seriesTitle, seriesType, currentEpisodeId, season, episode, episodes };
+}
+
 export function loadActiveSeriesContext(): CatalogSeriesContext | null {
   try {
     const raw = sessionStorage.getItem(ACTIVE_SERIES_CONTEXT_KEY);
-    return raw ? JSON.parse(raw) : null;
+    return raw ? parseSeriesContext(JSON.parse(raw)) : null;
   } catch {
     return null;
   }
