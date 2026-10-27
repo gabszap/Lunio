@@ -473,67 +473,89 @@ interface ResolvedMalInfo {
   malId?: string;
   /** Temporada do IMDb ("1", "2"…) -> id do MyAnimeList da entrada que a representa. */
   seasonMalIds?: Record<string, string>;
-  /** Meta da fonte do anime principal no MAL (já lido aqui: serve para as capas por temporada sem outro pedido). */
+  /** Meta da fonte do anime no MAL (arte ocidental da TheTVDB; já lida aqui para as capas, sem outro pedido). */
   meta?: any;
 }
 
-/** Quantas entradas do MAL com o mesmo IMDb se examinam (o resto é OVA, filme, especial…). */
-const MAX_MAL_ENTRIES = 12;
+/** Ano em que a entrada estreou (`releaseInfo` "2012-2013", "2014", "2026-"). */
+function startYearOf(raw: any): number | undefined {
+  const m = /(19|20)\d{2}/.exec(String(raw?.releaseInfo ?? raw?.year ?? ''));
+  return m ? Number(m[0]) : undefined;
+}
+
+/** Anos em que uma temporada do IMDb foi ao ar (do primeiro ao último episódio com data). */
+export interface SeasonYears {
+  from: number;
+  to: number;
+}
+
+/**
+ * Liga cada temporada do IMDb à entrada do MyAnimeList que a representa. A fonte devolve o mesmo meta (a série inteira, todas
+ * as temporadas) para qualquer `mal:<id>` do mesmo IMDb, então o meta não diz qual entrada é qual temporada; o que diferencia as
+ * entradas é o ano de estreia (`releaseInfo` na busca). Cada entrada vai para a temporada em cujos anos ela cai (ou, fora de
+ * todas, para a mais próxima, no máximo 1 ano); uma temporada com várias entradas (partes, OVAs) fica com a que estreou primeiro
+ * (empate: o menor id). A ordem do id do MAL não vale: há OVAs, filmes e partes no meio.
+ */
+export function matchSeasonsToMal(seasons: Record<number, SeasonYears>, entries: Array<{ id: string; year?: number }>): Record<string, string> {
+  const numbers = Object.keys(seasons).map(Number).filter((s) => s >= 1).sort((a, b) => a - b);
+  const claimed = new Map<number, Array<{ id: string; year: number }>>();
+  for (const e of entries) {
+    if (e.year === undefined) continue;
+    let best: { season: number; dist: number } | undefined;
+    for (const s of numbers) {
+      const { from, to } = seasons[s];
+      const dist = e.year < from ? from - e.year : e.year > to ? e.year - to : 0;
+      // Mais perto vence; dentro de mais de uma temporada (ano de virada), a que começou por último
+      if (dist <= 1 && (!best || dist < best.dist || (dist === best.dist && dist === 0))) best = { season: s, dist };
+    }
+    if (best) claimed.set(best.season, [...(claimed.get(best.season) ?? []), { id: e.id, year: e.year }]);
+  }
+  const out: Record<string, string> = {};
+  for (const [season, list] of claimed) {
+    list.sort((a, b) => a.year - b.year || Number(a.id) - Number(b.id));
+    out[String(season)] = list[0].id;
+  }
+  return out;
+}
 
 /**
  * O IMDb não diz qual é o anime no MyAnimeList. Os itens do catálogo de busca de anime da fonte trazem os dois ids
- * (`mal:<id>` com o `imdb_id` junto): procura pelo nome e fica com os que têm o mesmo IMDb. A ordem do id do MAL **não** é a
- * ordem das temporadas (há OVAs, filmes e partes no meio), então a temporada de cada entrada vem do próprio meta dela: os
- * episódios de um `mal:<id>` trazem a temporada do IMDb (`tt…:<temporada>:<episódio>`). Entrada sem temporada >= 1 (OVA,
- * especial) não vira temporada; duas entradas na mesma temporada (partes de uma temporada): fica a de menor id.
+ * (`mal:<id>` com o `imdb_id` junto): procura pelo nome e fica com os que têm o mesmo IMDb. `seasons` (os anos em que foi ao ar
+ * cada temporada do IMDb) liga cada uma à sua entrada. A entrada principal é a da 1ª temporada (ou, sem mapa, a de menor id).
  */
-async function resolveMalInfo(type: string, name: string, imdbId: string): Promise<ResolvedMalInfo> {
+async function resolveMalInfo(type: string, name: string, imdbId: string, seasons: Record<number, SeasonYears> = {}): Promise<ResolvedMalInfo> {
   try {
     const wanted = type === 'movie' ? 'movie' : 'series';
     const manifest = await getManifest();
     const catalogs = manifest.searchCatalogs.filter((c) => c.type.startsWith('anime') && (c.type === 'anime' || c.type.includes(wanted))).slice(0, 2);
-    const ids: string[] = [];
+    const entries: Array<{ id: string; year?: number }> = [];
+    // O meta de um `mal:` traz o nome da série com o ano ("Série (2012)"), que não acha as outras temporadas na busca
+    const query = name.replace(/\s*\(\d{4}\)\s*$/, '').slice(0, 100) || name.slice(0, 100);
 
     for (const c of catalogs) {
-      const { data } = await fetchCatalogJson(`/catalog/${c.type}/${encodeURIComponent(c.id)}/search=${encodeURIComponent(name.slice(0, 100))}.json`, 'search');
+      const { data } = await fetchCatalogJson(`/catalog/${c.type}/${encodeURIComponent(c.id)}/search=${encodeURIComponent(query)}.json`, 'search');
       for (const raw of Array.isArray(data?.metas) ? data.metas : []) {
         const item = toItem(raw, c.type);
-        if (item?.imdbId === imdbId && item.id.startsWith('mal:') && /^\d{1,10}$/.test(item.id.slice(4)) && !ids.includes(item.id.slice(4))) ids.push(item.id.slice(4));
+        if (item?.imdbId === imdbId && item.id.startsWith('mal:') && /^\d{1,10}$/.test(item.id.slice(4)) && !entries.some((e) => e.id === item.id.slice(4))) {
+          entries.push({ id: item.id.slice(4), year: startYearOf(raw) });
+        }
       }
-      if (ids.length > 0) break;
+      if (entries.length > 0) break;
     }
-    if (ids.length === 0) return {};
+    if (entries.length === 0) return {};
 
-    // O meta de cada entrada, em paralelo (cada um é guardado em cache); o que falhar fica sem temporada
-    const entries = await Promise.all(
-      ids
-        .sort((a, b) => Number(a) - Number(b))
-        .slice(0, MAX_MAL_ENTRIES)
-        .map(async (id) => {
-          try {
-            const { data } = await fetchCatalogJson(`/meta/${type}/${encodeURIComponent(`mal:${id}`)}.json`, 'meta');
-            const seasons = (Array.isArray(data?.meta?.videos) ? data.meta.videos : [])
-              .map((v: any) => (v?.season === undefined || v?.season === null ? NaN : Number(v.season)))
-              .filter((s: number) => Number.isInteger(s) && s >= 1);
-            return { id, meta: data?.meta, season: seasons.length > 0 ? Math.min(...seasons) : undefined };
-          } catch {
-            return { id, meta: undefined, season: undefined };
-          }
-        })
-    );
+    const mapped = matchSeasonsToMal(seasons, entries);
+    const firstSeason = Object.keys(mapped).map(Number).sort((a, b) => a - b)[0];
+    // Sem temporadas ligadas, a entrada de menor id (como antes) é a principal
+    const malId = firstSeason !== undefined ? mapped[String(firstSeason)] : entries.map((e) => e.id).sort((a, b) => Number(a) - Number(b))[0];
 
-    const seasonMalIds: Record<string, string> = {};
-    for (const e of entries) {
-      if (e.season !== undefined && !seasonMalIds[String(e.season)]) seasonMalIds[String(e.season)] = e.id; // `entries` já está em ordem de id
+    let meta: any;
+    try {
+      meta = (await fetchCatalogJson(`/meta/${type}/${encodeURIComponent(`mal:${malId}`)}.json`, 'meta')).data?.meta;
+    } catch {
+      // sem o meta do MAL só ficam as capas do próprio item
     }
-    const firstSeason = Object.keys(seasonMalIds).map(Number).sort((a, b) => a - b)[0];
-    // Sem temporadas conhecidas, a entrada de menor id (como antes) é a principal
-    const malId = firstSeason !== undefined ? seasonMalIds[String(firstSeason)] : entries[0].id;
-    return {
-      malId,
-      seasonMalIds: firstSeason !== undefined ? seasonMalIds : undefined,
-      meta: entries.find((e) => e.id === malId)?.meta,
-    };
+    return { malId, seasonMalIds: firstSeason !== undefined ? mapped : undefined, meta };
   } catch {
     return {}; // sem o id do MAL o detalhe só fica sem a nota
   }
@@ -563,9 +585,18 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
   let seasonMalIds: Record<string, string> | undefined;
   let malMeta: any;
 
-  // Título do IMDb (tt…) que é anime: descobre o MyAnimeList da série e o de cada temporada. Item `mal:` já é uma entrada só.
-  if (id.startsWith('tt') && item.imdbId && looksLikeAnime(m, genres)) {
-    const resolved = await resolveMalInfo(type, item.name, item.imdbId);
+  // Anime com IMDb: descobre o MyAnimeList de cada temporada. Vale também para o item `mal:`: a fonte devolve a série inteira
+  // (todas as temporadas) para qualquer entrada, então a nota e a arte mudam com a temporada escolhida nos dois casos
+  if (item.imdbId && looksLikeAnime(m, genres)) {
+    // Anos em que cada temporada foi ao ar (pelos episódios com data): ligam a temporada à entrada do MAL
+    const seasonYears: Record<number, SeasonYears> = {};
+    for (const e of episodes) {
+      const y = e.released ? Number(e.released.slice(0, 4)) : NaN;
+      if (e.season < 1 || !Number.isInteger(y)) continue;
+      const cur = seasonYears[e.season];
+      seasonYears[e.season] = cur ? { from: Math.min(cur.from, y), to: Math.max(cur.to, y) } : { from: y, to: y };
+    }
+    const resolved = await resolveMalInfo(type, item.name, item.imdbId, seasonYears);
     if (!malId && resolved.malId) malId = resolved.malId;
     seasonMalIds = resolved.seasonMalIds;
     malMeta = resolved.meta;
@@ -585,13 +616,13 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
   };
   let seasonPosters = posterMap(m);
 
-  // Título do IMDb: as capas ocidentais (TheTVDB) vêm do meta do anime no MAL, já lido acima. Só preenche o que o item não tem
+  // Título do IMDb: o IMDb/TMDB só traz arte japonesa; a do MAL (TheTVDB, no idioma da fonte: pt, senão inglês) vale no lugar dela,
+  // tanto o pôster da série quanto o de cada temporada. O que o MAL não tem fica com o do próprio item
   if (malMeta) {
     const western = posterMap(malMeta);
-    if (Object.keys(western).length > 0) {
-      seasonPosters = { ...western, ...seasonPosters };
-      if (!item.poster) item.poster = httpUrl(malMeta.poster) || item.poster;
-    }
+    if (Object.keys(western).length > 0) seasonPosters = { ...seasonPosters, ...western };
+    const westernPoster = httpUrl(malMeta.poster);
+    if (westernPoster) item.poster = westernPoster;
   }
 
   // A nota não atrasa o detalhe: vem junto só se já estiver guardada (e sem esperar uma por uma); senão o cliente a pede em /api/catalog/malscore

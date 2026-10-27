@@ -97,8 +97,11 @@ beforeAll(async () => {
       return respond(res, { metas: [{ id: 'mal:99', type: 'series', imdb_id: 'tt0000003', name: 'Outro' }, { id: 'mal:777', type: 'series', imdb_id: 'tt0000002', name: 'Anime IMDb' }, { id: 'mal:778', type: 'series', imdb_id: 'tt0000002', name: 'Anime IMDb 2' }] });
     }
     // Anime do IMDb com várias entradas no MAL (as de /meta/ ficam mais abaixo): a ordem do id não é a das temporadas
-    if (rest.startsWith('/catalog/anime.series/search.anime_series/search=Anime Longo')) {
-      return respond(res, { metas: [350, 300, 200, 100].map((n) => ({ id: `mal:${n}`, type: 'series', imdb_id: 'tt0000005', name: `Anime Longo ${n}` })) });
+    // Só o nome sem o ano acha as entradas (o meta de um mal: chama a série de "Anime Longo (2012)")
+    if (rest === '/catalog/anime.series/search.anime_series/search=Anime Longo.json') {
+      const entry = (n: number, releaseInfo: string, imdb: string | null = 'tt0000005') => ({ id: `mal:${n}`, type: 'series', imdb_id: imdb, name: `Anime Longo ${n}`, releaseInfo });
+      // 100 = T1 (2012), 200 = OVA do mesmo ano (id maior), 300/350 = T2 em duas partes (2014 e 2015), 400 = T3 (2016), 999 = outro IMDb
+      return respond(res, { metas: [entry(400, '2016'), entry(350, '2015'), entry(300, '2014-2015'), entry(200, '2012'), entry(100, '2012-2013'), entry(999, '2012', 'tt0000999')] });
     }
     if (rest.startsWith('/catalog/anime.series/search.anime_series/search=')) {
       return respond(res, { metas: [{ id: 'mal:31240', imdb_id: 'tt5607616', type: 'series', name: 'Re:ZERO (anime)', releaseInfo: '2016', poster: 'https://cdn.myanimelist.net/x.jpg' }] });
@@ -116,14 +119,18 @@ beforeAll(async () => {
     if (rest.startsWith('/meta/series/tt0000002')) return respond(res, { meta: { id: 'tt0000002', imdb_id: 'tt0000002', type: 'series', name: 'Anime IMDb', _originalLanguage: 'ja', videos: [] } });
     // Anime do IMDb com várias entradas no MAL: a ordem do id não é a das temporadas (200 é uma OVA, 300 e 350 são partes da 2ª)
     if (rest.startsWith('/meta/series/tt0000005')) {
-      return respond(res, { meta: { id: 'tt0000005', imdb_id: 'tt0000005', type: 'series', name: 'Anime Longo', _originalLanguage: 'ja', poster: 'https://image.tmdb.org/ocidental.jpg', videos: [], app_extras: { seasonPosters: { '1': 'https://image.tmdb.org/s1-proprio.jpg' } } } });
+      const ep = (season: number, n: number, released: string) => ({ id: `tt0000005:${season}:${n}`, season, episode: n, released });
+      return respond(res, { meta: {
+        id: 'tt0000005', imdb_id: 'tt0000005', type: 'series', name: 'Anime Longo', _originalLanguage: 'ja', poster: 'https://image.tmdb.org/japones.jpg',
+        app_extras: { seasonPosters: { '1': 'https://image.tmdb.org/s1-japones.jpg', '2': 'https://image.tmdb.org/s2-japones.jpg', '3': 'https://image.tmdb.org/s3-japones.jpg', '4': 'https://image.tmdb.org/s4-japones.jpg' } },
+        videos: [ep(1, 1, '2012-10-06T11:00:00.000Z'), ep(1, 2, '2013-03-30T11:00:00.000Z'), ep(2, 1, '2014-04-05T11:00:00.000Z'), ep(2, 13, '2015-01-10T11:00:00.000Z'), ep(3, 1, '2016-04-01T11:00:00.000Z'), ep(0, 1, '2013-01-01T11:00:00.000Z')],
+      } });
     }
-    if (rest.startsWith('/meta/series/mal%3A100') || rest.startsWith('/meta/series/mal:100')) {
-      return respond(res, { meta: { id: 'mal:100', type: 'series', name: 'Anime Longo T1', poster: 'https://cdn.myanimelist.net/japones.jpg', app_extras: { seasonPosters: { '1': 'https://thetvdb.test/s1.jpg', '2': 'https://thetvdb.test/s2.jpg' } }, videos: [{ id: 'tt0000005:1:1', season: 1, episode: 1 }] } });
+    // Qualquer entrada do MAL devolve a série inteira, com a arte ocidental (TheTVDB): não diz qual entrada é qual temporada
+    const malEntry = /^\/meta\/series\/mal(?:%3A|:)(100|200|300|350|400)/.exec(rest);
+    if (malEntry) {
+      return respond(res, { meta: { id: `mal:${malEntry[1]}`, imdb_id: 'tt0000005', type: 'series', name: 'Anime Longo (2012)', poster: 'https://thetvdb.test/serie.jpg', app_extras: { seasonPosters: { '1': 'https://thetvdb.test/s1.jpg', '2': 'https://thetvdb.test/s2.jpg', '3': 'https://thetvdb.test/s3.jpg' } }, _originalLanguage: 'ja', videos: [{ id: 'tt0000005:1:1', season: 1, episode: 1, released: '2012-10-06T07:00:00.000Z' }, { id: 'tt0000005:2:1', season: 2, episode: 1, released: '2014-04-05T07:00:00.000Z' }, { id: 'tt0000005:3:1', season: 3, episode: 1, released: '2016-04-01T07:00:00.000Z' }] } });
     }
-    if (rest.startsWith('/meta/series/mal%3A200') || rest.startsWith('/meta/series/mal:200')) return respond(res, { meta: { id: 'mal:200', type: 'series', name: 'OVA', videos: [{ id: 'tt0000005:0:1', season: 0, episode: 1 }] } });
-    if (rest.startsWith('/meta/series/mal%3A300') || rest.startsWith('/meta/series/mal:300')) return respond(res, { meta: { id: 'mal:300', type: 'series', name: 'T2 parte 1', videos: [{ id: 'tt0000005:2:1', season: 2, episode: 1 }] } });
-    if (rest.startsWith('/meta/series/mal%3A350') || rest.startsWith('/meta/series/mal:350')) return respond(res, { meta: { id: 'mal:350', type: 'series', name: 'T2 parte 2', videos: [{ id: 'tt0000005:2:13', season: 2, episode: 13 }] } });
     if (rest.startsWith('/meta/series/tt0000004')) return respond(res, { meta: { id: 'tt0000004', imdb_id: 'tt0000004', type: 'series', name: 'Série Normal', _originalLanguage: 'en', genres: ['Drama'], videos: [] } });
     if (rest.startsWith('/meta/movie/tt0000009')) return respond(res, { meta: { id: 'tt0000009', type: 'movie', name: 'Sem MAL', videos: [] } });
     if (rest.startsWith('/meta/anime/')) {
@@ -437,19 +444,38 @@ describe('/api/catalog/*', () => {
     expect((await malScore('777')).score).toBe(8.25);
   });
 
-  it('anime do IMDb com várias entradas no MAL: a temporada vem do meta de cada entrada, não da ordem do id (OVA fica de fora, partes ficam com a de menor id)', async () => {
+  it('anime do IMDb com várias entradas no MAL: cada temporada fica com a entrada que estreou no mesmo ano, não com a ordem do id (OVA e partes sobram)', async () => {
     const body = await json(await get('meta?type=series&id=tt0000005'));
-    expect(body.meta.seasonMalIds).toEqual({ '1': '100', '2': '300' }); // pela ordem do id seria 1:100, 2:200 (a OVA), 3:300, 4:350
+    // pela ordem do id seriam 1:100, 2:200 (a OVA), 3:300, 4:350; pelo ano: T1 2012 -> 100 (a OVA 200 é do mesmo ano, mas com id maior), T2 2014 -> 300, T3 2016 -> 400
+    expect(body.meta.seasonMalIds).toEqual({ '1': '100', '2': '300', '3': '400' });
     expect(body.meta.malId).toBe('100');
   });
 
-  it('capas por temporada: as do próprio item valem; as do MAL só preenchem o que falta, e o pôster do item não é trocado', async () => {
-    const body = await json(await get('meta?type=series&id=tt0000005'));
-    expect(body.meta.seasonPosters).toEqual({ '1': 'https://image.tmdb.org/s1-proprio.jpg', '2': 'https://thetvdb.test/s2.jpg' });
-    expect(body.meta.poster).toBe('https://image.tmdb.org/ocidental.jpg');
+  it('matchSeasonsToMal: entrada de um ano antes da temporada, partes e OVAs (dados reais de JoJo)', async () => {
+    const { matchSeasonsToMal } = await import('../catalog');
+    // anos em que cada temporada do IMDb foi ao ar e as entradas do MAL (id: ano de estreia)
+    const seasons = { 1: { from: 2012, to: 2013 }, 2: { from: 2014, to: 2015 }, 3: { from: 2016, to: 2017 }, 4: { from: 2018, to: 2019 }, 5: { from: 2022, to: 2022 }, 6: { from: 2026, to: 2026 } };
+    const entries = [[61469, 2026], [51367, 2022], [48661, 2021], [37991, 2018], [31933, 2016], [26055, 2015], [20899, 2014], [14719, 2012], [53273, 2022]].map(([id, year]) => ({ id: String(id), year }));
+    // a 5ª temporada é a Stone Ocean: a 1ª parte (2021) vence as partes de 2022; a 2ª parte da 2ª temporada (2015) não vira a 3ª
+    expect(matchSeasonsToMal(seasons, entries)).toEqual({ '1': '14719', '2': '20899', '3': '31933', '4': '37991', '5': '48661', '6': '61469' });
+    expect(matchSeasonsToMal({}, entries)).toEqual({});
+    expect(matchSeasonsToMal(seasons, [{ id: '9' }])).toEqual({}); // sem ano na busca, nada a ligar
   });
 
-  it('o meta de uma entrada do MAL que falha só deixa aquela temporada sem id (o detalhe responde)', async () => {
+  it('o item mal: também liga as temporadas (a fonte devolve a série inteira por qualquer entrada) e mantém o próprio id como o principal', async () => {
+    const body = await json(await get(`meta?type=series&id=${encodeURIComponent('mal:300')}`));
+    expect(body.meta.seasonMalIds).toEqual({ '1': '100', '2': '300', '3': '400' });
+    expect(body.meta.malId).toBe('300');
+  });
+
+  it('item do IMDb: a arte do MAL (ocidental) vale no lugar da japonesa, no pôster da série e no de cada temporada', async () => {
+    const body = await json(await get('meta?type=series&id=tt0000005'));
+    expect(body.meta.poster).toBe('https://thetvdb.test/serie.jpg');
+    // as temporadas que o MAL tem trocam; a que só o item tem (4) continua com a do item
+    expect(body.meta.seasonPosters).toEqual({ '1': 'https://thetvdb.test/s1.jpg', '2': 'https://thetvdb.test/s2.jpg', '3': 'https://thetvdb.test/s3.jpg', '4': 'https://image.tmdb.org/s4-japones.jpg' });
+  });
+
+  it('o meta do MAL que falha deixa só as capas do item (o detalhe responde)', async () => {
     const body = await json(await get('meta?type=series&id=tt0000002')); // mal:777 e mal:778 não têm meta no fake
     expect(body.meta).toMatchObject({ id: 'tt0000002', malId: '777' });
     expect(body.meta.seasonMalIds).toBeUndefined();

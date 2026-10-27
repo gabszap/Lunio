@@ -338,7 +338,7 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
 
   // Capa e nota correspondentes à temporada atualmente selecionada
   const currentSeasonStr = String(season);
-  const activePoster = (isSeries && data.seasonPosters?.[currentSeasonStr]) || item.poster || data.poster;
+  const activePoster = (isSeries && data.seasonPosters?.[currentSeasonStr]) || data.poster || item.poster;
   const currentMalId = (isSeries && data.seasonMalIds?.[currentSeasonStr]) || data.malId;
   const currentMalScore = (currentMalId && malScores[currentMalId]) || null;
 
