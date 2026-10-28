@@ -1,4 +1,4 @@
-import { expandLink } from './linkParam';
+import { expandLink, sharedFingerprint } from './linkParam';
 import fs from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { sendApiError, sendJson } from '../http';
@@ -28,7 +28,7 @@ export async function handleHls(req: IncomingMessage, res: ServerResponse) {
       const fingerprint = typeof body.fingerprint === 'string' ? body.fingerprint.slice(0, 200) : undefined;
       const hlsUrl = expandLink(req, res, body.url);
       if (hlsUrl === false) return;
-      const started = await startHls({ url: hlsUrl!, audio, fingerprint });
+      const started = await startHls({ url: hlsUrl!, audio, fingerprint: sharedFingerprint(req, hlsUrl, fingerprint) });
       res.setHeader('Cache-Control', 'no-store');
       return sendJson(res, 200, started);
     }

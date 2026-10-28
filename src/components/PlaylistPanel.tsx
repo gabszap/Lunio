@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GripVertical, ListPlus, ListVideo, Play, X } from 'lucide-react';
 import { syncManager } from '../lib/sync';
-import { detectMimeType, getYouTubeId, validateAndFormatUrl } from '../lib/media';
+import { detectMimeType, getYouTubeId, shareableFingerprint, validateAndFormatUrl } from '../lib/media';
 import { extractCleanTitleFromUrl } from '../lib/recent';
 import { PLAYLIST_MAX_ITEMS, playlistUrlKey, type PlaylistItem } from '../types/sync';
 import { t } from '../lib/i18n';
@@ -52,6 +52,7 @@ export const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ onPlayItem }) => {
     }
     const ytId = getYouTubeId(url);
     const finalUrl = ytId ? `https://www.youtube.com/watch?v=${ytId}` : url;
+    // Só pega o que a pessoa mesma adicionou (dos outros chega um id); quem decide é o servidor
     if (playlist.some((p) => playlistUrlKey(p.url) === playlistUrlKey(finalUrl))) {
       setError(t('Esse vídeo já está na fila.'));
       return;
@@ -66,7 +67,7 @@ export const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ onPlayItem }) => {
       }
       syncManager.emitPlaylistAdd({ url: `https://www.youtube.com/watch?v=${ytId}`, title, mimeType: 'video/youtube' });
     } else {
-      syncManager.emitPlaylistAdd({ url, title: extractCleanTitleFromUrl(url) || 'Stream', mimeType: detectMimeType(url) });
+      syncManager.emitPlaylistAdd({ url, title: extractCleanTitleFromUrl(url) || 'Stream', mimeType: detectMimeType(url), fingerprint: shareableFingerprint(url) });
     }
     setLink('');
     setError('');

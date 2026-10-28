@@ -1,4 +1,4 @@
-import { urlParam } from './linkParam';
+import { sharedFingerprint, urlParam } from './linkParam';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { sendApiError } from '../http';
 import { isBlockedError } from '../security';
@@ -12,7 +12,7 @@ export async function handleSubtitle(req: IncomingMessage, res: ServerResponse) 
     const targetUrl = urlParam(req, res, reqUrl);
     if (targetUrl === false) return; // id de link desconhecido: já respondeu 404
     track = reqUrl.searchParams.get('track');
-    const customFingerprint = (reqUrl.searchParams.get('fingerprint') || '').slice(0, 200) || undefined;
+    const customFingerprint = sharedFingerprint(req, targetUrl, (reqUrl.searchParams.get('fingerprint') || '').slice(0, 200) || undefined);
 
     if (!targetUrl || !track || !/^\d{1,4}$/.test(track)) {
       sendApiError(res, 400, 'bad_request', 'Parâmetros url e track são obrigatórios.');
