@@ -352,10 +352,13 @@ const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, 
   const hasAltArt = Boolean(data.altPoster || data.altSeasonPosters);
   const [artSource, setArtSource] = useState<ArtSource>(readArtSource);
   const useAlt = hasAltArt && artSource === 'tmdb';
-  // O TMDB costuma ter capa só da 1ª temporada (a fonte o vê como uma só): as demais usam a da TheTVDB antes de repetir a da série
+  // O TMDB costuma ter capa só da 1ª temporada (a fonte o vê como uma só) e o pôster da série é o da última: a última usa esse,
+  // as do meio usam a da TheTVDB (nunca repetem o pôster da série)
   const seasonArt = isSeries ? data.seasonPosters?.[currentSeasonStr] : undefined;
+  const lastSeason = seasons.length ? Math.max(...seasons) : undefined;
   const activePoster =
-    (useAlt && ((isSeries && data.altSeasonPosters?.[currentSeasonStr]) || seasonArt || data.altPoster)) ||
+    (useAlt &&
+      ((isSeries && data.altSeasonPosters?.[currentSeasonStr]) || (season === lastSeason && data.altPoster) || seasonArt || data.altPoster)) ||
     seasonArt ||
     data.poster ||
     item.poster;
