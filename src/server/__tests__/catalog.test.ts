@@ -185,6 +185,23 @@ describe('summarizeManifest', () => {
     ]);
   });
 
+  it('Explorar: tudo que só exige gênero entra (com ou sem opções para escolher); busca e outros parâmetros ficam fora', () => {
+    const s = summarizeManifest(MANIFEST);
+    expect(s.discover.map((d) => d.id)).toEqual(['tmdb.popular', 'tmdb.trending', 'mal.airing', 'so-com-genero', 'mal.top_series']);
+    expect(s.discover[0]).toMatchObject({ type: 'movie', genres: ['Ação', 'Drama'], genreRequired: false, paged: true });
+    expect(s.discover[1]).toMatchObject({ genres: [], genreRequired: false, paged: true });
+    expect(s.discover[2].paged).toBe(false); // sem `skip` na lista
+    expect(s.discover[3]).toMatchObject({ genreRequired: true, genres: ['Ação', 'Drama'] });
+    // gênero obrigatório sem nenhuma opção não dá para pedir; "similar"/"calendar"/"va_id" exigem outro parâmetro
+    const t = summarizeManifest({ catalogs: [
+      { type: 'movie', id: 'sem-opcoes', extra: [{ name: 'genre', isRequired: true }] },
+      { type: 'movie', id: 'similar', extra: [{ name: 'similar', isRequired: true }] },
+      { type: 'anime', id: 'va', extra: [{ name: 'va_id', isRequired: true }, { name: 'skip' }] },
+      { type: 'movie', id: 'busca-e-genero', extra: [{ name: 'search' }, { name: 'genre', options: ['A'] }, { name: 'skip' }] },
+    ] });
+    expect(t.discover.map((d) => d.id)).toEqual(['busca-e-genero']);
+  });
+
   it('entende o formato antigo (extraSupported/extraRequired) e o Cinemeta', () => {
     const s = summarizeManifest({ name: 'Cinemeta', catalogs: [{ type: 'movie', id: 'top', name: 'Popular', genres: ['Action'], extraSupported: ['search', 'genre', 'skip'] }, { type: 'movie', id: 'busca', extraRequired: ['search'], extraSupported: ['search'] }] });
     expect(s.rows.map((r) => r.id)).toEqual(['top']);

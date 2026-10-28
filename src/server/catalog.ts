@@ -191,10 +191,26 @@ export interface CatalogDef {
   fixedGenre?: string;
 }
 
+/** Um catálogo da tela Explorar (como o Descobrir do Stremio): só o gênero pode ser obrigatório. */
+export interface DiscoverDef {
+  type: string;
+  id: string;
+  name: string;
+  genres: string[];
+  /** O catálogo só responde com um gênero (sem a opção "nenhum"). */
+  genreRequired: boolean;
+  /** Aceita `skip` (carregar mais ao rolar). */
+  paged: boolean;
+}
+
+const MAX_DISCOVER = 200;
+
 export interface CatalogManifest {
   name: string;
   /** Fileiras para a Home: catálogos que não exigem nenhum parâmetro (como `search`). */
   rows: CatalogDef[];
+  /** Catálogos navegáveis na tela Explorar: não exigem nada além do gênero (inclui os que exigem um gênero). */
+  discover: DiscoverDef[];
   /** Catálogos que respondem a busca. */
   searchCatalogs: Array<{ type: string; id: string; name: string }>;
   isDefault: boolean;
@@ -228,6 +244,7 @@ function extraInfo(cat: any): { supported: Set<string>; required: Set<string>; g
 export function summarizeManifest(manifest: any): Omit<CatalogManifest, 'isDefault' | 'stale'> {
   const rows: CatalogDef[] = [];
   const searchCatalogs: Array<{ type: string; id: string; name: string }> = [];
+  const discover: DiscoverDef[] = [];
   for (const cat of Array.isArray(manifest?.catalogs) ? manifest.catalogs : []) {
     const type = str(cat?.type, 30);
     const id = str(cat?.id, 100);
@@ -235,11 +252,16 @@ export function summarizeManifest(manifest: any): Omit<CatalogManifest, 'isDefau
     const { supported, required, genres } = extraInfo(cat);
     const name = str(cat?.name, 120) || id;
     if (supported.has('search')) searchCatalogs.push({ type, id, name });
+    // Explorar: nenhum parâmetro obrigatório além do gênero (que, sendo obrigatório, precisa ter opções para escolher)
+    const genreRequired = required.has('genre');
+    if (discover.length < MAX_DISCOVER && [...required].every((n) => n === 'genre') && (!genreRequired || genres.length > 0)) {
+      discover.push({ type, id, name, genres, genreRequired, paged: supported.has('skip') });
+    }
     if (required.size === 0) rows.push({ type, id, name, genres });
     // Só o gênero é obrigatório e há uma única opção: dá para pedir a fileira com ela
     else if (required.size === 1 && required.has('genre') && genres.length === 1) rows.push({ type, id, name, genres, fixedGenre: genres[0] });
   }
-  return { name: str(manifest?.name, 80) || 'Catálogo', rows, searchCatalogs };
+  return { name: str(manifest?.name, 80) || 'Catálogo', rows, discover, searchCatalogs };
 }
 
 export async function getManifest(): Promise<CatalogManifest> {

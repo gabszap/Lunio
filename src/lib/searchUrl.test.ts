@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { detailFromPath, detailPath, readDetailFromUrl, readSearchFromUrl, readSeasonFromUrl, writeDetailToUrl, writeSearchToUrl, writeSeasonToUrl } from './searchUrl';
+import { detailFromPath, detailPath, discoverFromUrl, discoverPath, writeDiscoverToUrl, readDetailFromUrl, readSearchFromUrl, readSeasonFromUrl, writeDetailToUrl, writeSearchToUrl, writeSeasonToUrl } from './searchUrl';
 
 describe('readSearchFromUrl', () => {
   it('lê a busca (com acento, dois-pontos e espaço, nas duas formas de codificar)', () => {
@@ -167,5 +167,46 @@ describe('temporada aberta (?season=)', () => {
       writeSeasonToUrl(null);
       expect(current).toBe('/detail/series/mal%3A31240');
     });
+  });
+});
+
+describe('Explorar (/discover/<tipo>/<catálogo>)', () => {
+  let current = '/discover/series/streaming.cru_series';
+  const replaceState = vi.fn((_s: unknown, _t: string, url: string) => {
+    current = url;
+  });
+  beforeEach(() => {
+    current = '/catalog?search=abc';
+    replaceState.mockClear();
+    vi.stubGlobal('window', {
+      get location() {
+        const u = new URL(current, 'https://lunio.test');
+        return { href: u.href, pathname: u.pathname, search: u.search, hash: u.hash };
+      },
+      history: { replaceState },
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('lê tipo, catálogo (com ponto e dois-pontos codificado) e gênero; o resto é null', () => {
+    expect(discoverFromUrl('/discover/series/streaming.cru_series', '')).toEqual({ type: 'series', id: 'streaming.cru_series' });
+    expect(discoverFromUrl('/discover/anime/mal.genres', '?genre=A%C3%A7%C3%A3o')).toEqual({ type: 'anime', id: 'mal.genres', genre: 'Ação' });
+    expect(discoverFromUrl('/discover/movie/a%3Ab', '')).toEqual({ type: 'movie', id: 'a:b' });
+    for (const bad of ['/discover', '/discover/series', '/discover/../x/y', '/discover/Série/x', '/discover/series/a%2Fb', '/catalog', '/detail/series/x']) {
+      expect(discoverFromUrl(bad, ''), bad).toBeNull();
+    }
+    expect(discoverPath({ type: 'anime', id: 'mal:1' })).toBe('/discover/anime/mal%3A1');
+  });
+
+  it('grava o Explorar no lugar da busca e volta a /catalog ao sair', () => {
+    writeDiscoverToUrl({ type: 'series', id: 'streaming.cru_series', genre: 'Ação' });
+    expect(current).toBe('/discover/series/streaming.cru_series?genre=A%C3%A7%C3%A3o');
+    writeDiscoverToUrl({ type: 'series', id: 'streaming.cru_series' }); // sem gênero: sai do endereço
+    expect(current).toBe('/discover/series/streaming.cru_series');
+    writeDiscoverToUrl(null);
+    expect(current).toBe('/catalog');
+    replaceState.mockClear();
+    writeDiscoverToUrl(null); // já fora: não mexe no histórico
+    expect(replaceState).not.toHaveBeenCalled();
   });
 });
