@@ -1,4 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// O idioma é decidido ao carregar o módulo de i18n (pelo navegador): sem isto o CI, em inglês, traduz "agoLabel"
+vi.hoisted(() => {
+  vi.stubGlobal('navigator', { language: 'pt-BR' });
+});
+
 import { agoLabel, clearLastRoom, loadLastRoom, saveLastRoom } from './lastRoom';
 
 describe('lastRoom', () => {
