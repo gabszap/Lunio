@@ -1,16 +1,20 @@
 import { t, msg } from './/i18n';
+import { apiFetch } from './access';
 /**
- * Catálogo de filmes e séries via Cinemeta (addon público de metadados do Stremio).
- * Só metadados: pôster, sinopse, temporadas e episódios. O vídeo em si continua vindo
- * de um link de stream, arquivo, Drive ou YouTube que a pessoa escolhe.
+ * Catálogo de filmes e séries. Quem fala com a fonte (um addon do Stremio configurado em `CATALOG_URL`) é o servidor
+ * (`/api/catalog/*`, com cache); aqui só se consome o que ele devolve. Só metadados: pôster, sinopse, temporadas e
+ * episódios. O vídeo em si continua vindo de um link de stream, arquivo, Drive ou YouTube que a pessoa escolhe.
  */
 
-const BASE = 'https://v3-cinemeta.strem.io';
+/** `movie`, `series`, `anime`… conforme a fonte; `anime` é tratado como série (o Stremio também). */
+export type CatalogType = string;
 
-export type CatalogType = 'movie' | 'series';
+export const isSeriesType = (type: CatalogType) => type !== 'movie';
 
 export interface CatalogItem {
+  /** Id na fonte (`tt…`, `tmdb:…`, `mal:…`): é o que vale para pedir o detalhe. */
   id: string;
+  imdbId?: string;
   type: CatalogType;
   name: string;
   poster?: string;
@@ -33,79 +37,131 @@ export interface CatalogMeta extends CatalogItem {
   runtime?: string;
   background?: string;
   imdbRating?: string;
+  /** Id do anime no MyAnimeList (para o link da página dele). */
+  malId?: string;
+  /** Nota (0–10) no MyAnimeList, votos e posição no ranking (ausentes se a API do MAL não respondeu). */
+  malScore?: number;
+  malScoredBy?: number;
+  malRank?: number;
+  /** A temporada 0 são os especiais. */
   episodes: CatalogEpisode[];
+}
+
+export interface CatalogRow {
+  type: CatalogType;
+  id: string;
+  name: string;
+  genres: string[];
+  /** A fileira exige um gênero e só tem um: ele vai no pedido. */
+  fixedGenre?: string;
+}
+
+/** Resultado da busca em um catálogo de busca da fonte ("Anime Series Search", "Movies Search"…). */
+export interface SearchGroup {
+  type: CatalogType;
+  id: string;
+  name: string;
+  metas: CatalogItem[];
+}
+
+export interface CatalogManifest {
+  name: string;
+  rows: CatalogRow[];
+  isDefault: boolean;
+  /** A fonte está fora do ar e o servidor devolveu a última resposta guardada. */
+  stale: boolean;
 }
 
 const cache = new Map<string, Promise<any>>();
 
+/** GET em `/api/catalog/...`; respostas iguais são reaproveitadas (e uma falha não fica guardada). */
 function getJson<T>(path: string): Promise<T> {
-  const url = `${BASE}${path}`;
-  let p = cache.get(url);
+  let p = cache.get(path);
   if (!p) {
-    p = fetch(url).then((r) => {
-      if (!r.ok) throw new Error(`Cinemeta ${r.status}`);
+    p = apiFetch(`/api/catalog/${path}`).then((r) => {
+      if (!r.ok) throw new Error(`Catálogo ${r.status}`);
       return r.json();
     });
-    p.catch(() => cache.delete(url));
-    cache.set(url, p);
+    p.catch(() => cache.delete(path));
+    cache.set(path, p);
   }
   return p as Promise<T>;
 }
 
-function toItem(m: any, fallbackType: CatalogType): CatalogItem {
-  return {
-    id: m.imdb_id || m.id,
-    type: m.type === 'series' ? 'series' : m.type === 'movie' ? 'movie' : fallbackType,
-    name: m.name,
-    poster: m.poster,
-    year: String(m.releaseInfo || m.year || '').replace(/[–�]/g, '–') || undefined,
-  };
+export function fetchManifest(): Promise<CatalogManifest> {
+  return getJson<CatalogManifest>('manifest');
 }
 
-export async function fetchTop(type: CatalogType, genre?: string): Promise<CatalogItem[]> {
-  const extra = genre ? `/genre=${encodeURIComponent(genre)}` : '';
-  const data = await getJson<{ metas: any[] }>(`/catalog/${type}/top${extra}.json`);
-  return (data.metas || []).filter((m) => m?.name).map((m) => toItem(m, type));
+export async function fetchRow(row: Pick<CatalogRow, 'type' | 'id'> & { fixedGenre?: string }, genre?: string): Promise<CatalogItem[]> {
+  const q = new URLSearchParams({ type: row.type, id: row.id });
+  const g = genre ?? (row as CatalogRow).fixedGenre;
+  if (g) q.set('genre', g);
+  const data = await getJson<{ metas: CatalogItem[] }>(`row?${q}`);
+  return data.metas || [];
 }
 
-export async function searchCatalog(query: string): Promise<CatalogItem[]> {
-  const q = encodeURIComponent(query.trim());
-  const [movies, series] = await Promise.all([
-    getJson<{ metas: any[] }>(`/catalog/movie/top/search=${q}.json`).catch(() => ({ metas: [] })),
-    getJson<{ metas: any[] }>(`/catalog/series/top/search=${q}.json`).catch(() => ({ metas: [] })),
-  ]);
-  const all = [
-    ...(movies.metas || []).map((m) => toItem(m, 'movie')),
-    ...(series.metas || []).map((m) => toItem(m, 'series')),
-  ];
-  return all.filter((m) => m.name);
+/** Um grupo por catálogo de busca da fonte, como no Stremio (grupos sem resultado nem chegam). */
+export async function searchCatalog(query: string): Promise<SearchGroup[]> {
+  const data = await getJson<{ groups: SearchGroup[] }>(`search?${new URLSearchParams({ q: query.trim() })}`);
+  return data.groups || [];
+}
+
+export interface MalScore {
+  /** Nota 0–10 (null: sem nota ainda, ou a API do MAL não respondeu: ver `failed`). */
+  score: number | null;
+  scoredBy?: number;
+  rank?: number;
+  failed: boolean;
+}
+
+const malScores = new Map<string, MalScore>();
+
+/** Nota do anime no MyAnimeList. O servidor já tenta 3 vezes; só respostas boas ficam guardadas aqui. */
+export async function fetchMalScore(malId: string): Promise<MalScore> {
+  const cached = malScores.get(malId);
+  if (cached) return cached;
+  const res = await apiFetch(`/api/catalog/malscore?${new URLSearchParams({ id: malId })}`);
+  if (!res.ok) throw new Error(`Catálogo ${res.status}`);
+  const body = (await res.json()) as MalScore;
+  if (!body.failed) malScores.set(malId, body);
+  return body;
 }
 
 export async function fetchMeta(type: CatalogType, id: string): Promise<CatalogMeta> {
-  const data = await getJson<{ meta: any }>(`/meta/${type}/${id}.json`);
-  const m = data.meta || {};
-  const episodes: CatalogEpisode[] = (m.videos || [])
-    .map((v: any) => ({
-      id: v.id,
-      season: Number(v.season) || 0,
-      episode: Number(v.episode ?? v.number) || 0,
-      title: v.name || v.title || t('Episódio {v1}', { v1: v.episode ?? v.number }),
-      overview: v.overview || v.description,
-      thumbnail: v.thumbnail,
-      released: v.released || v.firstAired,
-    }))
-    .filter((e: CatalogEpisode) => e.season > 0)
-    .sort((a: CatalogEpisode, b: CatalogEpisode) => a.season - b.season || a.episode - b.episode);
+  const data = await getJson<{ meta: CatalogMeta }>(`meta?${new URLSearchParams({ type, id })}`);
+  return data.meta;
+}
 
-  return {
-    ...toItem(m, type),
-    description: m.description,
-    genres: m.genres || m.genre || [],
-    runtime: m.runtime,
-    background: m.background,
-    imdbRating: m.imdbRating,
-    episodes,
-  };
+/**
+ * Busca unificada (a antiga): os grupos num só, na ordem dos catálogos, sem repetir o mesmo título (mesmo IMDb, ou mesmo
+ * nome e ano). O primeiro que aparece fica; as temporadas de um anime com o mesmo IMDb viram um item só.
+ */
+export function mergeGroups(groups: SearchGroup[]): CatalogItem[] {
+  const seen = new Set<string>();
+  const merged: CatalogItem[] = [];
+  for (const group of groups) {
+    for (const item of group.metas) {
+      const key = item.imdbId || `${item.name.toLowerCase()}|${item.year ?? ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+    }
+  }
+  return merged;
+}
+
+/** Fileiras com o mesmo nome (ex.: "Popular" de filmes e de séries) ganham o tipo no título para se distinguirem. */
+export function rowTitles(rows: Array<{ name: string; type: CatalogType }>): string[] {
+  const count = new Map<string, number>();
+  for (const r of rows) count.set(r.name, (count.get(r.name) || 0) + 1);
+  const typeLabel = (type: string) => (type === 'movie' ? t('Filmes') : type === 'series' ? t('Séries') : type === 'anime' ? t('Animes') : type);
+  return rows.map((r) => ((count.get(r.name) || 0) > 1 ? `${r.name} · ${typeLabel(r.type)}` : r.name));
+}
+
+/** Temporadas na ordem de exibição: 1, 2, 3… e os especiais (temporada 0) no fim. */
+export function seasonOrder(seasons: number[]): number[] {
+  const unique = Array.from(new Set(seasons));
+  return [...unique.filter((s) => s >= 1).sort((a, b) => a - b), ...unique.filter((s) => s < 1)];
 }
 
 // ───────────── Minha lista (local) ─────────────
