@@ -5,6 +5,7 @@ import { getCurrentChapter, formatTime } from '../../lib/chapters';
 import { logger } from '../../lib/logger';
 import { sessionManager } from '../../lib/session';
 import { getProgressStorageKey } from './progress';
+import { reportProgress } from '../../lib/continueWatching';
 
 /**
  * Ouve o <video> nativo (imune a dessincronias do Vidstack): tempo, buffer, pause/play, seek, capítulo atual,
@@ -138,6 +139,8 @@ export function useNativeVideoEvents(args: {
           if (total > 0 && actualTotalTime > total * 0.95) localStorage.removeItem(getProgressStorageKey(source.src));
           else localStorage.setItem(getProgressStorageKey(source.src), actualTotalTime.toString());
         } catch {}
+        // O que veio do catálogo também vira "continuar assistindo" (por título e episódio, sem o link)
+        reportProgress(actualTotalTime, totalDurationRef.current);
       }
 
       // Checar transição de capítulo usando a ref mais recente (sem closure defasada nem spam)

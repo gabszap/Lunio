@@ -4,6 +4,7 @@ import {
   CatalogItem,
   CatalogManifest,
   SearchGroup,
+  episodeTag,
   fetchManifest,
   getMyList,
   isSeriesType,
@@ -24,6 +25,7 @@ import { loadAddons, type VideoAddon } from '../../lib/addons';
 import type { StreamOption } from '../../lib/streams';
 import type { CatalogSeriesContext } from '../../types/media';
 import type { WatchIntent } from './types';
+import { CHANGE_EVENT as CONTINUE_CHANGE_EVENT, loadContinue, removeContinue, type CatalogRef, type ContinueEntry } from '../../lib/continueWatching';
 
 export type { WatchIntent } from './types';
 
@@ -35,7 +37,7 @@ interface CatalogTabProps {
   initialSeason?: number | null;
   onWatch: (intent: WatchIntent) => void;
   /** Um stream escolhido na lista "Onde assistir" (o App cria a sala e abre o player). */
-  onPlayStream: (stream: StreamOption, title: string, seriesContext?: CatalogSeriesContext) => void;
+  onPlayStream: (stream: StreamOption, title: string, seriesContext?: CatalogSeriesContext, movie?: CatalogRef) => void;
   onCreateRoom: () => void;
 }
 
@@ -65,6 +67,34 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   // Um link com `?detail=` abre o título direto; os dados completos vêm do detalhe
   const [selected, setSelected] = useState<CatalogItem | null>(() => (initialDetail ? { id: initialDetail.id, type: initialDetail.type, name: '' } : null));
   const [myList, setMyList] = useState<CatalogItem[]>(() => getMyList());
+  /** "Continuar assistindo": o que foi tocado pelo catálogo, com o ponto em que parou (só no navegador). */
+  const [continueList, setContinueList] = useState<ContinueEntry[]>(() => loadContinue());
+  useEffect(() => {
+    const refresh = () => setContinueList(loadContinue());
+    window.addEventListener(CONTINUE_CHANGE_EVENT, refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener(CONTINUE_CHANGE_EVENT, refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
+  const continueItems = useMemo<CatalogItem[]>(
+    () =>
+      continueList.map((e) => ({
+        id: e.id,
+        type: e.type,
+        name: e.name,
+        poster: e.poster,
+        year: e.videoId && e.season !== undefined && e.episode !== undefined ? `${e.next ? `${t('Próximo')} · ` : ''}${episodeTag(e.season, e.episode)}` : undefined,
+      })),
+    [continueList]
+  );
+  const openContinue = (item: CatalogItem) => {
+    const entry = continueList.find((e) => e.type === item.type && e.id === item.id);
+    if (discoverOpen) discoverScroll.current = window.scrollY;
+    setEpisodeId(entry?.videoId ?? null); // abre direto na página do episódio, onde se escolhe o stream de novo
+    setSelected(item);
+  };
   /** As fileiras vêm do manifesto da fonte configurada no servidor (na ordem dela). */
   const [manifest, setManifest] = useState<CatalogManifest | null | 'error'>(null);
   const [manifestTry, setManifestTry] = useState(0);
@@ -321,6 +351,31 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
         )
       ) : (
         <>
+          {continueList.length > 0 && (
+            <Row
+              title={t('Continuar assistindo')}
+              load={async () => continueItems}
+              items={continueItems}
+              onOpen={openContinue}
+              renderItem={(item) => {
+                const entry = continueList.find((e) => e.type === item.type && e.id === item.id);
+                return (
+                  <div className="relative group/continue">
+                    <PosterCard item={item} onOpen={openContinue} progress={entry && !entry.next && entry.duration > 0 ? entry.position / entry.duration : undefined} />
+                    <button
+                      type="button"
+                      aria-label={t('Tirar de Continuar assistindo')}
+                      title={t('Tirar de Continuar assistindo')}
+                      onClick={() => removeContinue(item)}
+                      className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-black/65 text-white border-0 cursor-pointer flex items-center justify-center sm:opacity-0 sm:group-hover/continue:opacity-100 focus-visible:opacity-100 hover:bg-black/85"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                );
+              }}
+            />
+          )}
           {myList.length > 0 && <Row title={t('Minha lista')} load={async () => myList} items={myList} onOpen={openItem} />}
           <HomeRows manifest={manifest} onOpen={openItem} onRetry={() => setManifestTry((n) => n + 1)} onCreateRoom={onCreateRoom} />
         </>

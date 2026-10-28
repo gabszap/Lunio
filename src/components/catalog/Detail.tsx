@@ -22,6 +22,7 @@ import { StreamList } from './StreamList';
 import { type VideoAddon } from '../../lib/addons';
 import type { StreamOption } from '../../lib/streams';
 import type { CatalogSeriesContext } from '../../types/media';
+import type { CatalogRef } from '../../lib/continueWatching';
 import { discordManager } from '../../lib/discord';
 import type { WatchIntent } from './types';
 import { Poster, gradientFor } from './Poster';
@@ -37,7 +38,8 @@ interface DetailProps {
   onOpenAddons: () => void;
   onBack: () => void;
   onWatch: (intent: WatchIntent) => void;
-  onPlayStream: (stream: StreamOption, title: string, seriesContext?: CatalogSeriesContext) => void;
+  /** Filme: sem contexto de série, mas com o título (para o "continuar assistindo"). */
+  onPlayStream: (stream: StreamOption, title: string, seriesContext?: CatalogSeriesContext, movie?: CatalogRef) => void;
 }
 
 /** Nota do MyAnimeList com novas tentativas (a API pode estar fria ou limitando). `null`: sem nota, desistiu ou foi cancelado. */
@@ -190,13 +192,14 @@ export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, epis
                 seriesId: item.id,
                 seriesTitle: data.name,
                 seriesType: item.type,
+                seriesPoster: data.poster || item.poster,
                 currentEpisodeId: openEpisode.id,
                 season: openEpisode.season,
                 episode: openEpisode.episode,
                 episodes: data.episodes,
               }
             : undefined;
-        onPlayStream(stream, episodeTitle, seriesContext);
+        onPlayStream(stream, episodeTitle, seriesContext, isSeries ? undefined : { type: item.type, id: item.id, name: data.name, poster: data.poster || item.poster });
       }}
       onOpenAddons={onOpenAddons}
     />
