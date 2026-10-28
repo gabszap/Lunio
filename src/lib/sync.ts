@@ -688,6 +688,7 @@ class SyncManager {
       chapters?: any[];
       subtitles?: any[];
       audioTracks?: any[];
+      fingerprint?: string;
     },
     initialPosition: number = 0
   ) {
@@ -728,7 +729,7 @@ class SyncManager {
     return this.roomState?.playlist || [];
   }
 
-  public emitPlaylistAdd(item: { url: string; title: string; mimeType?: string }) {
+  public emitPlaylistAdd(item: { url: string; title: string; mimeType?: string; fingerprint?: string }) {
     if (!this.isConnected) return;
     this.send({ type: 'playlist:add', ...item });
   }

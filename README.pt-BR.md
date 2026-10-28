@@ -280,7 +280,7 @@ DESIGN.md                 Notas do design system
 ## Limitações conhecidas
 
 - O **Catálogo** é experimental: funciona, mas é uma implementação inicial e vai mudar.
-- Os **Addons** só listam streams com `url` direta (sem magnet/infoHash, YouTube ou arquivos compactados), e não os que exigem cabeçalhos de pedido especiais. Não ficam disponíveis dentro do Discord. O link do stream entra na sala como qualquer link colado, então quem está na sala pode vê-lo.
+- Os **Addons** só listam streams com `url` direta (sem magnet/infoHash, YouTube ou arquivos compactados), e não os que exigem cabeçalhos de pedido especiais. Não ficam disponíveis dentro do Discord. O servidor guarda o link do stream no estado da sala (Redis, até 24 h), mas só quem o enviou o vê inteiro: os outros recebem um id opaco (`lk_…`) nas mensagens da sala e nos pedidos `?url=`, e o servidor o troca de volta. Arquivos enviados ao próprio site e links do YouTube não são trocados.
 - Links de torrent e compartilhamento de tela aparecem no menu como "Em breve". Torrent precisa de um motor de torrent no servidor. O compartilhamento de tela está planejado sobre **MoQ/WebTransport** (não WebRTC): `getDisplayMedia()` → WebCodecs → MoQ/WebTransport → relay → espectadores, o que exige HTTP/3 e um relay no servidor.
 - Arquivos enviados ficam em `.uploads/` até a limpeza removê-los: `UPLOAD_TTL_HOURS` depois que a sala fecha, ou `UPLOAD_IDLE_HOURS` (24) sem leitura, e os mais antigos saem primeiro se a cota de disco for atingida.
 - O ban vale para a identidade do navegador (guardada no `localStorage`): uma aba nova mantém a identidade, mas outro navegador, janela anônima ou dados do site apagados geram uma identidade nova. Não há contas, então é até aí que vai.

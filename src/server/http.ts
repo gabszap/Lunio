@@ -23,6 +23,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   unauthorized: 'Sessão ausente ou expirada. Recarregue a página.',
   forbidden: 'Você não tem permissão para isso.',
   not_found: 'Não encontrado.',
+  link_expired: 'Esse vídeo já saiu da sala. Peça para o Host tocar de novo.',
   method_not_allowed: 'Método não permitido.',
   rate_limited: 'Muitos pedidos. Tente de novo em instantes.',
   busy: 'O servidor está ocupado. Tente de novo em instantes.',

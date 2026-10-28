@@ -282,7 +282,7 @@ DESIGN.md                 Design system notes
 ## Known limitations
 
 - **Catalog** is experimental: it works, but is an initial implementation and will change.
-- **Addons** only list streams with a direct `url` (no magnet/infoHash, YouTube or archives), and not the ones that require special request headers. They are not available inside Discord. The stream link goes into the room like any pasted link, so the people in the room can see it.
+- **Addons** only list streams with a direct `url` (no magnet/infoHash, YouTube or archives), and not the ones that require special request headers. They are not available inside Discord. The server keeps each stream link in the room state (Redis, up to 24 h) but only the person who sent it sees it whole: everyone else gets an opaque id (`lk_…`) in the room messages and in `?url=` requests, and the server swaps it back. Uploads to the site itself and YouTube links are not swapped.
 - Torrent links and screen sharing appear in the menu as "Coming soon". Torrent needs a torrent engine on the server. Screen sharing is planned on **MoQ/WebTransport** (not WebRTC): `getDisplayMedia()` → WebCodecs → MoQ/WebTransport → relay → viewers, which needs HTTP/3 and a relay on the server.
 - Uploaded files stay in `.uploads/` until the cleanup removes them: `UPLOAD_TTL_HOURS` after the room closes, or after `UPLOAD_IDLE_HOURS` (24) without being read, and the oldest go first if the disk quota is hit.
 - A ban applies to the browser's identity (kept in `localStorage`): a new tab keeps it, but another browser, a private window or cleared site data gets a new identity. There are no accounts, so that is as far as it goes.

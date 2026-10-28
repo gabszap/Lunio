@@ -28,6 +28,7 @@ import type { PlaylistItem } from './types/sync';
 import { PlaylistPanel } from './components/PlaylistPanel';
 import { logger } from './lib/logger';
 import { describeSourceForLog } from './lib/mediaLog';
+import { shareableFingerprint } from './lib/media';
 import { discordManager, DiscordContextState } from './lib/discord';
 import { syncManager } from './lib/sync';
 import { generateRoomCode, roomCodeFrom } from './lib/roomCode';
@@ -264,6 +265,7 @@ export default function App() {
           chapters: room.media.chapters || [],
           subtitles: room.media.subtitles || [],
           audioTracks: room.media.audioTracks || [],
+          fingerprint: room.media.fingerprint,
         });
       }
     });
@@ -277,6 +279,7 @@ export default function App() {
           chapters: media.chapters || [],
           subtitles: media.subtitles || [],
           audioTracks: media.audioTracks || [],
+          fingerprint: media.fingerprint,
         });
       }
     });
@@ -353,6 +356,8 @@ export default function App() {
       chapters: payload.chapters,
       subtitles: payload.subtitles,
       audioTracks: payload.audioTracks,
+      // Os outros da sala recebem só um id no lugar do link: a identidade do vídeo vai junto para dividirem o mesmo cache
+      fingerprint: payload.fingerprint ?? shareableFingerprint(payload.url),
     });
   };
 
@@ -437,7 +442,9 @@ export default function App() {
       chapters: [],
       subtitles: [],
       audioTracks: [],
-      isMkv: /\.mkv|torrentio/i.test(item.url),
+      // O link pode ser só um id (item de outra pessoa): o tipo vem do que quem adicionou informou
+      isMkv: /matroska/i.test(item.mimeType || '') || /\.mkv|torrentio/i.test(item.url),
+      fingerprint: item.fingerprint,
     };
     logger.info(`[Fila] Tocando "${item.title}"`);
     setPendingSubtitles([]);
@@ -595,7 +602,7 @@ export default function App() {
             {/* key = URL: um vídeo novo (fila, Host trocando) nasce com estado limpo: áudio escolhido, posição, retomada */}
             <VideoPlayer
               key={currentPayload.url}
-              source={{ src: currentPayload.url, type: currentPayload.mimeType }}
+              source={{ src: currentPayload.url, type: currentPayload.mimeType, fingerprint: currentPayload.fingerprint }}
               title={currentPayload.title}
               chapters={currentPayload.chapters}
               subtitles={currentPayload.subtitles}
@@ -620,6 +627,7 @@ export default function App() {
                   chapters: media.chapters || [],
                   subtitles: media.subtitles || [],
                   audioTracks: media.audioTracks || [],
+                  fingerprint: media.fingerprint,
                 });
               }}
             />

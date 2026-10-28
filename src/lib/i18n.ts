@@ -79,6 +79,7 @@ export function t(text: string, vars?: Record<string, string | number>): string 
 const API_ERRORS: Record<string, string> = {
   bad_request: msg('Pedido inválido.'),
   unauthorized: msg('Sessão ausente ou expirada. Recarregue a página.'),
+  link_expired: msg('Esse vídeo já saiu da sala. Peça para o Host tocar de novo.'),
   forbidden: msg('Você não tem permissão para isso.'),
   rate_limited: msg('Muitos pedidos. Tente de novo em instantes.'),
   busy: msg('O servidor está ocupado. Tente de novo em instantes.'),

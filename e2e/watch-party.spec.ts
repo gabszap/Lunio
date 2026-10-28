@@ -26,7 +26,7 @@ test.describe('Watch Party', () => {
       void v.play();
     });
     await expect.poll(async () => (await state(host.page)).src, { timeout: 40_000 }).toContain('legendas');
-    await expect.poll(async () => (await state(guest.page)).src, { timeout: 40_000 }).toContain('legendas');
+    await expect.poll(async () => (await state(guest.page)).src, { timeout: 40_000 }).toMatch(/url=lk_[\w-]{22}/);
     await expect(host.page.getByText('A fila está vazia.')).toBeVisible();
     // e começa a tocar sem ninguém apertar play
     await expect.poll(async () => (await state(host.page)).paused, { timeout: 30_000 }).toBe(false);
@@ -112,8 +112,9 @@ test.describe('Watch Party', () => {
     // A fila esvazia nos dois e o vídeo trocou nos dois
     await expect(host.page.getByText('A fila está vazia.')).toBeVisible();
     await expect(guest.page.getByText('A fila está vazia.')).toBeVisible();
-    await expect.poll(async () => (await state(host.page)).src, { timeout: 30_000 }).toContain('legendas');
+    // O link é de quem adicionou (Bia): o Host, que só toca, recebe um id no lugar
     await expect.poll(async () => (await state(guest.page)).src, { timeout: 30_000 }).toContain('legendas');
+    await expect.poll(async () => (await state(host.page)).src, { timeout: 30_000 }).toMatch(/url=lk_[\w-]{22}/);
 
     await host.context.close();
     await guest.context.close();
