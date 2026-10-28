@@ -50,3 +50,25 @@ describe('extractCleanTitleFromUrl', () => {
     expect(extractCleanTitleFromUrl('https://x.test/play/meu-video')).toBe('meu-video');
   });
 });
+
+describe('chave dos streams recentes', () => {
+  const store = new Map<string, string>();
+  beforeAll(() => {
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    });
+  });
+
+  it('lê a chave antiga uma vez e troca pela nova na primeira gravação', async () => {
+    const { loadRecentStreams, saveRecentStreams } = await import('./recent');
+    store.set('streamplayer_recent_streams', JSON.stringify([{ url: 'https://x.test/a.mkv', title: 'A', date: '01/01/2026' }]));
+    expect(loadRecentStreams()).toHaveLength(1);
+    saveRecentStreams(loadRecentStreams());
+    expect(store.has('streamplayer_recent_streams')).toBe(false);
+    expect(JSON.parse(store.get('lunio_recent_streams')!)).toHaveLength(1);
+    saveRecentStreams([]);
+    expect(store.has('lunio_recent_streams')).toBe(false);
+  });
+});

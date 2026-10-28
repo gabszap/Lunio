@@ -5,6 +5,7 @@ import { logger } from '../../lib/logger';
 import { getYouTubeId, resolveMediaRef } from '../../lib/media';
 import { sessionManager } from '../../lib/session';
 import { getProgressStorageKey } from './progress';
+import { readStartTime } from '../../lib/startTime';
 import type { useAlternateAudio } from './useAlternateAudio';
 import type { useSubtitles } from './useSubtitles';
 
@@ -66,7 +67,8 @@ export function useMediaInspection(args: {
     // Checa se há progresso salvo para sugerir retomada em popup (o vídeo sempre inicia do 0)
     try {
       const savedTime = parseFloat(localStorage.getItem(getProgressStorageKey(source.src)) || '0');
-      if (savedTime > 10 && !autoPlay) {
+      // O `?t=` do link ou o instante do "continuar assistindo" já decidem a posição: nada de perguntar
+      if (savedTime > 10 && !autoPlay && readStartTime() === null) {
         setResumePrompt({ time: savedTime, formatted: formatTime(savedTime) });
       } else {
         setResumePrompt(null);

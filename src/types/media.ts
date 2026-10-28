@@ -185,6 +185,8 @@ export interface CatalogSeriesContext {
   seriesId: string;
   seriesTitle: string;
   seriesType: string;
+  /** Capa da série (para o "continuar assistindo"). */
+  seriesPoster?: string;
   currentEpisodeId: string;
   season: number;
   episode: number;
