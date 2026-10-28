@@ -47,9 +47,6 @@ export interface CatalogMeta extends CatalogItem {
   malRank?: number;
   /** Capas de cada temporada (da fonte, ex.: AIOMetadata app_extras.seasonPosters). */
   seasonPosters?: Record<string, string>;
-  /** Arte do próprio item (TMDB) quando a do MAL (TheTVDB) a substituiu. */
-  altPoster?: string;
-  altSeasonPosters?: Record<string, string>;
   /** Ids do anime no MyAnimeList para cada temporada ("1": "14719", "2": "20899"...). */
   seasonMalIds?: Record<string, string>;
   /** Notas já conhecidas no cache para cada temporada. */

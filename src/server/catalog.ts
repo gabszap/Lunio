@@ -380,9 +380,6 @@ export interface CatalogMeta extends CatalogItem {
   malRank?: number;
   /** Capas de cada temporada (da fonte, ex.: AIOMetadata app_extras.seasonPosters). */
   seasonPosters?: Record<string, string>;
-  /** Arte do próprio item (TMDB) quando a do MAL (TheTVDB) a substituiu: o cliente deixa escolher. */
-  altPoster?: string;
-  altSeasonPosters?: Record<string, string>;
   /** Ids do anime no MyAnimeList para cada temporada ("1": "14719", "2": "20899"...). */
   seasonMalIds?: Record<string, string>;
   /** Notas já conhecidas no cache para cada temporada. */
@@ -564,58 +561,12 @@ async function resolveMalInfo(type: string, name: string, imdbId: string, season
   }
 }
 
-/** Anos em que cada temporada foi ao ar (pelos episódios com data): ligam a temporada à entrada do MAL. */
-function seasonYearsOf(episodes: CatalogEpisode[]): Record<number, SeasonYears> {
-  const out: Record<number, SeasonYears> = {};
-  for (const e of episodes) {
-    const y = e.released ? Number(e.released.slice(0, 4)) : NaN;
-    if (e.season < 1 || !Number.isInteger(y)) continue;
-    const cur = out[e.season];
-    out[e.season] = cur ? { from: Math.min(cur.from, y), to: Math.max(cur.to, y) } : { from: y, to: y };
-  }
-  return out;
-}
-
-/**
- * Tem fonte (TMDB, Crunchyroll) que põe o anime inteiro numa temporada só ("1x59"). A TheTVDB, que vem no meta do `mal:`, divide
- * por temporada (24 + 23 + 12…). Se os episódios do item estão todos numa temporada e a TheTVDB tem mais de uma, cada episódio
- * recebe temporada, número e id da TheTVDB, na ordem de exibição; título, sinopse e miniatura continuam os do item. Só vale se a
- * conta fecha (a TheTVDB não pode ter menos) e as datas batem (±3 dias, por causa do fuso); senão volta `undefined` e nada muda.
- * Os especiais (temporada 0) ficam como estão.
- */
-export function regroupSeasons(episodes: CatalogEpisode[], tvdbVideos: unknown): CatalogEpisode[] | undefined {
-  const regular = episodes.filter((e) => e.season >= 1);
-  if (regular.length < 2 || new Set(regular.map((e) => e.season)).size !== 1 || !Array.isArray(tvdbVideos)) return undefined;
-  const tvdb = tvdbVideos
-    .map((v: any) => ({ id: str(v?.id, 100), season: Number(v?.season), episode: Number(v?.episode ?? v?.number), released: str(v?.released, 40) }))
-    .filter((v) => v.id && Number.isInteger(v.season) && v.season >= 1 && Number.isInteger(v.episode) && v.episode >= 1)
-    .sort((a, b) => a.season - b.season || a.episode - b.episode);
-  if (new Set(tvdb.map((v) => v.season)).size < 2 || tvdb.length < regular.length) return undefined;
-
-  const ordered = [...regular].sort((a, b) => a.episode - b.episode);
-  const DAY = 86_400_000;
-  let compared = 0;
-  for (let i = 0; i < ordered.length; i++) {
-    const a = Date.parse(ordered[i].released ?? '');
-    const b = Date.parse(tvdb[i].released);
-    if (Number.isNaN(a) || Number.isNaN(b)) continue;
-    compared++;
-    if (Math.abs(a - b) > 3 * DAY) return undefined;
-  }
-  if (compared < Math.ceil(ordered.length / 2)) return undefined;
-
-  const remap = new Map(ordered.map((e, i) => [e, { id: tvdb[i].id, season: tvdb[i].season, episode: tvdb[i].episode }]));
-  return episodes
-    .map((e) => (remap.has(e) ? { ...e, ...remap.get(e)! } : e))
-    .sort((a, b) => a.season - b.season || a.episode - b.episode);
-}
-
 export async function getMeta(type: string, id: string): Promise<{ meta: CatalogMeta; stale: boolean }> {
   const { data, stale } = await fetchCatalogJson(`/meta/${type}/${encodeURIComponent(id)}.json`, 'meta');
   const m = data?.meta;
   const item = toItem({ ...m, id: m?.id ?? id }, type);
   if (!item) throw new CatalogUnavailableError();
-  let episodes: CatalogEpisode[] = (Array.isArray(m?.videos) ? m.videos : [])
+  const episodes: CatalogEpisode[] = (Array.isArray(m?.videos) ? m.videos : [])
     .slice(0, 3000)
     .map((v: any) => ({
       id: str(v?.id, 100),
@@ -637,18 +588,18 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
   // Anime com IMDb: descobre o MyAnimeList de cada temporada. Vale também para o item `mal:`: a fonte devolve a série inteira
   // (todas as temporadas) para qualquer entrada, então a nota e a arte mudam com a temporada escolhida nos dois casos
   if (item.imdbId && looksLikeAnime(m, genres)) {
-    const resolved = await resolveMalInfo(type, item.name, item.imdbId, seasonYearsOf(episodes));
+    // Anos em que cada temporada foi ao ar (pelos episódios com data): ligam a temporada à entrada do MAL
+    const seasonYears: Record<number, SeasonYears> = {};
+    for (const e of episodes) {
+      const y = e.released ? Number(e.released.slice(0, 4)) : NaN;
+      if (e.season < 1 || !Number.isInteger(y)) continue;
+      const cur = seasonYears[e.season];
+      seasonYears[e.season] = cur ? { from: Math.min(cur.from, y), to: Math.max(cur.to, y) } : { from: y, to: y };
+    }
+    const resolved = await resolveMalInfo(type, item.name, item.imdbId, seasonYears);
     if (!malId && resolved.malId) malId = resolved.malId;
     seasonMalIds = resolved.seasonMalIds;
     malMeta = resolved.meta;
-
-    // Anime que o item põe todo numa temporada: divide pelas temporadas da TheTVDB e liga cada nova temporada à sua entrada do MAL
-    const regrouped = regroupSeasons(episodes, malMeta?.videos);
-    if (regrouped) {
-      episodes = regrouped;
-      const again = await resolveMalInfo(type, item.name, item.imdbId, seasonYearsOf(episodes));
-      if (again.seasonMalIds) seasonMalIds = again.seasonMalIds;
-    }
   }
 
   // Capas por temporada (ex.: app_extras.seasonPosters do AIOMetadata ou seasonPosters)
@@ -663,23 +614,8 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
     }
     return out;
   };
-  let seasonPosters = posterMap(m);
-  let altPoster: string | undefined;
-  let altSeasonPosters: Record<string, string> | undefined;
-
-  // Título do IMDb: a arte do MAL (TheTVDB, no idioma da fonte: pt, senão inglês) vale no lugar da do TMDB, tanto o pôster da série quanto
-  // o de cada temporada. O que o MAL não tem fica com o do próprio item. A arte do item segue junto (`alt*`) para o cliente poder trocar
-  if (malMeta) {
-    const western = posterMap(malMeta);
-    const westernPoster = httpUrl(malMeta.poster);
-    const own = seasonPosters;
-    if (Object.keys(western).length > 0) seasonPosters = { ...own, ...western };
-    if (westernPoster) {
-      if (item.poster && item.poster !== westernPoster) altPoster = item.poster;
-      item.poster = westernPoster;
-    }
-    if (Object.keys(own).length > 0 && JSON.stringify(own) !== JSON.stringify(seasonPosters)) altSeasonPosters = own;
-  }
+  // Só o item `mal:` tem capa por temporada (TheTVDB). Anime aberto pelo IMDb fica com a capa principal do catálogo, igual em todas as temporadas
+  const seasonPosters = item.id.startsWith('mal:') ? posterMap(m) : {};
 
   // A nota não atrasa o detalhe: vem junto só se já estiver guardada (e sem esperar uma por uma); senão o cliente a pede em /api/catalog/malscore
   const seasonEntries = Object.entries(seasonMalIds ?? {});
@@ -703,8 +639,6 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
       malScoredBy: stats?.scoredBy,
       malRank: stats?.rank,
       seasonPosters: Object.keys(seasonPosters).length > 0 ? seasonPosters : undefined,
-      altPoster,
-      altSeasonPosters,
       seasonMalIds,
       seasonMalScores: Object.keys(seasonMalScores).length > 0 ? seasonMalScores : undefined,
       episodes,
