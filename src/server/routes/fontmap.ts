@@ -1,3 +1,4 @@
+import { urlParam } from './linkParam';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,7 +20,8 @@ import { ensureFonts } from '../media/fonts';
 export async function handleFontMap(req: IncomingMessage, res: ServerResponse) {
   try {
     const reqUrl = new URL(req.url || '', 'http://localhost');
-    const targetUrl = reqUrl.searchParams.get('url');
+    const targetUrl = urlParam(req, res, reqUrl);
+    if (targetUrl === false) return; // id de link desconhecido: já respondeu 404
     const customFingerprint = (reqUrl.searchParams.get('fingerprint') || '').slice(0, 200) || undefined;
     if (!targetUrl) {
       sendApiError(res, 400, 'bad_request', 'Parâmetro url é obrigatório.');

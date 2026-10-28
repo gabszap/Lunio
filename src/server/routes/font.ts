@@ -1,3 +1,4 @@
+import { urlParam } from './linkParam';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -12,7 +13,8 @@ import { FONT_CACHE_DIR } from '../media/paths';
 export async function handleFont(req: IncomingMessage, res: ServerResponse) {
   try {
     const reqUrl = new URL(req.url || '', 'http://localhost');
-    const targetUrl = reqUrl.searchParams.get('url');
+    const targetUrl = urlParam(req, res, reqUrl);
+    if (targetUrl === false) return; // id de link desconhecido: já respondeu 404
     const fontFilename = reqUrl.searchParams.get('name') || '';
     const streamTrack = reqUrl.searchParams.get('track') || '';
     const customFingerprint = (reqUrl.searchParams.get('fingerprint') || '').slice(0, 200) || undefined;

@@ -1,3 +1,4 @@
+import { expandLink } from './linkParam';
 import fs from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { sendApiError, sendJson } from '../http';
@@ -25,7 +26,9 @@ export async function handleHls(req: IncomingMessage, res: ServerResponse) {
         return sendApiError(res, 400, 'bad_request', 'Parâmetros url e audio são obrigatórios.');
       }
       const fingerprint = typeof body.fingerprint === 'string' ? body.fingerprint.slice(0, 200) : undefined;
-      const started = await startHls({ url: body.url, audio, fingerprint });
+      const hlsUrl = expandLink(req, res, body.url);
+      if (hlsUrl === false) return;
+      const started = await startHls({ url: hlsUrl!, audio, fingerprint });
       res.setHeader('Cache-Control', 'no-store');
       return sendJson(res, 200, started);
     }
