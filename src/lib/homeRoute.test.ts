@@ -7,6 +7,7 @@ describe('tabFromPath', () => {
     expect(tabFromPath('/catalog/')).toBe('catalog');
     expect(tabFromPath('/status')).toBe('status');
     expect(tabFromPath('/detail/series/tt5607616')).toBe('catalog'); // um título aberto é o catálogo
+    expect(tabFromPath('/detail/series/mal%3A61469/tt2359704%3A6%3A1')).toBe('catalog'); // e um episódio também
     expect(tabFromPath('/home')).toBe('room');
     expect(tabFromPath('/')).toBe('room');
     expect(tabFromPath('')).toBe('room');

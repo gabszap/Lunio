@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Film, Play, Search, SearchX, Star, Tv, Users, X, RefreshCw } from 'lucide-react';
+import { Bookmark, BookmarkCheck, CalendarDays, Check, CheckCheck, ChevronLeft, ChevronRight, Film, Play, Puzzle, Search, SearchX, Star, Tv, Users, X, RefreshCw } from 'lucide-react';
 import {
+  CatalogEpisode,
   CatalogItem,
   CatalogManifest,
   CatalogMeta,
@@ -20,11 +21,18 @@ import {
   searchCatalog,
   seasonOrder,
   toggleMyList,
+  useWatchedEpisodes,
 } from '../../lib/catalog';
 import { GhostButton, IconButton, PillTabs, PrimaryButton, Spinner, TextButton, cx } from '../ui';
 import { t } from '../../lib/i18n';
 import { DetailRef, writeDetailToUrl, writeSearchToUrl, writeSeasonToUrl } from '../../lib/searchUrl';
 import { ImdbIcon, MalIcon } from './BrandIcons';
+import { AddonsPanel } from './AddonsPanel';
+import { StreamList } from './StreamList';
+import { loadAddons, type VideoAddon } from '../../lib/addons';
+import type { StreamOption } from '../../lib/streams';
+import type { CatalogSeriesContext } from '../../types/media';
+import { discordManager } from '../../lib/discord';
 
 export interface WatchIntent {
   title: string;
@@ -38,6 +46,8 @@ interface CatalogTabProps {
   /** Temporada do título aberto pelo endereço (`?season=`). */
   initialSeason?: number | null;
   onWatch: (intent: WatchIntent) => void;
+  /** Um stream escolhido na lista "Onde assistir" (o App cria a sala e abre o player). */
+  onPlayStream: (stream: StreamOption, title: string, seriesContext?: CatalogSeriesContext) => void;
   onCreateRoom: () => void;
 }
 
@@ -60,13 +70,16 @@ const gradientFor = (id: string) => {
 
 const Poster: React.FC<{ item: CatalogItem; className?: string; iconSize?: number }> = ({ item, className, iconSize = 32 }) => {
   const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+  }, [item.poster]);
   return (
     <span
       className={cx('relative flex-none rounded-xl border border-lu-border overflow-hidden flex items-center justify-center text-lu-text/35', className)}
       style={{ background: gradientFor(item.id) }}
     >
       {item.poster && !failed ? (
-        <img src={item.poster} alt="" loading="lazy" onError={() => setFailed(true)} className="absolute inset-0 w-full h-full object-cover" />
+        <img key={item.poster} src={item.poster} alt="" loading="lazy" onError={() => setFailed(true)} className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300" />
       ) : (
         <Film size={iconSize} />
       )}
@@ -87,7 +100,7 @@ const PosterCard: React.FC<{ item: CatalogItem; onOpen: (item: CatalogItem) => v
   >
     <Poster item={item} className="w-full aspect-[2/3] transition-transform group-hover:-translate-y-0.5" />
     <span className="flex flex-col min-w-0 w-full">
-      <span className="text-[13px] font-semibold text-lu-text truncate">{item.name}</span>
+      <span className="text-[13px] font-semibold text-lu-text leading-snug line-clamp-2 break-words" title={item.name}>{item.name}</span>
       <span className="text-[12px] text-lu-muted">
         {showType ? `${isSeriesType(item.type) ? t('Série') : t('Filme')}${item.year ? ` · ${item.year}` : ''}` : item.year || ' '}
       </span>
@@ -210,55 +223,106 @@ const BrandBadge: React.FC<{ href?: string; label: string; icon: React.ReactNode
   );
 };
 
-const Detail: React.FC<{ item: CatalogItem; initialSeason?: number | null; onBack: () => void; onWatch: (intent: WatchIntent) => void }> = ({ item, initialSeason = null, onBack, onWatch }) => {
+interface DetailProps {
+  item: CatalogItem;
+  initialSeason?: number | null;
+  /** Episódio aberto (o `videos[].id` do meta); o endereço é do CatalogTab. */
+  episodeId: string | null;
+  onEpisodeChange: (id: string | null) => void;
+  addons: VideoAddon[];
+  onOpenAddons: () => void;
+  onBack: () => void;
+  onWatch: (intent: WatchIntent) => void;
+  onPlayStream: (stream: StreamOption, title: string, seriesContext?: CatalogSeriesContext) => void;
+}
+
+/** Nota do MyAnimeList com novas tentativas (a API pode estar fria ou limitando). `null`: sem nota, desistiu ou foi cancelado. */
+async function fetchMalScoreRetrying(malId: string, cancelled: () => boolean): Promise<{ score: number; rank?: number } | null> {
+  for (const wait of [0, 5000, 15000]) {
+    if (wait) await new Promise((r) => setTimeout(r, wait));
+    if (cancelled()) return null;
+    try {
+      const r = await fetchMalScore(malId);
+      if (cancelled()) return null;
+      if (r.score !== null) return { score: r.score, rank: r.rank };
+      if (!r.failed) return null; // sem nota (ainda sem votos): não adianta insistir
+    } catch {
+      // tenta de novo
+    }
+  }
+  return null;
+}
+
+const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, onEpisodeChange, addons, onOpenAddons, onBack, onWatch, onPlayStream }) => {
   const [meta, setMeta] = useState<CatalogMeta | null>(null);
   const [error, setError] = useState(false);
   const [season, setSeason] = useState<number>(initialSeason ?? 1);
-  const [malStats, setMalStats] = useState<{ score: number; rank?: number } | null>(null);
+  /** Notas do MyAnimeList já conhecidas, por id do MAL (a série e cada temporada que tem o seu). */
+  const [malScores, setMalScores] = useState<Record<string, { score: number; rank?: number }>>({});
   const [saved, setSaved] = useState(() => isInMyList(item.id));
+  const { isWatched, toggleWatched, setEpisodesWatched } = useWatchedEpisodes();
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; episode: CatalogEpisode } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    if (!contextMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    const onScroll = () => {
+      setContextMenu(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [contextMenu]);
+
+  useEffect(() => {
+    // Resposta de um título anterior não pode mexer no atual
+    let cancelled = false;
     setMeta(null);
     setError(false);
     fetchMeta(item.type, item.id)
       .then((m) => {
+        if (cancelled) return;
         setMeta(m);
         const order = seasonOrder(m.episodes.map((e) => e.season));
-        // A temporada do endereço vale se o título a tem; senão, a primeira
-        if (initialSeason !== null && order.includes(initialSeason)) setSeason(initialSeason);
+        // O episódio do endereço manda na temporada; senão vale a do endereço (se o título a tem); senão, a primeira
+        const opened = episodeId ? m.episodes.find((e) => e.id === episodeId) : undefined;
+        if (opened) setSeason(opened.season);
+        else if (initialSeason !== null && order.includes(initialSeason)) setSeason(initialSeason);
         else if (order[0] !== undefined) setSeason(order[0]);
+        // Episódio que o título não tem: volta à lista
+        if (episodeId && !opened) onEpisodeChange(null);
       })
-      .catch(() => setError(true));
-  }, [item]);
-
-  // A nota do MyAnimeList vem à parte, com novas tentativas (a API pode estar fria ou limitando): o detalhe nunca espera por ela
-  useEffect(() => {
-    setMalStats(null);
-    const malId = meta?.malId;
-    if (!malId) return;
-    if (meta.malScore !== undefined) {
-      setMalStats({ score: meta.malScore, rank: meta.malRank });
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      for (const wait of [0, 5000, 15000]) {
-        if (wait) await new Promise((r) => setTimeout(r, wait));
-        if (cancelled) return;
-        try {
-          const r = await fetchMalScore(malId);
-          if (cancelled) return;
-          if (r.score !== null) return void setMalStats({ score: r.score, rank: r.rank });
-          if (!r.failed) return; // sem nota (ainda sem votos): não adianta insistir
-        } catch {
-          // tenta de novo
-        }
-      }
-    })();
+      .catch(() => {
+        if (!cancelled) setError(true);
+      });
     return () => {
       cancelled = true;
     };
-  }, [meta?.malId, meta?.malScore, meta?.malRank]);
+  }, [item]);
+
+  // As notas que o servidor já tinha guardadas vêm junto do detalhe (as demais são pedidas abaixo, uma vez por id do MAL)
+  useEffect(() => {
+    if (!meta) return;
+    setMalScores((prev) => {
+      const next = { ...prev };
+      if (meta.malId && meta.malScore !== undefined) next[meta.malId] = { score: meta.malScore, rank: meta.malRank };
+      for (const s of Object.values(meta.seasonMalScores ?? {})) next[s.malId] = { score: s.score, rank: s.rank };
+      return next;
+    });
+  }, [meta]);
 
   const data = meta ?? { ...item, genres: [], episodes: [] as CatalogMeta['episodes'], description: undefined, runtime: undefined, imdbRating: undefined, background: undefined };
   // 1, 2, 3… e os especiais (temporada 0) no fim
@@ -272,10 +336,67 @@ const Detail: React.FC<{ item: CatalogItem; initialSeason?: number | null; onBac
   useEffect(() => () => writeSeasonToUrl(null), []);
   const firstEpisode = data.episodes.find((e) => e.season >= 1) ?? data.episodes[0];
 
+  // Capa e nota correspondentes à temporada atualmente selecionada
+  const currentSeasonStr = String(season);
+  // Item `mal:` tem capa por temporada; o do IMDb mostra sempre a capa principal do catálogo
+  const activePoster = item.id.startsWith('mal:')
+    ? (isSeries && data.seasonPosters?.[currentSeasonStr]) || data.poster || item.poster
+    : item.poster || data.poster;
+  const currentMalId = (isSeries && data.seasonMalIds?.[currentSeasonStr]) || data.malId;
+  const currentMalScore = (currentMalId && malScores[currentMalId]) || null;
+
+  // Nota do MAL que ainda não se conhece: pedida à parte, com novas tentativas (o detalhe nunca espera por ela). Um pedido por id
+  const hasCurrentScore = currentMalScore !== null;
+  useEffect(() => {
+    if (!currentMalId || hasCurrentScore) return;
+    let cancelled = false;
+    void fetchMalScoreRetrying(currentMalId, () => cancelled).then((r) => {
+      if (r) setMalScores((prev) => ({ ...prev, [currentMalId]: r }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentMalId, hasCurrentScore]);
+
   const watchTitle = (preferSolo: boolean) => {
     const title = isSeries && firstEpisode ? `${data.name} · ${episodeTag(firstEpisode.season, firstEpisode.episode)}` : data.name;
     onWatch({ title, preferSolo });
   };
+
+  // "Onde assistir": filme direto no detalhe; série, no episódio aberto (`/detail/<tipo>/<id>/<videoId>`)
+  const openEpisode = isSeries && episodeId ? data.episodes.find((e) => e.id === episodeId) : undefined;
+  const episodeTitle = openEpisode ? `${data.name} · ${episodeTag(openEpisode.season, openEpisode.episode)}` : data.name;
+  const streamsList = discordManager.isDiscordActivity() ? (
+    // Dentro do Discord o iframe só fala com origens mapeadas: o navegador não alcança o addon
+    <p className="m-0 text-[14px] text-lu-muted">{t('Os addons não estão disponíveis no Discord. Cole o link do vídeo.')}</p>
+  ) : (
+    <StreamList
+      addons={addons}
+      target={
+        isSeries
+          ? openEpisode
+            ? { type: item.type === 'anime' ? 'anime' : 'series', videoId: openEpisode.id, seriesId: item.id, season: openEpisode.season, episode: openEpisode.episode }
+            : null
+          : { type: 'movie', videoId: item.id }
+      }
+      onPlay={(stream) => {
+        const seriesContext: CatalogSeriesContext | undefined =
+          isSeries && openEpisode
+            ? {
+                seriesId: item.id,
+                seriesTitle: data.name,
+                seriesType: item.type,
+                currentEpisodeId: openEpisode.id,
+                season: openEpisode.season,
+                episode: openEpisode.episode,
+                episodes: data.episodes,
+              }
+            : undefined;
+        onPlayStream(stream, episodeTitle, seriesContext);
+      }}
+      onOpenAddons={onOpenAddons}
+    />
+  );
 
   const metaLine = [
     data.year,
@@ -309,7 +430,7 @@ const Detail: React.FC<{ item: CatalogItem; initialSeason?: number | null; onBac
             <span>{t('Catálogo')}</span>
           </TextButton>
           <div className="flex flex-col sm:flex-row gap-6 sm:gap-10 mt-4 sm:items-end">
-            <Poster item={data} iconSize={48} className="w-[160px] sm:w-[240px] aspect-[2/3]" />
+            <Poster item={{ ...data, poster: activePoster }} iconSize={48} className="w-[160px] sm:w-[240px] aspect-[2/3]" />
             <div className="flex-1 min-w-0 flex flex-col gap-3.5 sm:pb-2">
               <span className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-lu-tint text-lu-accent text-[12px] font-semibold self-start">
                 {isSeries ? <Tv size={14} /> : <Film size={14} />}
@@ -333,17 +454,17 @@ const Detail: React.FC<{ item: CatalogItem; initialSeason?: number | null; onBac
                       {data.imdbRating ?? 'IMDb'}
                     </BrandBadge>
                   )}
-                  {data.malId && (
+                  {currentMalId && (
                     <BrandBadge
-                      href={`https://myanimelist.net/anime/${data.malId}`}
+                      href={`https://myanimelist.net/anime/${currentMalId}`}
                       label={
-                        malStats
-                          ? `${t('Nota do MyAnimeList')}: ${malStats.score.toFixed(2)}${malStats.rank ? ` · ${t('ranking')} #${malStats.rank}` : ''}`
+                        currentMalScore
+                          ? `${t('Nota do MyAnimeList')}: ${currentMalScore.score.toFixed(2)}${currentMalScore.rank ? ` · ${t('ranking')} #${currentMalScore.rank}` : ''}`
                           : t('Abrir no MyAnimeList')
                       }
                       icon={<MalIcon />}
                     >
-                      {malStats ? malStats.score.toFixed(2) : 'MyAnimeList'}
+                      {currentMalScore ? currentMalScore.score.toFixed(2) : 'MyAnimeList'}
                     </BrandBadge>
                   )}
                 </p>
@@ -382,10 +503,70 @@ const Detail: React.FC<{ item: CatalogItem; initialSeason?: number | null; onBac
         </div>
       </section>
 
-      {isSeries && seasons.length > 0 && (
+      {!isSeries && !error && <section className="px-4 sm:px-12 pt-2">{streamsList}</section>}
+
+      {isSeries && openEpisode && (
+        <section aria-label={t('Onde assistir')} className="px-4 sm:px-12 pt-2 flex flex-col gap-4">
+          <div
+            className="flex flex-wrap items-center gap-3 cursor-context-menu"
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setContextMenu({ x: e.clientX, y: e.clientY, episode: openEpisode });
+            }}
+          >
+            <TextButton onClick={() => onEpisodeChange(null)} className="!pl-2 -ml-2">
+              <ChevronLeft size={18} />
+              <span>{t('Episódios')}</span>
+            </TextButton>
+            <h2 className="m-0 text-[18px] font-semibold flex items-center gap-2">
+              <span>
+                {episodeTag(openEpisode.season, openEpisode.episode)} · {openEpisode.title || t('Episódio {v1}', { v1: openEpisode.episode })}
+              </span>
+              {isWatched(openEpisode.id) && (
+                <span
+                  title={t('Assistido')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[13px] font-semibold bg-lu-tint text-lu-accent border border-lu-accent/40 shadow-sm"
+                >
+                  <Check size={14} strokeWidth={2.5} />
+                  <span>{t('Assistido')}</span>
+                </span>
+              )}
+            </h2>
+          </div>
+          {streamsList}
+          <GhostButton className="self-start" onClick={() => onWatch({ title: episodeTitle, preferSolo: false })}>
+            {t('Colar o link do vídeo')}
+          </GhostButton>
+        </section>
+      )}
+
+      {isSeries && !openEpisode && seasons.length > 0 && (
         <section aria-label={t('Episódios')} className="px-4 sm:px-12 pt-2 flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="m-0 text-[18px] font-semibold">{t('Episódios')}</h2>
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="m-0 text-[18px] font-semibold">{t('Episódios')}</h2>
+              {episodes.length > 0 && (
+                <TextButton
+                  size="sm"
+                  onClick={() => {
+                    const allWatched = episodes.every((ep) => isWatched(ep.id));
+                    setEpisodesWatched(episodes.map((ep) => ep.id), !allWatched);
+                  }}
+                  className="text-[13px]"
+                >
+                  <CheckCheck
+                    size={16}
+                    className={episodes.every((ep) => isWatched(ep.id)) ? 'text-lu-accent' : 'text-lu-muted'}
+                  />
+                  <span>
+                    {episodes.every((ep) => isWatched(ep.id))
+                      ? t('Marcar temporada como não assistida')
+                      : t('Marcar temporada como assistida')}
+                  </span>
+                </TextButton>
+              )}
+            </div>
             <div className="max-w-full overflow-x-auto no-scrollbar">
               <PillTabs
                 label={t('Temporadas')}
@@ -397,37 +578,115 @@ const Detail: React.FC<{ item: CatalogItem; initialSeason?: number | null; onBac
             </div>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {episodes.map((ep) => (
-              <button
-                key={ep.id}
-                type="button"
-                onClick={() => onWatch({ title: `${data.name} · ${episodeTag(ep.season, ep.episode)}`, preferSolo: false })}
-                className="group flex items-start gap-4 p-3 rounded-[14px] bg-lu-bg2 border border-lu-border hover:bg-white/6 text-left w-full"
-              >
-                <span
-                  className="relative w-[128px] sm:w-[176px] aspect-video flex-none rounded-[10px] overflow-hidden flex items-center justify-center"
-                  style={{ background: gradientFor(ep.id) }}
-                >
-                  {ep.thumbnail && (
-                    <img src={ep.thumbnail} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" onError={(e) => (e.currentTarget.style.display = 'none')} />
+            {episodes.map((ep) => {
+              const watched = isWatched(ep.id);
+              return (
+                <button
+                  key={ep.id}
+                  type="button"
+                  onClick={() => onEpisodeChange(ep.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setContextMenu({ x: e.clientX, y: e.clientY, episode: ep });
+                  }}
+                  className={cx(
+                    'group flex items-start gap-4 p-3 rounded-[14px] bg-lu-bg2 border border-lu-border hover:bg-white/6 text-left w-full transition-colors',
+                    watched && 'border-lu-border-strong',
                   )}
-                  <span className="relative opacity-0 group-hover:opacity-100 transition-opacity w-10 h-10 rounded-full bg-lu-video/70 flex items-center justify-center">
-                    <Play size={18} />
+                >
+                  <span
+                    className="relative w-[128px] sm:w-[176px] aspect-video flex-none rounded-[10px] overflow-hidden flex items-center justify-center"
+                    style={{ background: gradientFor(ep.id) }}
+                  >
+                    {ep.thumbnail && (
+                      <img
+                        src={ep.thumbnail}
+                        alt=""
+                        loading="lazy"
+                        className={cx('absolute inset-0 w-full h-full object-cover', watched && 'opacity-85')}
+                        onError={(e) => (e.currentTarget.style.display = 'none')}
+                      />
+                    )}
+                    {watched && (
+                      <span
+                        title={t('Assistido')}
+                        className="absolute top-2 right-2 z-10 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-lu-bg/95 border border-lu-accent/60 text-lu-accent text-[12px] font-semibold shadow-lg backdrop-blur-sm"
+                      >
+                        <Check size={14} strokeWidth={2.5} />
+                        <span>{t('Assistido')}</span>
+                      </span>
+                    )}
+                    <span className="relative opacity-0 group-hover:opacity-100 transition-opacity w-10 h-10 rounded-full bg-lu-video/70 flex items-center justify-center">
+                      <Play size={18} />
+                    </span>
                   </span>
-                </span>
-                <span className="flex flex-col gap-1 min-w-0">
-                  <span className="text-[14px] font-semibold">
-                    {ep.episode}. {ep.title || t('Episódio {v1}', { v1: ep.episode })}
+                  <span className="flex flex-col gap-1 min-w-0">
+                    <span className="text-[14px] font-semibold">
+                      {ep.episode}. {ep.title || t('Episódio {v1}', { v1: ep.episode })}
+                    </span>
+                    <span className="text-[12px] text-lu-muted flex items-center gap-1.5 flex-wrap">
+                      <span>{episodeTag(ep.season, ep.episode)}</span>
+                      {watched && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span className="inline-flex items-center gap-1 text-lu-accent text-[12px] font-semibold">
+                            <Check size={13} strokeWidth={2.5} />
+                            {t('Assistido')}
+                          </span>
+                        </>
+                      )}
+                      {ep.released && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span>{new Date(ep.released).toLocaleDateString('pt-BR')}</span>
+                        </>
+                      )}
+                    </span>
+                    {ep.overview && <span className="text-[13px] leading-snug text-lu-muted line-clamp-2">{ep.overview}</span>}
                   </span>
-                  <span className="text-[12px] text-lu-muted">
-                    {[episodeTag(ep.season, ep.episode), ep.released ? new Date(ep.released).toLocaleDateString('pt-BR') : null].filter(Boolean).join(' · ')}
-                  </span>
-                  {ep.overview && <span className="text-[13px] leading-snug text-lu-muted line-clamp-2">{ep.overview}</span>}
-                </span>
-              </button>
-            ))}
+                </button>
+              );
+            })}
           </div>
         </section>
+      )}
+
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          style={{
+            position: 'fixed',
+            left: Math.max(12, Math.min(contextMenu.x, window.innerWidth - 220 - 12)),
+            top: Math.max(12, Math.min(contextMenu.y, window.innerHeight - 56 - 12)),
+          }}
+          className="z-50 min-w-[210px] p-1.5 rounded-[12px] bg-lu-elevated border border-lu-border shadow-[0_16px_40px_rgba(0,0,0,0.6)] text-lu-text backdrop-blur-md"
+          onClick={(e) => e.stopPropagation()}
+          role="menu"
+          aria-label={t('Opções do episódio')}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              toggleWatched(contextMenu.episode.id);
+              setContextMenu(null);
+            }}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[8px] text-[13px] font-medium text-left transition-colors hover:bg-white/8 hover:text-lu-text cursor-pointer text-lu-text"
+          >
+            {isWatched(contextMenu.episode.id) ? (
+              <>
+                <X size={15} className="text-lu-muted flex-none" />
+                <span>{t('Marcar como não assistido')}</span>
+              </>
+            ) : (
+              <>
+                <Check size={15} className="text-lu-accent flex-none" />
+                <span>{t('Marcar como assistido')}</span>
+              </>
+            )}
+          </button>
+        </div>
       )}
     </div>
   );
@@ -503,7 +762,7 @@ function readSearchMode(): SearchMode {
   }
 }
 
-export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initialDetail = null, initialSeason = null, onWatch, onCreateRoom }) => {
+export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initialDetail = null, initialSeason = null, onWatch, onPlayStream, onCreateRoom }) => {
   const [query, setQuery] = useState(initialQuery);
   const [debounced, setDebounced] = useState(initialQuery.trim());
   /** Um grupo por catálogo de busca da fonte (como no Stremio). */
@@ -518,6 +777,14 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   /** As fileiras vêm do manifesto da fonte configurada no servidor (na ordem dela). */
   const [manifest, setManifest] = useState<CatalogManifest | null | 'error'>(null);
   const [manifestTry, setManifestTry] = useState(0);
+  const [addonsOpen, setAddonsOpen] = useState(false);
+  const [addons, setAddons] = useState<VideoAddon[]>(() => loadAddons());
+  /** Episódio aberto (`/detail/<tipo>/<id>/<videoId>`); trocar de título o zera. */
+  const [episodeId, setEpisodeId] = useState<string | null>(initialDetail?.videoId ?? null);
+  const openItem = (item: CatalogItem) => {
+    setEpisodeId(null);
+    setSelected(item);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -543,8 +810,8 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   useEffect(() => () => writeSearchToUrl(''), []);
   // O título aberto também vai para o endereço
   useEffect(() => {
-    writeDetailToUrl(selected ? { type: selected.type, id: selected.id } : null);
-  }, [selected]);
+    writeDetailToUrl(selected ? { type: selected.type, id: selected.id, videoId: episodeId ?? undefined } : null);
+  }, [selected, episodeId]);
   useEffect(() => () => writeDetailToUrl(null), []);
 
   useEffect(() => {
@@ -571,7 +838,26 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
 
   if (selected) {
     const fromUrl = initialDetail && initialDetail.id === selected.id && initialDetail.type === selected.type;
-    return <Detail key={`${selected.type}/${selected.id}`} item={selected} initialSeason={fromUrl ? initialSeason : null} onBack={() => setSelected(null)} onWatch={onWatch} />;
+    return (
+      <>
+        <Detail
+          key={`${selected.type}/${selected.id}`}
+          item={selected}
+          initialSeason={fromUrl ? initialSeason : null}
+          episodeId={episodeId}
+          onEpisodeChange={setEpisodeId}
+          addons={addons}
+          onOpenAddons={() => setAddonsOpen(true)}
+          onBack={() => {
+            setEpisodeId(null);
+            setSelected(null);
+          }}
+          onWatch={onWatch}
+          onPlayStream={onPlayStream}
+        />
+        <AddonsPanel open={addonsOpen} onClose={() => setAddonsOpen(false)} onChange={setAddons} />
+      </>
+    );
   }
 
   const groupsTotal = results?.reduce((n, g) => n + g.metas.length, 0) ?? 0;
@@ -592,7 +878,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex justify-center">
+      <div className="flex flex-wrap items-center justify-center gap-3">
         <div className="flex items-center gap-3 w-[640px] max-w-full h-[52px] pl-[18px] pr-2 rounded-[14px] bg-lu-surface border border-lu-border focus-within:border-lu-accent focus-within:shadow-[0_0_0_3px_var(--color-lu-tint)]">
           <span className="flex text-lu-muted">
             <Search size={20} />
@@ -611,7 +897,16 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
             </IconButton>
           )}
         </div>
+        <GhostButton onClick={() => setAddonsOpen(true)}>
+          <Puzzle size={16} />
+          <span>{t('Addons')}</span>
+        </GhostButton>
+        <GhostButton disabled title={t('Em breve')}>
+          <CalendarDays size={16} />
+          <span>{t('Calendário')}</span>
+        </GhostButton>
       </div>
+      <AddonsPanel open={addonsOpen} onClose={() => setAddonsOpen(false)} onChange={setAddons} />
 
       {debounced ? (
         results === null && !searchError ? (
@@ -680,12 +975,12 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
             </div>
             {mode === 'groups' ? (
               results!.map((group, i) => (
-                <Row key={`${group.type}:${group.id}`} title={groupTitles[i]} load={async () => group.metas} items={group.metas} onOpen={setSelected} />
+                <Row key={`${group.type}:${group.id}`} title={groupTitles[i]} load={async () => group.metas} items={group.metas} onOpen={openItem} />
               ))
             ) : (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(152px,1fr))] gap-x-4 gap-y-6">
                 {shown.map((item) => (
-                  <PosterCard key={`${item.type}-${item.id}`} item={item} onOpen={setSelected} showType fluid />
+                  <PosterCard key={`${item.type}-${item.id}`} item={item} onOpen={openItem} showType fluid />
                 ))}
               </div>
             )}
@@ -693,8 +988,8 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
         )
       ) : (
         <>
-          {myList.length > 0 && <Row title={t('Minha lista')} load={async () => myList} items={myList} onOpen={setSelected} />}
-          <HomeRows manifest={manifest} onOpen={setSelected} onRetry={() => setManifestTry((n) => n + 1)} onCreateRoom={onCreateRoom} />
+          {myList.length > 0 && <Row title={t('Minha lista')} load={async () => myList} items={myList} onOpen={openItem} />}
+          <HomeRows manifest={manifest} onOpen={openItem} onRetry={() => setManifestTry((n) => n + 1)} onCreateRoom={onCreateRoom} />
         </>
       )}
     </div>

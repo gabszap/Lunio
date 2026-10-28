@@ -1,5 +1,7 @@
-import { t, msg } from './/i18n';
+import React, { useEffect, useState } from 'react';
+import { t, msg } from './i18n';
 import { apiFetch } from './access';
+import type { CatalogSeriesContext } from '../types/media';
 /**
  * Catálogo de filmes e séries. Quem fala com a fonte (um addon do Stremio configurado em `CATALOG_URL`) é o servidor
  * (`/api/catalog/*`, com cache); aqui só se consome o que ele devolve. Só metadados: pôster, sinopse, temporadas e
@@ -43,6 +45,12 @@ export interface CatalogMeta extends CatalogItem {
   malScore?: number;
   malScoredBy?: number;
   malRank?: number;
+  /** Capas de cada temporada (da fonte, ex.: AIOMetadata app_extras.seasonPosters). */
+  seasonPosters?: Record<string, string>;
+  /** Ids do anime no MyAnimeList para cada temporada ("1": "14719", "2": "20899"...). */
+  seasonMalIds?: Record<string, string>;
+  /** Notas já conhecidas no cache para cada temporada. */
+  seasonMalScores?: Record<string, { score: number; scoredBy?: number; rank?: number; malId: string }>;
   /** A temporada 0 são os especiais. */
   episodes: CatalogEpisode[];
 }
@@ -214,3 +222,113 @@ export const GENRES_PT: Record<string, string> = {
 
 export const episodeTag = (season: number, episode: number) =>
   `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+
+// ───────────── Episódios assistidos (local) ─────────────
+
+const WATCHED_EPISODES_KEY = 'lunio_watched_episodes';
+const WATCHED_CHANGE_EVENT = 'lunio:watched-episodes-changed';
+
+export function getWatchedEpisodes(): Set<string> {
+  try {
+    const raw = localStorage.getItem(WATCHED_EPISODES_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Marca (ou desmarca) vários episódios de uma vez e avisa as telas abertas. */
+export function setEpisodesWatched(episodeIds: string[], isWatched: boolean): void {
+  const watched = getWatchedEpisodes();
+  for (const id of episodeIds) {
+    if (isWatched) watched.add(id);
+    else watched.delete(id);
+  }
+  try {
+    localStorage.setItem(WATCHED_EPISODES_KEY, JSON.stringify(Array.from(watched)));
+    window.dispatchEvent(new CustomEvent(WATCHED_CHANGE_EVENT));
+  } catch {
+    // armazenamento indisponível
+  }
+}
+
+/** Alterna um episódio e devolve o novo estado (`true` = assistido). */
+export function toggleEpisodeWatched(episodeId: string): boolean {
+  const next = !getWatchedEpisodes().has(episodeId);
+  setEpisodesWatched([episodeId], next);
+  return next;
+}
+
+export function useWatchedEpisodes() {
+  const [watched, setWatched] = useState<Set<string>>(() => getWatchedEpisodes());
+
+  useEffect(() => {
+    const onUpdate = () => setWatched(getWatchedEpisodes());
+    window.addEventListener(WATCHED_CHANGE_EVENT, onUpdate);
+    window.addEventListener('storage', onUpdate);
+    return () => {
+      window.removeEventListener(WATCHED_CHANGE_EVENT, onUpdate);
+      window.removeEventListener('storage', onUpdate);
+    };
+  }, []);
+
+  return {
+    isWatched: (id: string) => watched.has(id),
+    toggleWatched: (id: string) => toggleEpisodeWatched(id),
+    setEpisodesWatched: (ids: string[], isWatched: boolean) => setEpisodesWatched(ids, isWatched),
+  };
+}
+
+const ACTIVE_SERIES_CONTEXT_KEY = 'lunio_active_series_context';
+
+export function saveActiveSeriesContext(ctx: CatalogSeriesContext | null): void {
+  try {
+    if (ctx) sessionStorage.setItem(ACTIVE_SERIES_CONTEXT_KEY, JSON.stringify(ctx));
+    else sessionStorage.removeItem(ACTIVE_SERIES_CONTEXT_KEY);
+  } catch {
+    // sessionStorage indisponível
+  }
+}
+
+/** Confere o que veio do `sessionStorage` (pode ser de uma versão antiga ou estar cortado): forma errada vira `null`, episódio inválido é descartado. */
+export function parseSeriesContext(value: unknown): CatalogSeriesContext | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  const text = (x: unknown) => (typeof x === 'string' ? x : null);
+  const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+  const seriesId = text(v.seriesId);
+  const seriesTitle = text(v.seriesTitle);
+  const seriesType = text(v.seriesType);
+  const currentEpisodeId = text(v.currentEpisodeId);
+  const season = num(v.season);
+  const episode = num(v.episode);
+  if (seriesId === null || seriesTitle === null || seriesType === null || currentEpisodeId === null || season === null || episode === null) return null;
+  if (!Array.isArray(v.episodes)) return null;
+  const episodes: CatalogSeriesContext['episodes'] = [];
+  for (const raw of v.episodes) {
+    const e = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const id = text(e.id);
+    const s = num(e.season);
+    const n = num(e.episode);
+    if (!id || s === null || n === null) continue;
+    episodes.push({
+      id,
+      season: s,
+      episode: n,
+      title: text(e.title) ?? '',
+      overview: text(e.overview) ?? undefined,
+      thumbnail: text(e.thumbnail) ?? undefined,
+      released: text(e.released) ?? undefined,
+    });
+  }
+  return { seriesId, seriesTitle, seriesType, currentEpisodeId, season, episode, episodes };
+}
+
+export function loadActiveSeriesContext(): CatalogSeriesContext | null {
+  try {
+    const raw = sessionStorage.getItem(ACTIVE_SERIES_CONTEXT_KEY);
+    return raw ? parseSeriesContext(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
