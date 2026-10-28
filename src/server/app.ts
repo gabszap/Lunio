@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { apiGate } from './gate';
 import { handleDrive } from './routes/drive';
+import { handleCatalog } from './routes/catalog';
 import { handleFont } from './routes/font';
 import { handleFontMap } from './routes/fontmap';
 import { handleHls } from './routes/hls';
@@ -47,6 +48,7 @@ export function createApiRouter(): Router {
   router.use('/api/upstream', handleUpstreamStatus);
   router.use('/api/tracks', (req, res) => void handleTracks(req, res));
   router.use('/api/subtitle', (req, res) => void handleSubtitle(req, res));
+  router.use('/api/catalog', (req, res) => void handleCatalog(req, res));
   router.use('/api/fontmap', (req, res) => void handleFontMap(req, res));
   router.use('/api/font', (req, res) => void handleFont(req, res));
   router.use('/api/hls', (req, res) => void handleHls(req, res));

@@ -10,6 +10,8 @@ import { RoomLobbyModal } from './components/RoomLobbyModal';
 import { UsernameModal, getLastUsername, shouldSkipNamePrompt } from './components/UsernameModal';
 import { SubtitleModal } from './components/SubtitleModal';
 import { Modal, PrimaryButton, Spinner } from './components/ui';
+import { readDetailFromUrl, readSearchFromUrl, readSeasonFromUrl } from './lib/searchUrl';
+import { canonicalizeCatalogUrl, pushTabUrl, tabFromPath } from './lib/homeRoute';
 import { HomeLayout, HomeTab } from './components/home/HomeLayout';
 import { RoomMenu, SourceStep } from './components/home/RoomMenu';
 import { StreamStep } from './components/home/StreamStep';
@@ -58,7 +60,17 @@ export default function App() {
   // Trocar o idioma remonta a árvore inteira (a troca só existe na Home, sem vídeo tocando)
   const lang = useLang();
   const [view, setView] = useState<'home' | 'player'>('home');
-  const [homeTab, setHomeTab] = useState<HomeTab>('room');
+  // Busca, título e temporada vindos do endereço valem só na abertura do catálogo (ver o efeito de `homeTab` abaixo)
+  const initialSearch = useRef(readSearchFromUrl());
+  const initialDetail = useRef(readDetailFromUrl());
+  const initialSeason = useRef(readSeasonFromUrl());
+  // A aba vem da rota (/catalog, /home, /status); `/` com busca ou título do catálogo (sem sala) é o catálogo
+  const [homeTab, setHomeTab] = useState<HomeTab>(() => {
+    const fromPath = tabFromPath(window.location.pathname);
+    if (fromPath !== 'room') return fromPath;
+    const hasRoom = new URLSearchParams(window.location.search).has('room');
+    return (initialSearch.current || initialDetail.current) && !hasRoom ? 'catalog' : 'room';
+  });
   const [homeStep, setHomeStep] = useState<HomeStep>('menu');
   const [joinPrefill, setJoinPrefill] = useState<{ code: string; error: JoinError | null }>({ code: '', error: null });
   const [watchIntent, setWatchIntent] = useState<WatchIntent | null>(null);
@@ -103,6 +115,29 @@ export default function App() {
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [view, homeTab, homeStep]);
+
+  // A aba vai para a rota. Dentro do Discord a Activity roda sob o proxy do Discord: ali o endereço não muda.
+  useEffect(() => {
+    if (view !== 'home' || discordManager.getState().isEmbedded) return;
+    if (homeTab === 'catalog' && tabFromPath(window.location.pathname) !== 'catalog') canonicalizeCatalogUrl();
+    else pushTabUrl(homeTab);
+    // Sair do catálogo (para a Sala ou o Status) e voltar abre o catálogo limpo, não a busca ou o título do endereço da abertura
+    if (homeTab !== 'catalog') {
+      initialSearch.current = '';
+      initialDetail.current = null;
+      initialSeason.current = null;
+    }
+  }, [homeTab, view]);
+
+  // Voltar/avançar do navegador entre as abas
+  useEffect(() => {
+    const onPop = () => {
+      const tab = tabFromPath(window.location.pathname);
+      setHomeTab((current) => (current === tab ? current : tab));
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   const goHome = useCallback((tab: HomeTab = 'room', step: HomeStep = 'menu') => {
     setView('home');
@@ -479,6 +514,9 @@ export default function App() {
           {homeTab === 'catalog' ? (
             <Suspense fallback={<PanelFallback />}>
               <CatalogTab
+                initialQuery={initialSearch.current}
+                initialDetail={initialDetail.current}
+                initialSeason={initialSeason.current}
                 onWatch={(intent) => {
                   setWatchIntent(intent);
                   setHomeTab('room');

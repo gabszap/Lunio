@@ -85,6 +85,7 @@ const API_ERRORS: Record<string, string> = {
   upstream_rate_limited: msg('O servidor de vídeo pediu para esperar um pouco. Tente a legenda de novo em instantes.'),
   url_blocked: msg('Esse endereço não pode ser acessado pelo servidor.'),
   upstream_failed: msg('Não foi possível acessar o vídeo de origem.'),
+  catalog_unavailable: msg('O catálogo está fora do ar no momento.'),
   too_large: msg('Arquivo grande demais.'),
   quota_exceeded: msg('O servidor não tem mais espaço para envios.'),
   file_over_quota: msg('Esse arquivo é maior que o limite total de envios do servidor.'),

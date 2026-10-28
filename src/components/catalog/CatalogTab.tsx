@@ -2,19 +2,29 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Film, Play, Search, SearchX, Star, Tv, Users, X, RefreshCw } from 'lucide-react';
 import {
   CatalogItem,
+  CatalogManifest,
   CatalogMeta,
-  CatalogType,
+  CatalogRow,
   GENRES_PT,
+  SearchGroup,
   episodeTag,
+  fetchMalScore,
+  fetchManifest,
   fetchMeta,
-  fetchTop,
+  fetchRow,
   getMyList,
   isInMyList,
+  isSeriesType,
+  mergeGroups,
+  rowTitles,
   searchCatalog,
+  seasonOrder,
   toggleMyList,
 } from '../../lib/catalog';
 import { GhostButton, IconButton, PillTabs, PrimaryButton, Spinner, TextButton, cx } from '../ui';
 import { t } from '../../lib/i18n';
+import { DetailRef, writeDetailToUrl, writeSearchToUrl, writeSeasonToUrl } from '../../lib/searchUrl';
+import { ImdbIcon, MalIcon } from './BrandIcons';
 
 export interface WatchIntent {
   title: string;
@@ -22,6 +32,11 @@ export interface WatchIntent {
 }
 
 interface CatalogTabProps {
+  /** Busca e título vindos do endereço (`?search=`, `?detail=`). */
+  initialQuery?: string;
+  initialDetail?: DetailRef | null;
+  /** Temporada do título aberto pelo endereço (`?season=`). */
+  initialSeason?: number | null;
   onWatch: (intent: WatchIntent) => void;
   onCreateRoom: () => void;
 }
@@ -74,7 +89,7 @@ const PosterCard: React.FC<{ item: CatalogItem; onOpen: (item: CatalogItem) => v
     <span className="flex flex-col min-w-0 w-full">
       <span className="text-[13px] font-semibold text-lu-text truncate">{item.name}</span>
       <span className="text-[12px] text-lu-muted">
-        {showType ? `${item.type === 'series' ? t('Série') : t('Filme')}${item.year ? ` · ${item.year}` : ''}` : item.year || ' '}
+        {showType ? `${isSeriesType(item.type) ? t('Série') : t('Filme')}${item.year ? ` · ${item.year}` : ''}` : item.year || ' '}
       </span>
     </span>
   </button>
@@ -82,15 +97,39 @@ const PosterCard: React.FC<{ item: CatalogItem; onOpen: (item: CatalogItem) => v
 
 // ───────────────────────── Fileira com rolagem ─────────────────────────
 
-const Row: React.FC<{ title: string; load: () => Promise<CatalogItem[]>; onOpen: (item: CatalogItem) => void; items?: CatalogItem[] }> = ({
-  title,
-  load,
-  onOpen,
-  items: fixedItems,
-}) => {
+const Row: React.FC<{
+  title: string;
+  load: () => Promise<CatalogItem[]>;
+  onOpen: (item: CatalogItem) => void;
+  items?: CatalogItem[];
+  /** Só pede os itens quando a fileira chega perto da tela (uma fonte pode ter dezenas de fileiras). */
+  lazy?: boolean;
+}> = ({ title, load, onOpen, items: fixedItems, lazy = false }) => {
   const [items, setItems] = useState<CatalogItem[] | null>(fixedItems ?? null);
   const [error, setError] = useState(false);
+  const [visible, setVisible] = useState(!lazy);
   const scroller = useRef<HTMLDivElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (visible) return;
+    const el = sectionRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      setVisible(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: '400px' }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visible]);
 
   const fetchItems = () => {
     setError(false);
@@ -104,8 +143,8 @@ const Row: React.FC<{ title: string; load: () => Promise<CatalogItem[]>; onOpen:
       setItems(fixedItems);
       return;
     }
-    fetchItems();
-  }, [fixedItems]);
+    if (visible) fetchItems();
+  }, [fixedItems, visible]);
 
   const scrollBy = (dir: 1 | -1) => {
     const el = scroller.current;
@@ -113,7 +152,7 @@ const Row: React.FC<{ title: string; load: () => Promise<CatalogItem[]>; onOpen:
   };
 
   return (
-    <section aria-label={title} className="flex flex-col gap-2">
+    <section ref={sectionRef} aria-label={title} className="flex flex-col gap-2">
       <div className="flex items-center justify-between h-11">
         <h2 className="m-0 text-[18px] font-semibold tracking-[-0.01em]">{title}</h2>
         <div className="hidden sm:flex">
@@ -155,10 +194,27 @@ const Row: React.FC<{ title: string; load: () => Promise<CatalogItem[]>; onOpen:
 
 // ───────────────────────── Detalhe ─────────────────────────
 
-const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent: WatchIntent) => void }> = ({ item, onBack, onWatch }) => {
+/** Selo com a marca de uma fonte (IMDb, MyAnimeList): vira link para a página do título quando há endereço. */
+const BrandBadge: React.FC<{ href?: string; label: string; icon: React.ReactNode; children: React.ReactNode }> = ({ href, label, icon, children }) => {
+  const cls = 'inline-flex items-center gap-2 h-10 px-3 border border-white/18 rounded-lg text-[15px] font-semibold text-lu-text no-underline';
+  return href ? (
+    <a href={href} target="_blank" rel="noopener noreferrer" title={label} aria-label={label} className={cx(cls, 'hover:bg-white/8')}>
+      {icon}
+      {children}
+    </a>
+  ) : (
+    <span title={label} className={cls}>
+      {icon}
+      {children}
+    </span>
+  );
+};
+
+const Detail: React.FC<{ item: CatalogItem; initialSeason?: number | null; onBack: () => void; onWatch: (intent: WatchIntent) => void }> = ({ item, initialSeason = null, onBack, onWatch }) => {
   const [meta, setMeta] = useState<CatalogMeta | null>(null);
   const [error, setError] = useState(false);
-  const [season, setSeason] = useState<number>(1);
+  const [season, setSeason] = useState<number>(initialSeason ?? 1);
+  const [malStats, setMalStats] = useState<{ score: number; rank?: number } | null>(null);
   const [saved, setSaved] = useState(() => isInMyList(item.id));
 
   useEffect(() => {
@@ -167,17 +223,54 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
     fetchMeta(item.type, item.id)
       .then((m) => {
         setMeta(m);
-        const first = m.episodes.find((e) => e.season >= 1)?.season;
-        if (first) setSeason(first);
+        const order = seasonOrder(m.episodes.map((e) => e.season));
+        // A temporada do endereço vale se o título a tem; senão, a primeira
+        if (initialSeason !== null && order.includes(initialSeason)) setSeason(initialSeason);
+        else if (order[0] !== undefined) setSeason(order[0]);
       })
       .catch(() => setError(true));
   }, [item]);
 
+  // A nota do MyAnimeList vem à parte, com novas tentativas (a API pode estar fria ou limitando): o detalhe nunca espera por ela
+  useEffect(() => {
+    setMalStats(null);
+    const malId = meta?.malId;
+    if (!malId) return;
+    if (meta.malScore !== undefined) {
+      setMalStats({ score: meta.malScore, rank: meta.malRank });
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      for (const wait of [0, 5000, 15000]) {
+        if (wait) await new Promise((r) => setTimeout(r, wait));
+        if (cancelled) return;
+        try {
+          const r = await fetchMalScore(malId);
+          if (cancelled) return;
+          if (r.score !== null) return void setMalStats({ score: r.score, rank: r.rank });
+          if (!r.failed) return; // sem nota (ainda sem votos): não adianta insistir
+        } catch {
+          // tenta de novo
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [meta?.malId, meta?.malScore, meta?.malRank]);
+
   const data = meta ?? { ...item, genres: [], episodes: [] as CatalogMeta['episodes'], description: undefined, runtime: undefined, imdbRating: undefined, background: undefined };
-  const seasons = useMemo(() => Array.from(new Set(data.episodes.map((e) => e.season))).sort((a, b) => a - b), [data.episodes]);
+  // 1, 2, 3… e os especiais (temporada 0) no fim
+  const seasons = useMemo(() => seasonOrder(data.episodes.map((e) => e.season)), [data.episodes]);
   const episodes = data.episodes.filter((e) => e.season === season);
-  const isSeries = item.type === 'series';
-  const firstEpisode = data.episodes[0];
+  const isSeries = isSeriesType(item.type);
+  // A temporada aberta vai para o endereço (`?season=`) e sai dele ao fechar o título
+  useEffect(() => {
+    writeSeasonToUrl(isSeries && seasons.length > 0 ? season : null);
+  }, [season, isSeries, seasons.length]);
+  useEffect(() => () => writeSeasonToUrl(null), []);
+  const firstEpisode = data.episodes.find((e) => e.season >= 1) ?? data.episodes[0];
 
   const watchTitle = (preferSolo: boolean) => {
     const title = isSeries && firstEpisode ? `${data.name} · ${episodeTag(firstEpisode.season, firstEpisode.episode)}` : data.name;
@@ -186,7 +279,9 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
 
   const metaLine = [
     data.year,
-    isSeries && seasons.length ? `${seasons.length} ${seasons.length === 1 ? t('temporada') : t('temporadas')}` : data.runtime,
+    isSeries && seasons.length
+      ? `${seasons.filter((s) => s >= 1).length || seasons.length} ${(seasons.filter((s) => s >= 1).length || seasons.length) === 1 ? t('temporada') : t('temporadas')}`
+      : data.runtime,
     data.genres.slice(0, 3).map((g) => t(GENRES_PT[g] || g)).join(', '),
   ].filter(Boolean);
 
@@ -229,11 +324,27 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
                       <span>{bit}</span>
                     </React.Fragment>
                   ))}
-                  {data.imdbRating && (
-                    <span className="inline-flex items-center gap-1 px-1.5 border border-white/18 rounded text-[12px] font-semibold">
-                      <Star size={12} />
-                      {data.imdbRating}
-                    </span>
+                  {(data.imdbRating || data.imdbId) && (
+                    <BrandBadge
+                      href={data.imdbId ? `https://www.imdb.com/title/${data.imdbId}/` : undefined}
+                      label={data.imdbRating ? `${t('Nota do IMDb')}: ${data.imdbRating}` : t('Abrir no IMDb')}
+                      icon={<ImdbIcon />}
+                    >
+                      {data.imdbRating ?? 'IMDb'}
+                    </BrandBadge>
+                  )}
+                  {data.malId && (
+                    <BrandBadge
+                      href={`https://myanimelist.net/anime/${data.malId}`}
+                      label={
+                        malStats
+                          ? `${t('Nota do MyAnimeList')}: ${malStats.score.toFixed(2)}${malStats.rank ? ` · ${t('ranking')} #${malStats.rank}` : ''}`
+                          : t('Abrir no MyAnimeList')
+                      }
+                      icon={<MalIcon />}
+                    >
+                      {malStats ? malStats.score.toFixed(2) : 'MyAnimeList'}
+                    </BrandBadge>
                   )}
                 </p>
               )}
@@ -281,7 +392,7 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
                 size="sm"
                 value={String(season)}
                 onChange={(v) => setSeason(Number(v))}
-                options={seasons.map((s) => ({ value: String(s), label: t('Temporada {s}', { s }) }))}
+                options={seasons.map((s) => ({ value: String(s), label: s === 0 ? t('Especiais') : t('Temporada {s}', { s }) }))}
               />
             </div>
           </div>
@@ -306,7 +417,7 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
                 </span>
                 <span className="flex flex-col gap-1 min-w-0">
                   <span className="text-[14px] font-semibold">
-                    {ep.episode}. {ep.title}
+                    {ep.episode}. {ep.title || t('Episódio {v1}', { v1: ep.episode })}
                   </span>
                   <span className="text-[12px] text-lu-muted">
                     {[episodeTag(ep.season, ep.episode), ep.released ? new Date(ep.released).toLocaleDateString('pt-BR') : null].filter(Boolean).join(' · ')}
@@ -322,23 +433,119 @@ const Detail: React.FC<{ item: CatalogItem; onBack: () => void; onWatch: (intent
   );
 };
 
+// ───────────────────────── Fileiras da Home (do manifesto da fonte) ─────────────────────────
+
+const HomeRows: React.FC<{
+  manifest: CatalogManifest | null | 'error';
+  onOpen: (item: CatalogItem) => void;
+  onRetry: () => void;
+  onCreateRoom: () => void;
+}> = ({ manifest, onOpen, onRetry, onCreateRoom }) => {
+  if (manifest === null) {
+    return (
+      <>
+        {[0, 1].map((i) => (
+          <Row key={i} title=" " load={async () => []} onOpen={onOpen} lazy />
+        ))}
+      </>
+    );
+  }
+  if (manifest === 'error') {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+        <span className="w-[72px] h-[72px] rounded-[20px] bg-lu-surface border border-lu-border text-lu-muted flex items-center justify-center">
+          <SearchX size={32} />
+        </span>
+        <h1 className="mt-2 mb-0 text-[22px] font-semibold tracking-[-0.02em]">{t('O catálogo não respondeu')}</h1>
+        <p className="m-0 max-w-[440px] text-[14px] text-lu-muted">
+          {t('O catálogo está fora do ar agora. Se você já tem o vídeo, dá pra criar a sala direto.')}
+        </p>
+        <div className="flex flex-wrap justify-center gap-3 mt-3">
+          <GhostButton onClick={onRetry}>
+            <RefreshCw size={16} />
+            <span>{t('Tentar de novo')}</span>
+          </GhostButton>
+          <PrimaryButton onClick={onCreateRoom}>
+            <Users size={18} />
+            <span>{t('Criar sala com um vídeo')}</span>
+          </PrimaryButton>
+        </div>
+      </div>
+    );
+  }
+  if (manifest.rows.length === 0) {
+    return <p className="m-0 text-center text-[14px] text-lu-muted py-10">{t('Esta fonte não tem listas para mostrar. Use a busca.')}</p>;
+  }
+  const titles = rowTitles(manifest.rows);
+  return (
+    <>
+      {manifest.stale && (
+        <p className="m-0 text-[13px] text-lu-muted text-center">{t('O catálogo está fora do ar; mostrando o último conteúdo guardado.')}</p>
+      )}
+      {manifest.rows.map((row: CatalogRow, i) => (
+        <Row key={`${row.type}:${row.id}`} title={titles[i]} load={() => fetchRow(row)} onOpen={onOpen} lazy />
+      ))}
+    </>
+  );
+};
+
 // ───────────────────────── Aba ─────────────────────────
 
-type Filter = 'all' | CatalogType;
+type SearchMode = 'groups' | 'unified';
+type Filter = 'all' | 'movie' | 'series';
+const SEARCH_MODE_KEY = 'lunio_search_mode';
 
-export const CatalogTab: React.FC<CatalogTabProps> = ({ onWatch, onCreateRoom }) => {
-  const [query, setQuery] = useState('');
-  const [debounced, setDebounced] = useState('');
-  const [results, setResults] = useState<CatalogItem[] | null>(null);
+function readSearchMode(): SearchMode {
+  try {
+    return localStorage.getItem(SEARCH_MODE_KEY) === 'unified' ? 'unified' : 'groups';
+  } catch {
+    return 'groups';
+  }
+}
+
+export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initialDetail = null, initialSeason = null, onWatch, onCreateRoom }) => {
+  const [query, setQuery] = useState(initialQuery);
+  const [debounced, setDebounced] = useState(initialQuery.trim());
+  /** Um grupo por catálogo de busca da fonte (como no Stremio). */
+  const [results, setResults] = useState<SearchGroup[] | null>(null);
   const [searchError, setSearchError] = useState(false);
+  /** Por grupos (um por catálogo de busca, como no Stremio) ou unificada (tudo junto, sem repetidos, com filtro). */
+  const [mode, setMode] = useState<SearchMode>(readSearchMode);
   const [filter, setFilter] = useState<Filter>('all');
-  const [selected, setSelected] = useState<CatalogItem | null>(null);
+  // Um link com `?detail=` abre o título direto; os dados completos vêm do detalhe
+  const [selected, setSelected] = useState<CatalogItem | null>(() => (initialDetail ? { id: initialDetail.id, type: initialDetail.type, name: '' } : null));
   const [myList, setMyList] = useState<CatalogItem[]>(() => getMyList());
+  /** As fileiras vêm do manifesto da fonte configurada no servidor (na ordem dela). */
+  const [manifest, setManifest] = useState<CatalogManifest | null | 'error'>(null);
+  const [manifestTry, setManifestTry] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setManifest(null);
+    fetchManifest()
+      .then((m) => !cancelled && setManifest(m))
+      .catch(() => !cancelled && setManifest('error'));
+    return () => {
+      cancelled = true;
+    };
+  }, [manifestTry]);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebounced(query.trim()), 300);
     return () => window.clearTimeout(t);
   }, [query]);
+
+  // A busca vai para o endereço (e sai dele quando a aba fecha). Com um título aberto a rota é só /detail/…: a busca volta
+  // ao endereço quando o título fecha (ela continua aqui, no estado)
+  useEffect(() => {
+    writeSearchToUrl(selected ? '' : debounced);
+  }, [debounced, selected]);
+  useEffect(() => () => writeSearchToUrl(''), []);
+  // O título aberto também vai para o endereço
+  useEffect(() => {
+    writeDetailToUrl(selected ? { type: selected.type, id: selected.id } : null);
+  }, [selected]);
+  useEffect(() => () => writeDetailToUrl(null), []);
 
   useEffect(() => {
     if (!debounced) {
@@ -363,12 +570,25 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ onWatch, onCreateRoom })
   }, [selected]);
 
   if (selected) {
-    return <Detail item={selected} onBack={() => setSelected(null)} onWatch={onWatch} />;
+    const fromUrl = initialDetail && initialDetail.id === selected.id && initialDetail.type === selected.type;
+    return <Detail key={`${selected.type}/${selected.id}`} item={selected} initialSeason={fromUrl ? initialSeason : null} onBack={() => setSelected(null)} onWatch={onWatch} />;
   }
 
-  const movies = results?.filter((r) => r.type === 'movie') ?? [];
-  const series = results?.filter((r) => r.type === 'series') ?? [];
-  const shown = filter === 'all' ? results ?? [] : filter === 'movie' ? movies : series;
+  const groupsTotal = results?.reduce((n, g) => n + g.metas.length, 0) ?? 0;
+  const groupTitles = results ? rowTitles(results) : [];
+  const unified = results ? mergeGroups(results) : [];
+  const movies = unified.filter((r) => !isSeriesType(r.type));
+  const series = unified.filter((r) => isSeriesType(r.type));
+  const shown = filter === 'all' ? unified : filter === 'movie' ? movies : series;
+  const total = mode === 'unified' ? unified.length : groupsTotal;
+  const chooseMode = (next: SearchMode) => {
+    setMode(next);
+    try {
+      localStorage.setItem(SEARCH_MODE_KEY, next);
+    } catch {
+      // vale só nesta sessão
+    }
+  };
 
   return (
     <div className="flex flex-col gap-8">
@@ -399,7 +619,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ onWatch, onCreateRoom })
             <Spinner size={18} className="text-lu-accent" />
             {t('Buscando…')}
           </div>
-        ) : searchError || (results && results.length === 0) ? (
+        ) : searchError || (results && groupsTotal === 0) ? (
           <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
             <span className="w-[72px] h-[72px] rounded-[20px] bg-lu-surface border border-lu-border text-lu-muted flex items-center justify-center">
               <SearchX size={32} />
@@ -428,35 +648,53 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ onWatch, onCreateRoom })
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="m-0 text-[14px] text-lu-muted">
                 <strong className="text-lu-text font-semibold">
-                  {results!.length} {results!.length === 1 ? t('resultado') : t('resultados')}
+                  {total} {total === 1 ? t('resultado') : t('resultados')}
                 </strong>{' '}
                 pra “{debounced}”
               </p>
-              <PillTabs
-                label={t('Filtrar')}
-                size="sm"
-                value={filter}
-                onChange={setFilter}
-                options={[
-                  { value: 'all' as Filter, label: t('Tudo') },
-                  { value: 'movie' as Filter, label: t('Filmes · {length}', { length: movies.length }) },
-                  { value: 'series' as Filter, label: t('Séries · {length}', { length: series.length }) },
-                ]}
-              />
+              <div className="flex flex-wrap items-center gap-3">
+                {mode === 'unified' && (
+                  <PillTabs
+                    label={t('Filtrar')}
+                    size="sm"
+                    value={filter}
+                    onChange={setFilter}
+                    options={[
+                      { value: 'all' as Filter, label: t('Tudo') },
+                      { value: 'movie' as Filter, label: t('Filmes · {length}', { length: movies.length }) },
+                      { value: 'series' as Filter, label: t('Séries · {length}', { length: series.length }) },
+                    ]}
+                  />
+                )}
+                <PillTabs
+                  label={t('Modo de busca')}
+                  size="sm"
+                  value={mode}
+                  onChange={chooseMode}
+                  options={[
+                    { value: 'groups' as SearchMode, label: t('Por grupos') },
+                    { value: 'unified' as SearchMode, label: t('Unificada') },
+                  ]}
+                />
+              </div>
             </div>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(152px,1fr))] gap-x-4 gap-y-6">
-              {shown.map((item) => (
-                <PosterCard key={`${item.type}-${item.id}`} item={item} onOpen={setSelected} showType fluid />
-              ))}
-            </div>
+            {mode === 'groups' ? (
+              results!.map((group, i) => (
+                <Row key={`${group.type}:${group.id}`} title={groupTitles[i]} load={async () => group.metas} items={group.metas} onOpen={setSelected} />
+              ))
+            ) : (
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(152px,1fr))] gap-x-4 gap-y-6">
+                {shown.map((item) => (
+                  <PosterCard key={`${item.type}-${item.id}`} item={item} onOpen={setSelected} showType fluid />
+                ))}
+              </div>
+            )}
           </>
         )
       ) : (
         <>
           {myList.length > 0 && <Row title={t('Minha lista')} load={async () => myList} items={myList} onOpen={setSelected} />}
-          <Row title={t('Filmes populares')} load={() => fetchTop('movie')} onOpen={setSelected} />
-          <Row title={t('Séries populares')} load={() => fetchTop('series')} onOpen={setSelected} />
-          <Row title={t('Ação')} load={() => fetchTop('movie', 'Action')} onOpen={setSelected} />
+          <HomeRows manifest={manifest} onOpen={setSelected} onRetry={() => setManifestTry((n) => n + 1)} onCreateRoom={onCreateRoom} />
         </>
       )}
     </div>
