@@ -27,6 +27,7 @@ import { CatalogEpisode, episodeTag, loadActiveSeriesContext, saveActiveSeriesCo
 import type { PlaylistItem } from './types/sync';
 import { PlaylistPanel } from './components/PlaylistPanel';
 import { logger } from './lib/logger';
+import { describeSourceForLog } from './lib/mediaLog';
 import { discordManager, DiscordContextState } from './lib/discord';
 import { syncManager } from './lib/sync';
 import { generateRoomCode, roomCodeFrom } from './lib/roomCode';
@@ -374,7 +375,7 @@ export default function App() {
     // O menu de episódios só vale para o vídeo que veio de um episódio do catálogo; qualquer outro (link colado, filme, envio) o zera
     updateSeriesContext(options.seriesContext ?? null);
     if (options.recent) setRecentStreams((prev) => pushRecentStream(prev, merged.url, merged.title || ''));
-    logger.info(`[Mídia] Abrindo "${merged.title}"`, { url: merged.url });
+    logger.info(`[Mídia] Abrindo "${merged.title}" (${describeSourceForLog(merged.url)})`);
 
     if (mode === 'room') {
       // Cria a sala e já abre o player; o código fica no cabeçalho do player para compartilhar

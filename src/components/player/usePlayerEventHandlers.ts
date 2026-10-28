@@ -4,6 +4,7 @@ import type { PlaybackReadiness } from '../../types/media';
 import { formatTime } from '../../lib/chapters';
 import { apiFetch } from '../../lib/access';
 import { logger } from '../../lib/logger';
+import { describeSourceForLog } from '../../lib/mediaLog';
 import { sessionManager } from '../../lib/session';
 import { getVideoElement } from './dom';
 import { t } from '../../lib/i18n';
@@ -204,7 +205,7 @@ export function usePlayerEventHandlers(args: {
       code: errCode,
     });
 
-    logger.error(`[Player] Erro de reprodução: ${errMsg} (código ${errCode})`, { url: source.src });
+    logger.error(`[Player] Erro de reprodução: ${errMsg} (código ${errCode}) ${describeSourceForLog(source.src)}`);
 
     // Link remoto: o provedor pode ter limitado os pedidos (429). O <video> só vê um erro de rede; o servidor sabe o motivo
     if (/^https?:\/\//i.test(source.src)) {
