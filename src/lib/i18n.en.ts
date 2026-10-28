@@ -493,6 +493,8 @@ export const EN: Record<string, string> = {
   "Continuar assistindo": "Continue watching",
   "Tirar de Continuar assistindo": "Remove from Continue watching",
   "Progresso": "Progress",
+  "Retoma em {time}": "Resumes at {time}",
+  "Recomeçar do início": "Start over",
   "Voltar 10 s": "Back 10 s",
   "Voltar 10 segundos": "Back 10 seconds",
   "Voltar 10 segundos (←)": "Back 10 seconds (←)",

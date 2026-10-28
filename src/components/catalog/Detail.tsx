@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Bookmark, BookmarkCheck, Check, CheckCheck, ChevronLeft, Film, Play, Tv, Users, X } from 'lucide-react';
+import { Bookmark, BookmarkCheck, Check, CheckCheck, ChevronLeft, Film, History, Play, Tv, Users, X } from 'lucide-react';
 import {
   CatalogEpisode,
   CatalogItem,
@@ -22,7 +22,8 @@ import { StreamList } from './StreamList';
 import { type VideoAddon } from '../../lib/addons';
 import type { StreamOption } from '../../lib/streams';
 import type { CatalogSeriesContext } from '../../types/media';
-import type { CatalogRef } from '../../lib/continueWatching';
+import { CHANGE_EVENT as CONTINUE_CHANGE_EVENT, removeContinue, resumePositionFor, type CatalogRef } from '../../lib/continueWatching';
+import { formatTime } from '../../lib/chapters';
 import { discordManager } from '../../lib/discord';
 import type { WatchIntent } from './types';
 import { Poster, gradientFor } from './Poster';
@@ -172,6 +173,30 @@ export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, epis
   // "Onde assistir": filme direto no detalhe; série, no episódio aberto (`/detail/<tipo>/<id>/<videoId>`)
   const openEpisode = isSeries && episodeId ? data.episodes.find((e) => e.id === episodeId) : undefined;
   const episodeTitle = openEpisode ? `${data.name} · ${episodeTag(openEpisode.season, openEpisode.episode)}` : data.name;
+  // "Continuar assistindo": o vídeo abre onde parou ao escolher o stream; avisa antes e deixa recomeçar do início
+  const [resumeAt, setResumeAt] = useState<number | null>(null);
+  const openEpisodeRef = openEpisode ? { videoId: openEpisode.id, season: openEpisode.season, episode: openEpisode.episode } : undefined;
+  const openEpisodeKey = openEpisode?.id;
+  useEffect(() => {
+    const refresh = () => setResumeAt(resumePositionFor({ type: item.type, id: item.id, episode: openEpisodeRef }));
+    refresh();
+    window.addEventListener(CONTINUE_CHANGE_EVENT, refresh);
+    return () => window.removeEventListener(CONTINUE_CHANGE_EVENT, refresh);
+    // `openEpisodeRef` é derivado de `openEpisodeKey`
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.type, item.id, openEpisodeKey]);
+  const resumeHint =
+    resumeAt !== null && (!isSeries || openEpisode) ? (
+      <p className="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-[14px] text-lu-muted">
+        <span className="inline-flex items-center gap-2">
+          <History size={16} className="text-lu-accent" />
+          {t('Retoma em {time}', { time: formatTime(resumeAt) })}
+        </span>
+        <TextButton tone="accent" size="sm" onClick={() => removeContinue({ type: item.type, id: item.id })}>
+          {t('Recomeçar do início')}
+        </TextButton>
+      </p>
+    ) : null;
   const streamsList = discordManager.isDiscordActivity() ? (
     // Dentro do Discord o iframe só fala com origens mapeadas: o navegador não alcança o addon
     <p className="m-0 text-[14px] text-lu-muted">{t('Os addons não estão disponíveis no Discord. Cole o link do vídeo.')}</p>
@@ -310,7 +335,12 @@ export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, epis
         </div>
       </section>
 
-      {!isSeries && !error && <section className="px-4 sm:px-12 pt-2">{streamsList}</section>}
+      {!isSeries && !error && (
+        <section className="px-4 sm:px-12 pt-2 flex flex-col gap-3">
+          {!discordManager.isDiscordActivity() && resumeHint}
+          {streamsList}
+        </section>
+      )}
 
       {isSeries && openEpisode && (
         <section aria-label={t('Onde assistir')} className="px-4 sm:px-12 pt-2 flex flex-col gap-4">
@@ -341,6 +371,7 @@ export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, epis
               )}
             </h2>
           </div>
+          {!discordManager.isDiscordActivity() && resumeHint}
           {streamsList}
           <GhostButton className="self-start" onClick={() => onWatch({ title: episodeTitle, preferSolo: false })}>
             {t('Colar o link do vídeo')}

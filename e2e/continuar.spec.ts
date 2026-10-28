@@ -91,6 +91,7 @@ test.describe('Continuar assistindo', () => {
     // Clicar abre a página do episódio; escolher o stream de novo abre o vídeo no ponto em que parou
     await row.getByText('Série Dois').click();
     await expect.poll(() => new URL(page.url()).pathname).toBe('/detail/series/tt2/tt2%3A1%3A1');
+    await expect(page.getByText(/Retoma em \d{2}:\d{2}/)).toBeVisible(); // avisa antes de escolher o stream
     await page.getByRole('button', { name: /Filme\.1080p\.H264\.mkv/ }).click();
     await submitName(page, 'Ana');
     await expect(page).toHaveURL(/\?room=[A-Z0-9]+/);
@@ -134,6 +135,28 @@ test.describe('Continuar assistindo', () => {
     await seekAndPlay(page, 40);
     await page.waitForTimeout(7000);
     expect(await stored(page)).toEqual([]);
+    await page.close();
+  });
+
+  test('"Recomeçar do início" tira a retomada: o vídeo abre do zero e o título sai da fileira', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await setup(page);
+    await playEpisodeOne(page);
+    await seekAndPlay(page, 40);
+    await expect.poll(async () => (await stored(page))[0]?.position ?? 0, { timeout: 20_000 }).toBeGreaterThanOrEqual(35);
+
+    await page.goto('/detail/series/tt2/tt2%3A1%3A1');
+    await expect(page.getByText(/Retoma em \d{2}:\d{2}/)).toBeVisible();
+    await page.getByRole('button', { name: 'Recomeçar do início' }).click();
+    await expect(page.getByText(/Retoma em/)).toHaveCount(0);
+    expect(await stored(page)).toEqual([]);
+
+    await page.getByRole('button', { name: /Filme\.1080p\.H264\.mkv/ }).click();
+    await submitName(page, 'Ana');
+    await expect(page).toHaveURL(/\?room=[A-Z0-9]+/);
+    await waitReady(page);
+    await page.waitForTimeout(1500);
+    expect((await state(page)).t).toBeLessThan(10);
     await page.close();
   });
 });
