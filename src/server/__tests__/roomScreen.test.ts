@@ -191,3 +191,138 @@ describe('transmissão de tela: iniciar, ao vivo, parar', () => {
     expect(JSON.stringify(saved)).not.toContain('lunio/TELA');
   });
 });
+
+describe('transmissão de tela: chave, rotação e fim automático', () => {
+  const KEY = Buffer.alloc(32, 7).toString('base64');
+  const KEY2 = Buffer.alloc(32, 9).toString('base64');
+
+  /** Sala com a transmissão já iniciada e a época 1 enviada pelo Host. */
+  function streaming(guests: number) {
+    const r = room(guests);
+    send(r.host, { type: 'screen:start', quality: '1080p60' });
+    send(r.host, { type: 'screen:key', epoch: 1, key: KEY });
+    for (const s of r.all) s.clear();
+    return r;
+  }
+
+  it('repassa a chave aos espectadores e não devolve ao Host', () => {
+    const { host, viewers } = room(2);
+    send(host, { type: 'screen:start', quality: '1080p60' });
+    send(host, { type: 'screen:key', epoch: 1, key: KEY });
+    for (const v of viewers) expect(v.last('screen:key')).toEqual({ type: 'screen:key', epoch: 1, key: KEY });
+    expect(host.of('screen:key')).toHaveLength(0);
+  });
+
+  it('a chave não aparece em room:state, screen:state nem no console', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { host, viewers, all } = room(1);
+    send(host, { type: 'screen:start', quality: '1080p60' });
+    send(host, { type: 'screen:key', epoch: 1, key: KEY });
+    send(host, { type: 'screen:live' });
+    connect('TELA', 'late');
+    const states = all.flatMap((s) => [...s.of('room:state'), ...s.of('screen:state')]);
+    expect(states.length).toBeGreaterThan(0);
+    expect(JSON.stringify(states)).not.toContain(KEY);
+    expect(JSON.stringify(rm.getRoomState(rm.getOrCreateRoom('TELA')))).not.toContain(KEY);
+    const logged = [console.log, console.warn, console.error].flatMap((fn) => vi.mocked(fn).mock.calls);
+    expect(JSON.stringify(logged)).not.toContain(KEY);
+    expect(viewers[0].last('screen:key').key).toBe(KEY); // o canal certo continua funcionando
+  });
+
+  it('quem entra depois recebe a chave atual; o Host que reconecta não', () => {
+    const { host } = streaming(0);
+    const late = connect('TELA', 'late');
+    expect(late.last('screen:key')).toEqual({ type: 'screen:key', epoch: 1, key: KEY });
+    expect(late.sent.findIndex((m) => m.type === 'screen:key')).toBeGreaterThan(late.sent.findIndex((m) => m.type === 'room:state'));
+
+    rm.handleLeave(asWs(host));
+    const back = connect('TELA', 'host');
+    expect(back.of('screen:key')).toHaveLength(0);
+  });
+
+  it('ignora chave ruim, época que volta atrás e chave diferente na mesma época', () => {
+    const { host, viewers: [v] } = streaming(1);
+    const bad = [
+      { epoch: 2, key: Buffer.alloc(31, 1).toString('base64') },
+      { epoch: 0, key: KEY2 },
+      { epoch: 2, key: 123 },
+      { epoch: 1, key: KEY2 },
+    ];
+    for (const b of bad) send(host, { type: 'screen:key', ...b });
+    expect(v.of('screen:key')).toHaveLength(0);
+    send(host, { type: 'screen:key', epoch: 3, key: KEY2 });
+    expect(v.last('screen:key')).toEqual({ type: 'screen:key', epoch: 3, key: KEY2 });
+    v.clear();
+    send(host, { type: 'screen:key', epoch: 2, key: KEY }); // época menor que a atual (3)
+    expect(v.of('screen:key')).toHaveLength(0);
+  });
+
+  it('ignora chave e uso de quem não é o Host', () => {
+    const { viewers: [a, b] } = streaming(2);
+    send(a, { type: 'screen:key', epoch: 5, key: KEY2 });
+    send(a, { type: 'screen:usage', bytes: 1000 });
+    expect(b.of('screen:key')).toHaveLength(0);
+    const late = connect('TELA', 'late');
+    expect(late.last('screen:key').epoch).toBe(1);
+  });
+
+  it('expulsar ou banir pede a rotação (uma só em 500 ms) e o expulso não recebe a época nova', () => {
+    const { host, viewers: [a, b, c] } = streaming(3);
+    send(host, { type: 'room:kick', targetUserId: 'g1' });
+    send(host, { type: 'room:ban', targetUserId: 'g2' });
+    expect(host.of('screen:rotate_key')).toHaveLength(0);
+    vi.advanceTimersByTime(500);
+    expect(host.of('screen:rotate_key')).toHaveLength(1);
+
+    a.clear();
+    b.clear();
+    send(host, { type: 'screen:key', epoch: 2, key: KEY2 });
+    expect(c.last('screen:key')).toEqual({ type: 'screen:key', epoch: 2, key: KEY2 });
+    expect(a.of('screen:key')).toHaveLength(0);
+    expect(b.of('screen:key')).toHaveLength(0);
+  });
+
+  it('espectador que sai de vez faz o Host receber o pedido de rotação', () => {
+    const { host, viewers: [a] } = streaming(2);
+    send(a, { type: 'room:leave' });
+    vi.advanceTimersByTime(4000);
+    vi.advanceTimersByTime(500);
+    expect(host.of('screen:rotate_key')).toHaveLength(1);
+  });
+
+  it('trocar o Host encerra a transmissão e o novo Host não a herda', () => {
+    const { host, viewers: [a], all } = streaming(1);
+    send(host, { type: 'room:transfer_host', newHostId: 'g1' });
+    for (const s of all) expect(s.last('screen:state').screen).toBeNull();
+    expect(rm.getScreen('TELA')).toBeNull();
+    send(a, { type: 'screen:key', epoch: 9, key: KEY2 });
+    expect(host.of('screen:key')).toHaveLength(0);
+  });
+
+  it('passar o controle para si mesmo não encerra a transmissão', () => {
+    const { host } = streaming(1);
+    send(host, { type: 'room:transfer_host', newHostId: 'host' });
+    expect(rm.getScreen('TELA')).not.toBeNull();
+  });
+
+  it('o Host sair de vez encerra a transmissão para quem fica', () => {
+    const { host, viewers: [a] } = streaming(1);
+    send(host, { type: 'screen:live' });
+    expect(rm.getScreenStats().live).toBe(1);
+    rm.handleLeave(asWs(host));
+    vi.advanceTimersByTime(4000);
+    expect(a.last('screen:state').screen).toBeNull();
+    expect(rm.getScreenStats().live).toBe(0);
+  });
+
+  it('sala que esvazia e fecha não deixa transmissão nem timer pendurado', () => {
+    const { host, viewers: [a] } = streaming(1);
+    send(a, { type: 'room:leave' });
+    vi.advanceTimersByTime(4000); // pedido de rotação agendado (500 ms)
+    rm.handleLeave(asWs(host));
+    vi.advanceTimersByTime(4000 + 30_000 + 1000);
+    expect(rm.getScreen('TELA')).toBeNull();
+    expect(rm.getRoomInfo('TELA').exists).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});

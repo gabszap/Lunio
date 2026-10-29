@@ -9,7 +9,7 @@ import { warmUpMedia } from './media/resolver';
 import { pruneRoomUploads, uploadIdFromUrl } from './media/uploads';
 import { uploadIndex } from './media/uploadIndex';
 import { roomStore, type PersistedRoom, type RoomStore } from './roomStore';
-import { newScreenSession, screenShareEnabled } from './screenShare';
+import { isValidScreenEpoch, isValidScreenKey, newScreenSession, screenShareEnabled } from './screenShare';
 import { screenQuality, type RoomScreen } from '../types/screen';
 import type {
   ClientMessage,
@@ -178,6 +178,22 @@ export class RoomManager {
     room.screen = undefined;
     console.log(`[Screen] Transmissão encerrada na sala "${room.roomId}" (${reason}).`);
     if (reason !== 'room_closed') this.broadcast(room, { type: 'screen:state', screen: null });
+  }
+
+  /**
+   * Pede ao Host da transmissão uma chave nova (alguém saiu, foi expulso ou banido). Junta pedidos seguidos:
+   * um só `screen:rotate_key` depois de 500 ms; um pedido feito depois disso abre outra janela.
+   */
+  private requestKeyRotation(room: RoomInternal): void {
+    const screen = room.screen;
+    if (!screen || screen.rotateTimer) return;
+    screen.rotateTimer = setTimeout(() => {
+      screen.rotateTimer = undefined;
+      if (room.screen !== screen) return;
+      for (const [ws, s] of room.clients) {
+        if (s.userId === screen.info.hostId) this.send(ws, { type: 'screen:rotate_key' });
+      }
+    }, 500);
   }
 
   /** Quando a sala foi encerrada (ms), ou `undefined` se ainda existe / o servidor não sabe. */
@@ -382,6 +398,11 @@ export class RoomManager {
     // Votação para pular em andamento: o recém-chegado também a vê
     if (room.skipVote) this.send(ws, { type: 'skip:votes', skip: this.skipVoteState(room) });
 
+    // Transmissão com chave: quem entra agora a recebe (o Host da transmissão é quem a gera)
+    if (room.screen?.key && session.userId !== room.screen.info.hostId) {
+      this.send(ws, { type: 'screen:key', epoch: room.screen.key.epoch, key: room.screen.key.key });
+    }
+
     // Envia histórico de chat recente para o novo membro
     for (const msg of room.chatHistory.slice(-20)) {
       this.send(ws, {
@@ -439,6 +460,10 @@ export class RoomManager {
                 this.sendSystemChat(room, `${session.username} saiu da sala.`);
               }
 
+              // Transmissão: sem o Host dela acaba; se foi outra pessoa, a chave precisa girar
+              if (room.screen?.info.hostId === session.userId) this.endScreen(room, 'host_left');
+              else this.requestKeyRotation(room);
+
               // Se o Host saiu definitivamente, elege o próximo participante ativo como novo Host
               if (room.hostId === session.userId && room.clients.size > 0) {
                 const nextClient = room.clients.values().next().value;
@@ -473,6 +498,7 @@ export class RoomManager {
     // Alguém voltou a tempo (ou a sala já foi trocada): não encerra
     if (this.rooms.get(roomId) !== room || room.clients.size > 0 || room.pendingLeaves.size > 0) return;
     if (room.hostGraceTimer) clearTimeout(room.hostGraceTimer);
+    this.endScreen(room, 'room_closed');
     const pending = this.persistTimers.get(roomId);
     if (pending) clearTimeout(pending);
     this.persistTimers.delete(roomId);
@@ -1039,10 +1065,26 @@ export class RoomManager {
         break;
       }
 
+      case 'screen:key': {
+        const screen = currentRoom.screen;
+        if (!isHost || !screen || screen.info.hostId !== clientSession.userId) return;
+        if (!isValidScreenEpoch(msg.epoch) || !isValidScreenKey(msg.key)) return;
+        const current = screen.key;
+        if (current && (msg.epoch < current.epoch || (msg.epoch === current.epoch && msg.key !== current.key))) return;
+        screen.key = { epoch: msg.epoch, key: msg.key };
+        // Só quem está na sala agora recebe; o Host da transmissão já tem a chave
+        for (const [peerWs, peer] of currentRoom.clients) {
+          if (peer.userId !== screen.info.hostId) this.send(peerWs, { type: 'screen:key', epoch: msg.epoch, key: msg.key });
+        }
+        break;
+      }
+
       case 'room:transfer_host': {
         if (!isHost) return;
         const targetMember = Array.from(currentRoom.clients.values()).find((c) => c.userId === msg.newHostId);
         if (targetMember) {
+          // A transmissão é de quem a iniciou: com outro Host ela acaba (passar para si mesmo não conta)
+          if (targetMember.userId !== currentRoom.hostId) this.endScreen(currentRoom, 'host_changed');
           currentRoom.hostId = targetMember.userId;
           console.log(`[WatchParty] 👑 Controle transferido para "${targetMember.username}"`);
           this.sendSystemChat(currentRoom, `👑 ${clientSession.username} transferiu o controle para ${targetMember.username}.`);
@@ -1069,6 +1111,7 @@ export class RoomManager {
               targetWs.close(4001, 'Kicked by host');
             } catch {}
             this.handleLeave(targetWs);
+            this.requestKeyRotation(currentRoom); // o expulso ainda tem a chave: gira já, sem esperar a saída de vez
           }
         }
         break;
@@ -1099,6 +1142,7 @@ export class RoomManager {
               targetWs.close(4002, 'Banned by host');
             } catch {}
             this.handleLeave(targetWs);
+            this.requestKeyRotation(currentRoom); // o banido ainda tem a chave: gira já
           }
         }
 
