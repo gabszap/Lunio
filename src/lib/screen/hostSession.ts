@@ -78,6 +78,12 @@ export class HostScreenSession {
         await publisher.stop();
         return 'cancelled';
       }
+      // A sala pode ter encerrado a transmissão enquanto o seletor estava aberto: não anuncia o que ela não tem mais
+      if (signals.getScreen()?.hostId !== signals.getUserId()) {
+        await this.abort();
+        this.events.onStatus('idle');
+        return 'cancelled';
+      }
 
       signals.emitScreenKey(key);
       signals.emitScreenLive();

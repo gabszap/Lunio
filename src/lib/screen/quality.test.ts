@@ -40,6 +40,10 @@ describe('captureConstraints', () => {
     });
   });
 
+  it('keeps the page\'s own audio out of the captured system audio', () => {
+    expect((captureConstraints(q('720p30')) as any).audio.restrictOwnAudio).toBe(true);
+  });
+
   it('hides the Lunio tab itself from the picker (avoids an image loop and doubled sound)', () => {
     expect((captureConstraints(q('720p30')) as any).selfBrowserSurface).toBe('exclude');
   });

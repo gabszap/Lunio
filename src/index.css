@@ -306,3 +306,10 @@ body.is-fullscreen::-webkit-scrollbar,
 }
 
 
+
+/* Enquanto a transmissão de tela cobre o vídeo da sala, a legenda do filme não aparece por cima da tela transmitida */
+.screen-covering canvas.JASSUB,
+.screen-covering .JASSUB,
+.screen-covering .vds-captions {
+  visibility: hidden !important;
+}

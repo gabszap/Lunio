@@ -36,7 +36,8 @@ export const ScreenShareControl: React.FC<{ open: boolean; onOpenChange: (open: 
   if (!s.canBroadcast) return null;
 
   const busy = s.host.status === 'starting' || s.host.status === 'live';
-  const label = busy ? t('Parar transmissão') : t('Transmitir a tela');
+  // O botão abre o menu (onde está o "Parar transmissão"): o nome acessível é sempre o do menu
+  const label = t('Transmitir a tela');
 
   return (
     <div className="relative" ref={ref}>

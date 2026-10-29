@@ -159,6 +159,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // O volume e o mudo do player valem também para a transmissão de tela
   const { setVolume: setScreenVolume } = screenShare;
   useEffect(() => setScreenVolume(muted ? 0 : volume), [muted, volume, setScreenVolume]);
+  // Enquanto a transmissão cobre o vídeo, o vídeo da sala fica mudo MESMO que a pessoa mexa no mudo do player (o botão e a
+  // tecla M gravam direto no player): sem isto ligar o som tiraria o mudo e as duas trilhas tocariam juntas
+  const { covering: screenCovering } = screenShare;
+  useEffect(() => {
+    const player = playerRef.current;
+    if (player) player.muted = muted || screenCovering;
+  }, [muted, screenCovering]);
   const fullscreen = useFullscreen(playerRef, containerRef);
   const subs = useSubtitles({ playerRef, audioOffsetRef, setPaused, initialSubtitles });
   const { detectedSubtitles, readiness, setReadiness, activeSubtitle, setActiveSubtitle } = subs;
@@ -460,7 +467,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           : isFullscreen
           ? `h-full aspect-auto rounded-none bg-black aspect-${aspectMode}`
           : `relative w-full aspect-video lu-video-bg aspect-${aspectMode}`
-      } overflow-hidden select-none group text-lu-text ${isCursorHidden ? 'hide-cursor cursor-none' : ''}`}
+      } overflow-hidden select-none group text-lu-text ${isCursorHidden ? 'hide-cursor cursor-none' : ''} ${screenCovering ? 'screen-covering' : ''}`}
     >
       {/* Vidstack Media Player Core */}
       <MediaPlayer
@@ -486,7 +493,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         playbackRate={playbackRate}
         volume={volume}
         // Enquanto a transmissão de tela cobre o vídeo, ele segue sincronizado por baixo, mas mudo
-        muted={muted || screenShare.covering}
+        muted={muted || screenCovering}
         onCanPlay={playerEvents.onCanPlay}
         onTimeUpdate={playerEvents.onTimeUpdate}
         onPlay={playerEvents.onPlay}
@@ -565,10 +572,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {syncStatus.reconnecting && <ReconnectingBanner />}
 
       {/* Buffering */}
-      {isBuffering && !paused && !playbackError && <BufferingOverlay bufferAheadNow={bufferAheadNow} />}
+      {isBuffering && !paused && !playbackError && !screenCovering && <BufferingOverlay bufferAheadNow={bufferAheadNow} />}
 
       {/* Espectador: vídeo pausado pelo Host */}
-      {paused && isViewer && !playbackError && <HostPausedOverlay pausedByName={pausedByName} />}
+      {paused && isViewer && !playbackError && !screenCovering && <HostPausedOverlay pausedByName={pausedByName} />}
 
       {/* Clique no vídeo: play/pause; duplo clique: tela cheia */}
       <div

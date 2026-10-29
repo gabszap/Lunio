@@ -79,6 +79,8 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const capabilities = useMemo(() => (discord ? { host: false, viewer: false } : screenCapabilities()), [discord]);
 
   const [connected, setConnected] = useState(() => syncManager.getStatus().isConnected);
+  /** Está numa sala (mesmo que a conexão tenha caído e esteja voltando): quem assiste não é derrubado por uma queda curta. */
+  const [inRoom, setInRoom] = useState(() => Boolean(syncManager.getStatus().roomId));
   const [isHost, setIsHost] = useState(() => syncManager.getStatus().isHost);
   const [screen, setScreen] = useState<RoomScreen | null>(() => syncManager.getScreen());
   const [enabled, setEnabled] = useState(false);
@@ -102,6 +104,7 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
       syncManager.subscribeState(() => {
         const st = syncManager.getStatus();
         setConnected(st.isConnected);
+        setInRoom(Boolean(st.roomId));
         setIsHost(st.isHost);
         setScreen(syncManager.getScreen());
       }),
@@ -122,7 +125,7 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     };
   }, [connected, isHost, capabilities.host]);
 
-  // Baixa o motor antes de ele ser preciso: o seletor de tela tem pouco tempo depois do clique
+  // Baixa o motor assim que a pessoa pode transmitir (ou que há uma transmissão para assistir): o seletor de tela tem pouco tempo depois do clique
   useEffect(() => {
     if (canBroadcast || (capabilities.viewer && screen?.live && !isBroadcaster)) void preloadScreenEngine();
   }, [canBroadcast, capabilities.viewer, screen?.live, isBroadcaster]);
@@ -147,26 +150,46 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   // Aviso curto quando a transmissão acaba
   useEffect(() => {
-    if (viewerStatus !== 'ended') return;
+    if (viewerStatus !== 'ended') {
+      setEndedNotice(false); // o aviso é de uma transmissão que acabou: não sobrevive a outra tentativa nem a outra sala
+      return;
+    }
     setEndedNotice(true);
     const id = setTimeout(() => setEndedNotice(false), ENDED_NOTICE_MS);
     return () => clearTimeout(id);
   }, [viewerStatus]);
 
-  const teardown = useCallback(() => {
+  const teardownHost = useCallback(() => {
     void hostRef.current?.stop();
     hostRef.current = null;
-    viewerRef.current?.dispose();
-    viewerRef.current = null;
     setHostStatus('idle');
-    setViewerStatus('idle');
+    setHostError(null);
+    setHostNotice(null);
   }, []);
 
-  // Saiu da sala, foi expulso ou a conexão acabou: nada de sessão viva
+  const teardownViewer = useCallback(() => {
+    viewerRef.current?.dispose();
+    viewerRef.current = null;
+    setViewerStatus('idle');
+    setViewerError(null);
+    setEndedNotice(false);
+  }, []);
+
+  // O Host sem conexão com a sala deixa de transmitir (o servidor também encerra); quem assiste só sai ao deixar a sala,
+  // porque a imagem vem do relay e uma queda curta do WebSocket não precisa interrompê-la
   useEffect(() => {
-    if (!connected) teardown();
-  }, [connected, teardown]);
-  useEffect(() => teardown, [teardown]);
+    if (!connected) teardownHost();
+  }, [connected, teardownHost]);
+  useEffect(() => {
+    if (!inRoom) teardownViewer();
+  }, [inRoom, teardownViewer]);
+  useEffect(
+    () => () => {
+      teardownHost();
+      teardownViewer();
+    },
+    [teardownHost, teardownViewer]
+  );
 
   const startBroadcast = useCallback(async (q: ScreenQuality) => {
     if (hostRef.current) return;

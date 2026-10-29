@@ -167,7 +167,58 @@ describe('endings', () => {
   });
 });
 
+describe('returning to the video while still connecting', () => {
+  it('cancels the attempt: no viewer is created or left running when the token finally arrives', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const t = setup();
+    (t.api.fetchToken as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      await gate;
+      return { url: 'https://relay.test/SUB', path: 'lunio/R/abc', publish: false, quality: '1080p60', sessionId: 's1' };
+    });
+    const watching = t.session.watch();
+    t.session.returnToVideo();
+    expect(t.statuses.at(-1)![0]).toBe('idle');
+    release();
+    await watching;
+    expect(t.fv.calls).not.toContain('watch');
+    expect(t.statuses.at(-1)![0]).toBe('idle');
+    // e dá para tentar de novo depois
+    (t.api.fetchToken as ReturnType<typeof vi.fn>).mockImplementation(async () => ({ url: 'https://relay.test/SUB', path: 'lunio/R/abc', publish: false, quality: '1080p60', sessionId: 's1' }));
+    await t.session.watch();
+    expect(t.fv.calls).toContain('watch');
+  });
+
+  it('cancelling after the viewer exists but before it connects stops that viewer', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const t = setup();
+    t.fv.v.watch.mockImplementation(async () => {
+      await gate;
+    });
+    const watching = t.session.watch();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    t.session.returnToVideo();
+    release();
+    await watching;
+    expect(t.fv.v.stop).toHaveBeenCalled();
+    expect(t.statuses.at(-1)![0]).toBe('idle');
+  });
+});
+
 describe('errors', () => {
+  it('a key that fails to load does not break watching or leave an unhandled rejection', async () => {
+    const t = setup([key(1)]);
+    t.fv.v.addKey.mockRejectedValueOnce(new Error('chave ruim'));
+    await t.session.watch();
+    expect(t.fv.v.watch).toHaveBeenCalled();
+    t.fv.v.addKey.mockRejectedValueOnce(new Error('outra'));
+    t.sig.pushKey(key(2));
+    await Promise.resolve();
+  });
+
   it('a token refusal (not live yet) becomes an error status with the sentence, and watch can be retried', async () => {
     const t = setup([], new Error('A transmissão ainda não começou.'));
     await t.session.watch();

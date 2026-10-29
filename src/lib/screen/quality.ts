@@ -20,7 +20,8 @@ export function captureConstraints(q: ScreenQuality): DisplayMediaStreamOptions 
     // Áudio do sistema como está: sem cancelamento de eco, supressão de ruído nem ganho automático
     // O Chromium esconde a aba do Lunio da lista: transmitir a própria aba cria um laço de imagem e som
     selfBrowserSurface: 'exclude',
-    audio: { systemAudio: 'include', echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 },
+    // restrictOwnAudio: o som do próprio Lunio (o vídeo da sala do Host) não entra na captura do áudio do sistema
+    audio: { systemAudio: 'include', restrictOwnAudio: true, echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 },
   } as DisplayMediaStreamOptions;
 }
 

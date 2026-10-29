@@ -21,6 +21,8 @@ export class ViewerScreenSession {
   private volume = 1;
   private disposed = false;
   private connecting = false;
+  /** Cada `watch()` é uma tentativa; "Voltar ao vídeo" durante a conexão invalida a que estava em curso. */
+  private attempt = 0;
   private paused = false;
   private lastStatus: ViewerScreenStatus = 'idle';
   /** Inscrições do espectador atual (chaves). */
@@ -57,14 +59,15 @@ export class ViewerScreenSession {
       return;
     }
 
+    const mine = ++this.attempt;
     this.connecting = true;
     this.emit('connecting');
     try {
       const token = await this.deps.api.fetchToken();
-      if (this.disposed) return;
+      if (this.disposed || mine !== this.attempt) return;
       this.watchForEnd();
       const viewer = await this.deps.createViewer({ onStatus: (s, d) => this.onViewerStatus(s, d) });
-      if (this.disposed) {
+      if (this.disposed || mine !== this.attempt) {
         viewer.stop();
         return;
       }
@@ -74,19 +77,29 @@ export class ViewerScreenSession {
 
       // As chaves já guardadas chegam na hora da inscrição; todas entram antes do primeiro quadro
       const loading: Promise<void>[] = [];
-      this.offs.push(this.deps.signals.subscribeScreenKey((k: ScreenKeyMaterial) => void loading.push(viewer.addKey(k))));
+      this.offs.push(this.deps.signals.subscribeScreenKey((k: ScreenKeyMaterial) => void loading.push(viewer.addKey(k).catch(() => {}))));
       await Promise.all(loading);
       await viewer.watch({ url: token.url, path: token.path });
     } catch (e) {
+      if (mine !== this.attempt) return; // a pessoa já voltou ao vídeo: o erro desta tentativa não interessa
       this.discardViewer();
       if (this.lastStatus !== 'error') this.emit('error', e instanceof Error && e.message ? e.message : screenFailedText());
     } finally {
-      this.connecting = false;
+      if (mine === this.attempt) this.connecting = false;
     }
   }
 
   /** "Voltar ao vídeo": cancela as inscrições (0 bytes do relay); `watch()` retoma depressa. */
   returnToVideo(): void {
+    if (this.connecting) {
+      // Ainda conectando: desiste desta tentativa (nada fica rodando quando o token ou o motor chegarem)
+      this.attempt++;
+      this.connecting = false;
+      this.discardViewer();
+      this.unwatchEnd();
+      this.emit('idle');
+      return;
+    }
     if (!this.viewer || this.paused) return;
     this.paused = true;
     this.viewer.pause();

@@ -9,8 +9,12 @@ export const screenTimeoutText = () => t('O servidor não confirmou a transmiss�
 export const screenCancelledText = () => t('Você cancelou a seleção da tela.');
 export const screenFailedText = () => t('Não foi possível iniciar a transmissão.');
 
-/** O usuário fechou o seletor de tela do navegador (não é falha). */
+/**
+ * O usuário fechou o seletor de tela do navegador (não é falha). `NotAllowedError` também vem de bloqueio do sistema
+ * operacional (gravação de tela no macOS) ou de política: esses são falhas de verdade e a pessoa precisa saber.
+ */
 export function isPickerCancel(e: unknown): boolean {
-  const name = (e as { name?: string } | null)?.name;
-  return name === 'NotAllowedError' || name === 'AbortError';
+  const { name, message } = (e ?? {}) as { name?: string; message?: string };
+  if (name === 'AbortError') return true;
+  return name === 'NotAllowedError' && !/system|policy|disallowed/i.test(message ?? '');
 }

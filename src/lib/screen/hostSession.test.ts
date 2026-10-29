@@ -220,6 +220,26 @@ describe('HostScreenSession while live', () => {
   });
 });
 
+describe('HostScreenSession when the server ended the broadcast during the picker', () => {
+  it('does not announce a live broadcast the room no longer has: stops the publisher and cancels', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const t = setup({ startGate: gate });
+    const starting = t.session.start(QUALITY);
+    await vi.advanceTimersByTimeAsync(0);
+    t.sig.serverSets(SCREEN); // confirmou
+    await vi.advanceTimersByTimeAsync(0);
+    t.sig.serverSets(null); // acabou (ex.: um stop de órfã vindo de outra aba) enquanto o seletor está aberto
+    release();
+    expect(await starting).toBe('cancelled');
+    expect(t.sig.calls).not.toContain('live');
+    expect(t.sig.calls).not.toContain('key');
+    expect(t.p.pub.stop).toHaveBeenCalled();
+    expect(t.statuses.at(-1)![0]).toBe('idle');
+    expect(t.sig.listeners()).toBe(0);
+  });
+});
+
 describe('HostScreenSession.stop during start', () => {
   it('stopping while the picker is open cancels cleanly and leaves no live publisher', async () => {
     let release!: () => void;
