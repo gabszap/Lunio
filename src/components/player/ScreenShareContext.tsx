@@ -30,6 +30,8 @@ export interface ScreenShareValue {
   stopBroadcast(): void;
   watch(): void;
   returnToVideo(): void;
+  /** Fecha o aviso de erro da transmissão (do Host e do espectador). */
+  dismissError(): void;
   /** Volume efetivo do player (0 se mudo): a transmissão segue o controle de volume do player. */
   setVolume(v: number): void;
   /** O `<canvas>` do palco registra-se aqui; sobrevive à troca do `VideoPlayer` (que é remontado a cada vídeo). */
@@ -50,6 +52,7 @@ const INERT: ScreenShareValue = {
   stopBroadcast: () => {},
   watch: () => {},
   returnToVideo: () => {},
+  dismissError: () => {},
   setVolume: () => {},
   attachCanvas: () => {},
 };
@@ -222,6 +225,13 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const returnToVideo = useCallback(() => viewerRef.current?.returnToVideo(), []);
 
+  const dismissError = useCallback(() => {
+    setHostError(null);
+    setHostNotice(null);
+    setViewerError(null);
+    setViewerStatus((s) => (s === 'error' ? 'idle' : s));
+  }, []);
+
   const setVolume = useCallback((v: number) => {
     volumeRef.current = v;
     viewerRef.current?.setVolume(v);
@@ -247,10 +257,11 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
       stopBroadcast,
       watch,
       returnToVideo,
+      dismissError,
       setVolume,
       attachCanvas,
     }),
-    [canBroadcast, capabilities.viewer, screen, isBroadcaster, hostStatus, hostError, hostNotice, hasSubscribers, viewerStatus, viewerError, endedNotice, lastQuality, startBroadcast, stopBroadcast, watch, returnToVideo, setVolume, attachCanvas]
+    [canBroadcast, capabilities.viewer, screen, isBroadcaster, hostStatus, hostError, hostNotice, hasSubscribers, viewerStatus, viewerError, endedNotice, lastQuality, startBroadcast, stopBroadcast, watch, returnToVideo, dismissError, setVolume, attachCanvas]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

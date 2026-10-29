@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { screenQuality } from '../../types/screen';
-import { AUDIO_ENCODER_CONFIG, captureConstraints, captureFrameRate, keyframeInterval, videoEncoderConfig } from './quality';
+import { AUDIO_ENCODER_CONFIG, captureConstraints, captureFrameRate, keyframeInterval, qualityCost, videoEncoderConfig } from './quality';
 
 const q = (id: string) => screenQuality(id)!;
 
@@ -57,5 +57,18 @@ describe('keyframes and audio', () => {
 
   it('Opus 48 kHz stereo at 96 kbps', () => {
     expect(AUDIO_ENCODER_CONFIG).toEqual({ codec: 'opus', sampleRate: 48000, numberOfChannels: 2, bitrate: 96000 });
+  });
+});
+
+describe('qualityCost (what the Host is told before choosing)', () => {
+  it.each([
+    ['720p30', 2.7, 1.2],
+    ['720p60', 4.5, 2],
+    ['1080p30', 6, 2.7],
+    ['1080p60', 10, 4.5],
+    ['2160p30', 26, 11.7],
+    ['2160p60', 45, 20.3],
+  ])('%s -> %f Mbps and about %f GB/h per viewer', (id, mbps, gb) => {
+    expect(qualityCost(q(id))).toEqual({ mbps, gbPerHour: gb });
   });
 });

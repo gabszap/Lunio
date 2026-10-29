@@ -30,6 +30,7 @@ import { syncManager } from './lib/sync';
 import { generateRoomCode, roomCodeFrom } from './lib/roomCode';
 import { RecentStream, loadRecentStreams, pushRecentStream, saveRecentStreams } from './lib/recent';
 import { t, useLang } from './lib/i18n';
+import { ScreenShareProvider } from './components/player/ScreenShareContext';
 
 type HomeStep = 'menu' | 'join' | SourceStep;
 
@@ -499,6 +500,7 @@ export default function App() {
   };
 
   return (
+    <ScreenShareProvider>
     <React.Fragment key={lang}>
       {view === 'home' ? (
         <HomeLayout
@@ -615,5 +617,6 @@ export default function App() {
         </PrimaryButton>
       </Modal>
     </React.Fragment>
+    </ScreenShareProvider>
   );
 }

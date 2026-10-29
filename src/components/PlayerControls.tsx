@@ -22,6 +22,7 @@ import { VolumeDisplay } from './VolumeDisplay';
 import { SettingsMenu, formatMs } from './SettingsMenu';
 import { ChapterTimeline } from './ChapterTimeline';
 import { ChapterList } from './ChapterList';
+import { ScreenShareControl } from './player/ScreenShare';
 import { t, msg } from '../lib/i18n';
 import {
   Badge,
@@ -186,7 +187,7 @@ const ASPECT_LABEL: Record<'fit' | 'fill' | 'stretch', string> = {
   stretch: msg('Ajuste de tela: esticar (Z)'),
 };
 
-type MenuId = 'subs' | 'audio' | 'chapters' | 'settings' | null;
+type MenuId = 'subs' | 'audio' | 'chapters' | 'settings' | 'screen' | null;
 
 export const PlayerControls: React.FC<PlayerControlsProps> = ({
   title,
@@ -602,6 +603,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                 <Maximize2 size={20} />
               </IconButton>
             )}
+
+            <ScreenShareControl open={openMenu === 'screen'} onOpenChange={(o) => setOpenMenu(o ? 'screen' : null)} />
 
             {onWatchPartyToggle && (
               <IconButton

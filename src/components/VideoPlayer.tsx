@@ -50,6 +50,8 @@ import { usePlayerPrefs } from './player/usePlayerPrefs';
 import { usePlayerShortcuts } from './player/usePlayerShortcuts';
 import { useRoomSync } from './player/useRoomSync';
 import { useSubtitles } from './player/useSubtitles';
+import { ScreenHostPill, ScreenShareStandbyButton, ScreenStage } from './player/ScreenShare';
+import { useScreenShare } from './player/ScreenShareContext';
 
 export type { AspectMode } from './player/usePlayerPrefs';
 
@@ -153,6 +155,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   // Preferências locais, tela cheia e legendas
   const prefs = usePlayerPrefs();
+  const screenShare = useScreenShare();
+  // O volume e o mudo do player valem também para a transmissão de tela
+  const { setVolume: setScreenVolume } = screenShare;
+  useEffect(() => setScreenVolume(muted ? 0 : volume), [muted, volume, setScreenVolume]);
   const fullscreen = useFullscreen(playerRef, containerRef);
   const subs = useSubtitles({ playerRef, audioOffsetRef, setPaused, initialSubtitles });
   const { detectedSubtitles, readiness, setReadiness, activeSubtitle, setActiveSubtitle } = subs;
@@ -402,6 +408,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onCloseWatchParty={handleCloseWatchParty}
         onOpenRoomLobby={onOpenRoomLobby}
         onLeaveRoom={onLeaveRoom}
+        stage={
+          <>
+            <ScreenStage />
+            <ScreenHostPill />
+          </>
+        }
+        hostAction={<ScreenShareStandbyButton />}
       />
     );
   }
@@ -472,7 +485,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         logLevel="warn"
         playbackRate={playbackRate}
         volume={volume}
-        muted={muted}
+        // Enquanto a transmissão de tela cobre o vídeo, ele segue sincronizado por baixo, mas mudo
+        muted={muted || screenShare.covering}
         onCanPlay={playerEvents.onCanPlay}
         onTimeUpdate={playerEvents.onTimeUpdate}
         onPlay={playerEvents.onPlay}
@@ -511,6 +525,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </MediaProvider>
         <Captions className="vds-captions" />
       </MediaPlayer>
+
+      {/* Transmissão de tela: palco do espectador (por cima do vídeo) e faixa do Host */}
+      <ScreenStage />
+      <ScreenHostPill />
 
       {/* Legenda obrigatória sendo preparada (PlaybackReadiness v8) */}
       {subs.isPreparingSubtitle && readiness.selectedSubtitle.required && !subs.subtitleFailurePrompt && (

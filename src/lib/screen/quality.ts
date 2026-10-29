@@ -42,3 +42,9 @@ export function keyframeInterval(q: ScreenQuality): number {
 }
 
 export const AUDIO_ENCODER_CONFIG: AudioEncoderConfig = { codec: 'opus', sampleRate: 48000, numberOfChannels: 2, bitrate: 96000 };
+
+/** Quanto a qualidade consome: Mbps de vídeo e GB por hora que CADA espectador baixa (arredondados a 1 casa). */
+export function qualityCost(q: ScreenQuality): { mbps: number; gbPerHour: number } {
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+  return { mbps: round1(q.maxBitrate / 1e6), gbPerHour: round1((q.maxBitrate * 3600) / 8 / 1e9) };
+}
