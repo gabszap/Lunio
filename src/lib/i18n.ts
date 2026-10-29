@@ -91,6 +91,9 @@ const API_ERRORS: Record<string, string> = {
   file_over_quota: msg('Esse arquivo é maior que o limite total de envios do servidor.'),
   upload_in_progress: msg('Já existe um envio em andamento nesta sala.'),
   not_host: msg('Só o Host da sala pode enviar arquivos.'),
+  screenshare_disabled: msg('A transmissão de tela está desligada neste servidor.'),
+  no_screen: msg('Não há transmissão de tela nesta sala.'),
+  screen_not_live: msg('A transmissão ainda não começou.'),
   internal: msg('Erro inesperado no servidor.'),
 };
 
