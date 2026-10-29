@@ -23,3 +23,11 @@ export async function createScreenViewer(events: ViewerEvents): Promise<ScreenVi
   const [{ ScreenViewer: Viewer }, { moqTransport }] = await Promise.all([import('./viewer'), import('./moqTransport')]);
   return new Viewer({ transport: moqTransport() }, events);
 }
+
+/**
+ * Baixa o motor antes de ele ser preciso (o menu do Host abriu, ou uma transmissão começou): o seletor de tela só abre
+ * dentro de ~5 s do clique, então o download não pode ficar no caminho dele.
+ */
+export function preloadScreenEngine(): Promise<unknown> {
+  return Promise.allSettled([import('./publisher'), import('./viewer'), import('./moqTransport'), import('./publisherBrowser'), import('@moq/net')]);
+}
