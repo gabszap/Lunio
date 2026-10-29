@@ -91,7 +91,21 @@ async function user(browser: import('@playwright/test').Browser) {
 const shareBtn = (p: Page) => p.locator('#btn-screen-share');
 const canvas = (p: Page) => p.locator('canvas[aria-hidden="true"]');
 const log = (p: Page) => p.evaluate(() => (window as unknown as { __screenLog: FakeLog }).__screenLog);
-const live = async (p: Page) => (await (await p.request.get('/api/status')).json()).screen.live as number;
+// /api/status tem limite de pedidos por minuto (por IP): uma resposta recusada vale -1 (nunca é o valor esperado) e o poll espera
+const live = async (p: Page) => {
+  const res = await p.request.get('/api/status');
+  if (!res.ok()) return -1;
+  return ((await res.json()).screen?.live ?? -1) as number;
+};
+
+/**
+ * `screen.live` é o contador do servidor inteiro: a sala do teste anterior ainda pode estar encerrando (o servidor dá 4 s de
+ * graça a quem cai). Espera ficar em 0 antes de medir, para a linha de base ser a deste teste.
+ */
+async function idle(p: Page): Promise<number> {
+  await expect.poll(() => live(p), { timeout: 25_000, intervals: [1500] }).toBe(0);
+  return 0;
+}
 
 async function reveal(p: Page) {
   await p.mouse.move(640, 500);
@@ -131,11 +145,11 @@ test.describe('transmissão de tela (motor falso)', () => {
     await reveal(guest.page);
     await expect(shareBtn(guest.page)).toHaveCount(0);
 
-    const base = await live(host.page); // o contador é do servidor todo: compara com a linha de base
+    const base = await idle(host.page);
     await startSharing(host.page, /720p 60 fps/);
     const pubLog = await log(host.page);
     expect(pubLog.pub[0]).toEqual({ type: 'start', quality: '720p60', epoch: 1, hasUrl: true });
-    await expect.poll(() => live(host.page)).toBe(base + 1);
+    await expect.poll(() => live(host.page), { intervals: [1500] }).toBe(base + 1);
 
     // o espectador vê o cartão, assiste e recebe a chave
     await expect(guest.page.getByText('O Host está transmitindo a tela')).toBeVisible();
@@ -158,7 +172,7 @@ test.describe('transmissão de tela (motor falso)', () => {
     // parar: o servidor zera e o espectador é avisado
     const notice = expect(guest.page.getByText('A transmissão acabou')).toBeVisible();
     await host.page.getByRole('button', { name: 'Parar transmissão' }).first().click();
-    await expect.poll(() => live(host.page)).toBe(base);
+    await expect.poll(() => live(host.page), { intervals: [1500] }).toBe(base);
     await notice;
     expect((await log(host.page)).pub.at(-1)!.type).toBe('stop');
 
@@ -241,7 +255,7 @@ test.describe('transmissão de tela (motor falso)', () => {
     });
     await createRoom(host.page, 'Ana');
     await waitReady(host.page);
-    const base = await live(host.page);
+    const base = await idle(host.page);
     await reveal(host.page);
     await shareBtn(host.page).click();
     await host.page.getByRole('button', { name: 'Transmitir', exact: true }).click();
@@ -262,12 +276,12 @@ test.describe('transmissão de tela (motor falso)', () => {
     const code = await createRoom(host.page, 'Ana');
     await joinRoom(guest.page, code, 'Bia');
     await waitReady(host.page);
-    const base = await live(host.page);
+    const base = await idle(host.page);
     await startSharing(host.page);
     await watch(guest.page);
     const notice = expect(guest.page.getByText('A transmissão acabou')).toBeVisible({ timeout: 25_000 });
     await host.page.reload();
-    await expect.poll(() => live(host.page), { timeout: 20_000 }).toBe(base);
+    await expect.poll(() => live(host.page), { timeout: 25_000, intervals: [1500] }).toBe(base);
     await notice;
     await closeAll(host.context, guest.context);
   });
@@ -278,13 +292,13 @@ test.describe('transmissão de tela (motor falso)', () => {
     const code = await createRoom(host.page, 'Ana');
     await joinRoom(guest.page, code, 'Bia');
     await waitReady(host.page);
-    const base = await live(host.page);
+    const base = await idle(host.page);
     await startSharing(host.page);
     await watch(guest.page);
     const notice = expect(guest.page.getByText('A transmissão acabou')).toBeVisible({ timeout: 25_000 });
     await openParticipants(host.page);
     await host.page.getByRole('button', { name: 'Passar Host' }).first().click();
-    await expect.poll(() => live(host.page), { timeout: 20_000 }).toBe(base);
+    await expect.poll(() => live(host.page), { timeout: 25_000, intervals: [1500] }).toBe(base);
     await notice;
     await closeAll(host.context, guest.context);
   });
