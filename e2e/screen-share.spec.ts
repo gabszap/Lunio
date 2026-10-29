@@ -1,5 +1,5 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
-import { createRoom, joinRoom, newUser, openParticipants, video, waitReady } from './helpers';
+import { createRoom, joinRoom, newUser, openParticipants, submitName, video, waitReady } from './helpers';
 
 /**
  * Transmissão de tela, de ponta a ponta com o motor FALSO: servidor, WebSocket, token, chaves, interface e ciclo de
@@ -203,6 +203,35 @@ test.describe('transmissão de tela (motor falso)', () => {
 
     expect((await log(host.page)).pub.filter((e) => e.type === 'rotate').map((e) => e.epoch)).toEqual([2, 3, 4]);
     await closeAll(host.context, stays.context, kicked.context, banned.context);
+  });
+
+  test('"Compartilhar sua tela" na Home cria a sala sem vídeo e o Host transmite dali', async ({ browser }) => {
+    const host = await user(browser);
+    const guest = await user(browser);
+    await host.page.goto('/');
+    const option = host.page.getByRole('button', { name: /Compartilhar sua tela/ });
+    await expect(option).toBeEnabled();
+    await expect(option).not.toContainText('Em breve');
+    await option.click();
+    await submitName(host.page, 'Ana');
+    await expect(host.page).toHaveURL(/\?room=[A-Z0-9]+/);
+    const code = new URL(host.page.url()).searchParams.get('room')!;
+    await expect(host.page.getByText('Nenhum vídeo na sala')).toBeVisible();
+
+    // sem vídeo, o Host transmite pelo botão da própria tela de espera
+    await expect(shareBtn(host.page)).toBeVisible();
+    await shareBtn(host.page).click();
+    await host.page.getByRole('menuitemradio', { name: /1080p 30 fps/ }).click();
+    await host.page.getByRole('button', { name: 'Transmitir', exact: true }).click();
+    await expect(host.page.getByText('Transmitindo').first()).toBeVisible();
+    expect((await log(host.page)).pub[0]).toMatchObject({ type: 'start', quality: '1080p30' });
+
+    // e quem entra numa sala sem vídeo também assiste
+    await guest.page.goto(`/?room=${code}`);
+    await submitName(guest.page, 'Bia');
+    await expect(guest.page.getByText('O Host está transmitindo a tela')).toBeVisible();
+    await watch(guest.page);
+    await closeAll(host.context, guest.context);
   });
 
   test('cancelar o seletor de tela não deixa transmissão no servidor nem alerta', async ({ browser }) => {

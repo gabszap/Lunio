@@ -441,6 +441,18 @@ export default function App() {
     setWatchIntent(null);
   };
 
+  /** "Compartilhar sua tela": cria a sala sem vídeo e abre o player; é lá que o Host escolhe a qualidade e transmite. */
+  const startScreenRoom = () => {
+    withName(() => {
+      setPendingSubtitles([]);
+      setAutoPlayNext(false);
+      setCurrentPayload(EMPTY_PAYLOAD);
+      setWatchIntent(null);
+      ensureRoom();
+      setView('player');
+    }, t('Criar sala'));
+  };
+
   const renderRoomTab = () => {
     switch (homeStep) {
       case 'join':
@@ -487,6 +499,10 @@ export default function App() {
           <RoomMenu
             onPick={(step) => {
               setWatchIntent(null);
+              if (step === 'screen') {
+                startScreenRoom();
+                return;
+              }
               setHomeStep(step);
             }}
             onJoin={() => {

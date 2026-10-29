@@ -2,6 +2,7 @@ import React from 'react';
 import { ArrowRight, Captions, FolderOpen, Link, LogIn, Magnet, MonitorUp, RefreshCw, Upload, Users, Youtube } from 'lucide-react';
 import { GhostButton, HomeCard, TextButton, cx } from '../ui';
 import { t, msg } from '../../lib/i18n';
+import { useScreenMenu } from './useScreenMenu';
 
 export type SourceStep = 'upload' | 'torrent' | 'youtube' | 'drive' | 'screen' | 'stream';
 
@@ -12,6 +13,8 @@ interface SourceOption {
   icon: React.ReactNode;
   /** Ainda sem motor no servidor: aparece desativado com selo "Em breve". */
   soon?: boolean;
+  /** Depende de o servidor ter a transmissão ligada e de o navegador saber transmitir. */
+  needsScreen?: boolean;
 }
 
 const SOURCES: SourceOption[] = [
@@ -19,7 +22,7 @@ const SOURCES: SourceOption[] = [
   { step: 'torrent', title: msg('Abrir torrent'), hint: msg('Cole um magnet link'), icon: <Magnet size={20} />, soon: true },
   { step: 'youtube', title: msg('Abrir vídeo do YouTube'), hint: msg('Vídeo ou live, pelo link'), icon: <Youtube size={20} /> },
   { step: 'drive', title: msg('Abrir o Google Drive'), hint: msg('Um vídeo do seu Drive, pelo link'), icon: <FolderOpen size={20} /> },
-  { step: 'screen', title: msg('Compartilhar sua tela'), hint: msg('Sua tela vira a sala, ao vivo'), icon: <MonitorUp size={20} />, soon: true },
+  { step: 'screen', title: msg('Compartilhar sua tela'), hint: msg('Sua tela vira a sala, ao vivo'), icon: <MonitorUp size={20} />, needsScreen: true },
   { step: 'stream', title: msg('Colar link de stream'), hint: msg('Stremio, TorBox, .mkv ou debrid'), icon: <Link size={20} /> },
 ];
 
@@ -29,22 +32,26 @@ interface RoomMenuProps {
   onCatalog: () => void;
 }
 
-export const RoomMenu: React.FC<RoomMenuProps> = ({ onPick, onJoin, onCatalog }) => (
+export const RoomMenu: React.FC<RoomMenuProps> = ({ onPick, onJoin, onCatalog }) => {
+  const screenState = useScreenMenu();
+  return (
   <>
     <HomeCard>
       <h1 className="m-0 text-[22px] sm:text-[24px] font-semibold tracking-[-0.02em] leading-tight">{t('Crie uma sala')}</h1>
       <p className="mt-1.5 mb-5 text-[14px] text-lu-muted">{t('Solte um vídeo e assista na hora com os amigos.')}</p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {SOURCES.map((s) => (
+        {SOURCES.map((s) => {
+          const blocked = Boolean(s.soon) || (Boolean(s.needsScreen) && screenState !== 'available');
+          return (
           <button
             key={s.step}
             type="button"
-            disabled={s.soon}
+            disabled={blocked}
             onClick={() => onPick(s.step)}
             className={cx(
               'flex items-center justify-start gap-3.5 min-h-[76px] px-4 rounded-[14px] bg-lu-bg2 border border-lu-border text-left w-full transition-colors',
-              s.soon ? 'cursor-not-allowed opacity-60' : 'hover:bg-white/6'
+              blocked ? 'cursor-not-allowed opacity-60' : 'hover:bg-white/6'
             )}
           >
             <span className="w-10 h-10 rounded-[10px] bg-lu-elevated text-lu-accent flex items-center justify-center flex-none">
@@ -56,11 +63,15 @@ export const RoomMenu: React.FC<RoomMenuProps> = ({ onPick, onJoin, onCatalog })
                 {s.soon && (
                   <span className="px-1.5 py-px rounded-md bg-lu-elevated text-[11px] font-medium text-lu-muted whitespace-nowrap">{t('Em breve')}</span>
                 )}
+                {s.needsScreen && screenState === 'unavailable' && (
+                  <span className="px-1.5 py-px rounded-md bg-lu-elevated text-[11px] font-medium text-lu-muted whitespace-nowrap">{t('Indisponível')}</span>
+                )}
               </span>
               <span className="text-[12px] text-lu-muted">{t(s.hint)}</span>
             </span>
           </button>
-        ))}
+          );
+        })}
       </div>
 
       <div className="flex items-center justify-between gap-3 mt-5 pt-5 border-t border-lu-border flex-wrap">
@@ -90,4 +101,5 @@ export const RoomMenu: React.FC<RoomMenuProps> = ({ onPick, onJoin, onCatalog })
       </span>
     </div>
   </>
-);
+  );
+};

@@ -25,6 +25,16 @@ export function screenAvailability(a: {
 }
 
 /**
+ * A opção "Compartilhar sua tela" do menu da Home (ainda sem sala): `available` liga, `checking` espera a resposta do
+ * servidor (`enabled` ainda desconhecido: `null`), `unavailable` fica desligada. Quem não pode transmitir nunca espera.
+ */
+export function screenMenuState(a: { discord: boolean; hostCapable: boolean; enabled: boolean | null }): 'available' | 'checking' | 'unavailable' {
+  if (a.discord || !a.hostCapable) return 'unavailable';
+  if (a.enabled === null) return 'checking';
+  return a.enabled ? 'available' : 'unavailable';
+}
+
+/**
  * Transmissão que o servidor diz ser minha mas que esta página não está publicando: o Host recarregou a página (ou
  * abriu outra aba) e o publicador morreu com a página antiga. Deve ser encerrada, senão a sala fica "ao vivo" sem imagem.
  */

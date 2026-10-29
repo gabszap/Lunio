@@ -218,6 +218,7 @@ export const EN: Record<string, string> = {
   "Editar": "Edit",
   "Em “Acesso geral”, escolha": "Under “General access”, choose",
   "Em breve": "Coming soon",
+  "Indisponível": "Unavailable",
   "Encontrado{version}. Extração rápida de legendas disponível.": "Found{version}. Fast subtitle extraction available.",
   "Encontrado{version}. Faixas, troca de áudio e legendas disponíveis.": "Found{version}. Tracks, audio switching and subtitles available.",
   "Entendido": "Got it",
