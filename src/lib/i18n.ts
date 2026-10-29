@@ -94,6 +94,11 @@ const API_ERRORS: Record<string, string> = {
   screenshare_disabled: msg('A transmissão de tela está desligada neste servidor.'),
   no_screen: msg('Não há transmissão de tela nesta sala.'),
   screen_not_live: msg('A transmissão ainda não começou.'),
+  // Erros do WebSocket da sala (mesma frase do servidor, traduzida aqui)
+  screen_disabled: msg('A transmissão de tela está desligada neste servidor.'),
+  screen_active: msg('Já existe uma transmissão nesta sala.'),
+  screen_busy: msg('Há transmissões demais no momento. Tente de novo em instantes.'),
+  screen_bad_quality: msg('Qualidade de transmissão inválida.'),
   internal: msg('Erro inesperado no servidor.'),
 };
 
