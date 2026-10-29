@@ -16,10 +16,12 @@
   },
   "dependencies": {
     "@discord/embedded-app-sdk": "^2.5.0",
+    "@moq/net": "^0.4.7",
     "@tailwindcss/vite": "^4.1.14",
     "@vidstack/react": "^1.15.6",
     "@viren070/parse-torrent-title": "^0.8.8",
     "@vitejs/plugin-react": "^5.0.4",
+    "@zod/mini": "^4.6.7",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "hls.js": "^1.7.3",
@@ -31,7 +33,8 @@
     "react-dom": "^19.0.1",
     "vidstack": "^1.15.6",
     "vite": "^6.2.3",
-    "ws": "^8.21.3"
+    "ws": "^8.21.3",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
