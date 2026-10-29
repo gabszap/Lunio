@@ -2,6 +2,9 @@ import { discordManager } from './discord';
 import { clearRoomToken, setRoomToken } from './access';
 import { logger } from './logger';
 import { t } from './/i18n';
+import type { ScreenSignals } from './screen/signals';
+import type { ScreenKeyMaterial } from './screen/wire';
+import type { RoomScreen, ScreenQualityId } from '../types/screen';
 import type {
   ClientMessage,
   ServerMessage,
@@ -39,8 +42,16 @@ export type ErrorListener = (message: string, code?: string) => void;
 export type SkipVoteListener = (skip: import('../types/sync').SkipVoteState | null) => void;
 export type SkipPassedListener = (start: number, target: number) => void;
 
-class SyncManager {
+/** Quantas chaves da transmissão de tela o cliente guarda (a rotação troca a chave; quadros em voo ainda usam a anterior). */
+const SCREEN_KEYS_KEPT = 4;
+
+class SyncManager implements ScreenSignals {
   private ws: WebSocket | null = null;
+  /** Chaves da transmissão de tela recebidas da sala, em ordem de época. Só na memória; somem com a transmissão. */
+  private screenKeys: ScreenKeyMaterial[] = [];
+  private screenListeners = new Set<(screen: RoomScreen | null) => void>();
+  private screenKeyListeners = new Set<(key: ScreenKeyMaterial) => void>();
+  private screenRotateListeners = new Set<() => void>();
   private currentRoomId: string = '';
   private roomState: RoomState | null = null;
   /** Votação para pular o capítulo atual (null = nenhuma). Vem do servidor. */
@@ -421,7 +432,10 @@ class SyncManager {
     this.isConnected = false;
     this.isConnecting = false;
     this.currentRoomId = '';
+    const hadScreen = Boolean(this.roomState?.screen);
     this.roomState = null;
+    this.screenKeys = [];
+    if (hadScreen) this.notifyScreen(null);
     this.setSkipVote(null);
     this.chatHistory = [];
     clearRoomToken();
@@ -476,8 +490,10 @@ class SyncManager {
           } catch {}
         }
         const prevMedia = this.roomState?.media;
+        const prevScreen = this.roomState?.screen ?? null;
         const isFirstState = !this.roomState;
         this.roomState = msg.state;
+        this.afterScreenChange(prevScreen, msg.state.screen ?? null);
         if (isFirstState) {
           const host = msg.state.members.find((m) => m.isHost);
           logger.info(
@@ -562,6 +578,25 @@ class SyncManager {
         this.roomState.members = msg.members;
         this.roomState.hostId = msg.hostId;
         this.notifyState();
+        break;
+      }
+
+      case 'screen:state': {
+        if (!this.roomState) return;
+        const prev = this.roomState.screen ?? null;
+        this.roomState.screen = msg.screen;
+        this.afterScreenChange(prev, msg.screen);
+        this.notifyState();
+        break;
+      }
+
+      case 'screen:key': {
+        this.storeScreenKey(msg.epoch, msg.key);
+        break;
+      }
+
+      case 'screen:rotate_key': {
+        for (const listener of [...this.screenRotateListeners]) listener();
         break;
       }
 
@@ -937,6 +972,78 @@ class SyncManager {
     return () => {
       this.errorListeners.delete(listener);
     };
+  }
+
+  // --- Transmissão de tela (ScreenSignals) ---
+
+  public getScreen(): RoomScreen | null {
+    return this.roomState?.screen ?? null;
+  }
+
+  public getUserId(): string {
+    return this.user.id;
+  }
+
+  public subscribeScreen(listener: (screen: RoomScreen | null) => void): () => void {
+    this.screenListeners.add(listener);
+    return () => {
+      this.screenListeners.delete(listener);
+    };
+  }
+
+  public subscribeScreenKey(listener: (key: ScreenKeyMaterial) => void): () => void {
+    for (const key of [...this.screenKeys]) listener(key);
+    this.screenKeyListeners.add(listener);
+    return () => {
+      this.screenKeyListeners.delete(listener);
+    };
+  }
+
+  public subscribeScreenRotate(listener: () => void): () => void {
+    this.screenRotateListeners.add(listener);
+    return () => {
+      this.screenRotateListeners.delete(listener);
+    };
+  }
+
+  public emitScreenStart(quality: ScreenQualityId) {
+    this.send({ type: 'screen:start', quality });
+  }
+
+  public emitScreenLive() {
+    this.send({ type: 'screen:live' });
+  }
+
+  public emitScreenStop() {
+    this.send({ type: 'screen:stop' });
+  }
+
+  public emitScreenKey(key: ScreenKeyMaterial) {
+    this.send({ type: 'screen:key', epoch: key.epoch, key: key.key });
+  }
+
+  public emitScreenUsage(bytes: number) {
+    this.send({ type: 'screen:usage', bytes });
+  }
+
+  /** A transmissão mudou (ou acabou): chaves de uma transmissão que não existe mais não servem para nada. */
+  private afterScreenChange(prev: RoomScreen | null, next: RoomScreen | null) {
+    if (!next || (prev && prev.sessionId !== next.sessionId)) this.screenKeys = [];
+    if (prev?.sessionId === next?.sessionId && prev?.live === next?.live) return;
+    this.notifyScreen(next);
+  }
+
+  private notifyScreen(screen: RoomScreen | null) {
+    for (const listener of [...this.screenListeners]) listener(screen);
+  }
+
+  private storeScreenKey(epoch: unknown, key: unknown) {
+    if (typeof epoch !== 'number' || !Number.isInteger(epoch) || epoch < 1 || typeof key !== 'string' || !key) return;
+    if (this.screenKeys.some((k) => k.epoch === epoch)) return;
+    const material = { epoch, key };
+    this.screenKeys = [...this.screenKeys, material].sort((a, b) => a.epoch - b.epoch).slice(-SCREEN_KEYS_KEPT);
+    if (!this.screenKeys.includes(material)) return; // mais antiga que as guardadas
+    for (const listener of [...this.screenKeyListeners]) listener(material);
   }
 
   private notifyState() {
