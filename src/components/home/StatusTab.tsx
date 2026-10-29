@@ -27,6 +27,8 @@ interface StatusReport {
   redis: { enabled: boolean; connected: boolean };
   /** Fonte do catálogo: `ok` respondeu agora, `stale` está servindo a última resposta guardada, `name` vem do manifesto. */
   catalog?: { ok: boolean; stale: boolean; name: string; isDefault: boolean };
+  /** Transmissão de tela: só números (nunca o endereço do relay). */
+  screen?: { enabled: boolean; live: number; hostBytes: number; estimatedEgressBytes: number };
 }
 
 type Tone = 'success' | 'warning' | 'error';
@@ -189,6 +191,20 @@ export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
         : c.stale
           ? t('Catálogo fora do ar; mostrando o último conteúdo guardado. Links de stream continuam funcionando.')
           : t('Catálogo fora do ar. Links de stream continuam funcionando.'),
+    });
+  }
+
+  if (report?.screen?.enabled) {
+    const s = report.screen;
+    components.push({
+      id: 'screen',
+      label: t('Transmissão de tela'),
+      tone: 'success',
+      detail: t('Ligada. {live} ao vivo agora. Desde que o servidor iniciou, os Hosts enviaram {sent} e a saída estimada do relay foi {out}.', {
+        live: s.live,
+        sent: formatBytes(s.hostBytes),
+        out: formatBytes(s.estimatedEgressBytes),
+      }),
     });
   }
 

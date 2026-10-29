@@ -439,6 +439,8 @@ export const EN: Record<string, string> = {
   "Assistir transmissão": "Watch broadcast",
   "Voltar ao vídeo": "Back to the video",
   "A transmissão acabou": "The broadcast ended",
+  "Transmissão de tela": "Screen sharing",
+  "Ligada. {live} ao vivo agora. Desde que o servidor iniciou, os Hosts enviaram {sent} e a saída estimada do relay foi {out}.": "On. {live} live right now. Since the server started, Hosts have sent {sent} and the relay's estimated egress was {out}.",
   "No seletor, escolha a tela inteira ou outra janela; a aba do Lunio não aparece.": "In the picker, choose your whole screen or another window; the Lunio tab is not listed.",
   "Exige boa internet de subida e que quem assiste decodifique 4K.": "Needs a fast upload and viewers able to decode 4K.",
   "até {mbps} Mbps · ~{gb} GB/h por pessoa": "up to {mbps} Mbps · ~{gb} GB/h per viewer",
