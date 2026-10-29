@@ -359,3 +359,23 @@ describe('transmissão de tela: medidor de uso', () => {
     expect(getScreenUsage().hostBytes).toBe(0);
   });
 });
+
+describe('transmissão de tela: Host que perde a liderança na graça de 4 s', () => {
+  it('quem assume a liderança encerra a transmissão e o Host antigo não publica mais', () => {
+    const { host, viewers: [a] } = room(1);
+    send(host, { type: 'screen:start', quality: '1080p60' });
+    send(host, { type: 'screen:live' });
+    a.clear();
+
+    rm.handleLeave(asWs(host)); // o Host cai (recarregou a página)
+    connect('TELA', 'late'); // alguém entra na graça e vira Host
+    expect(rm.getRoomState(rm.getOrCreateRoom('TELA')).hostId).toBe('late');
+    const back = connect('TELA', 'host'); // o Host antigo volta antes dos 4 s
+
+    expect(rm.getScreen('TELA')).toBeNull();
+    expect(a.last('screen:state').screen).toBeNull();
+    expect(rm.isScreenBroadcaster('TELA', 'host')).toBe(false);
+    expect(back.last('room:state').state.screen).toBeNull();
+    expect(rm.getScreenStats().live).toBe(0);
+  });
+});

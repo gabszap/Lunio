@@ -159,7 +159,7 @@ export class RoomManager {
   /** É o Host da transmissão e está conectado agora? */
   public isScreenBroadcaster(roomId: string, userId: string): boolean {
     const room = this.rooms.get(roomId);
-    if (!room?.screen || room.screen.info.hostId !== userId) return false;
+    if (!room?.screen || room.screen.info.hostId !== userId || room.hostId !== userId) return false;
     for (const s of room.clients.values()) if (s.userId === userId) return true;
     return false;
   }
@@ -179,6 +179,12 @@ export class RoomManager {
     room.screen = undefined;
     console.log(`[Screen] Transmissão encerrada na sala "${room.roomId}" (${reason}).`);
     if (reason !== 'room_closed') this.broadcast(room, { type: 'screen:state', screen: null });
+  }
+
+  /** Toda troca de Host passa por aqui: a transmissão é de quem a iniciou e acaba quando outra pessoa assume. */
+  private setHost(room: RoomInternal, userId: string): void {
+    if (room.screen && room.screen.info.hostId !== userId) this.endScreen(room, 'host_changed');
+    room.hostId = userId;
   }
 
   /**
@@ -333,7 +339,7 @@ export class RoomManager {
       room.hostGraceTimer = undefined;
       room.hostGraceUntil = undefined;
     } else if (!room.hostId || (!hostConnected && !(room.hostGraceUntil !== undefined && Date.now() < room.hostGraceUntil))) {
-      room.hostId = user.id;
+      this.setHost(room, user.id);
     }
     if (room.hostId !== hostBefore) this.schedulePersist(room);
 
@@ -469,7 +475,7 @@ export class RoomManager {
               if (room.hostId === session.userId && room.clients.size > 0) {
                 const nextClient = room.clients.values().next().value;
                 if (nextClient) {
-                  room.hostId = nextClient.userId;
+                  this.setHost(room, nextClient.userId);
                   nextClient.isHost = true;
                   this.schedulePersist(room);
                   console.log(`[WatchParty] 👑 Novo Host eleito para sala "${roomId}": "${nextClient.username}"`);
@@ -520,7 +526,7 @@ export class RoomManager {
     if (Array.from(room.clients.values()).some((c) => c.userId === room.hostId)) return;
     const next = room.clients.values().next().value;
     if (!next) return;
-    room.hostId = next.userId;
+    this.setHost(room, next.userId);
     next.isHost = true;
     console.log(`[WatchParty] 👑 O Host antigo não voltou a tempo; novo Host da sala "${room.roomId}": "${next.username}"`);
     this.sendSystemChat(room, `👑 ${next.username} é o novo Host da sala.`);
@@ -1097,9 +1103,7 @@ export class RoomManager {
         if (!isHost) return;
         const targetMember = Array.from(currentRoom.clients.values()).find((c) => c.userId === msg.newHostId);
         if (targetMember) {
-          // A transmissão é de quem a iniciou: com outro Host ela acaba (passar para si mesmo não conta)
-          if (targetMember.userId !== currentRoom.hostId) this.endScreen(currentRoom, 'host_changed');
-          currentRoom.hostId = targetMember.userId;
+          this.setHost(currentRoom, targetMember.userId);
           console.log(`[WatchParty] 👑 Controle transferido para "${targetMember.username}"`);
           this.sendSystemChat(currentRoom, `👑 ${clientSession.username} transferiu o controle para ${targetMember.username}.`);
           this.broadcastMembersUpdate(currentRoom);
