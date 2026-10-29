@@ -1,4 +1,5 @@
 import { Chapter, SubtitleTrack, AudioTrackOption } from './media';
+import type { RoomScreen, ScreenQualityId } from './screen';
 
 export type MemberPlaybackState = 'waiting' | 'loading' | 'ready' | 'playing' | 'paused' | 'stalled';
 
@@ -82,6 +83,8 @@ export interface RoomState {
   playback: RoomPlaybackState;
   members: RoomMember[];
   bannedMembers?: BannedMember[];
+  /** Transmissão de tela em andamento (só em memória; a chave de criptografia nunca vem aqui). */
+  screen?: RoomScreen | null;
 }
 
 export interface ChatMessage {
@@ -217,6 +220,29 @@ export type ClientMessage =
       start: number;
       target: number;
       vote: boolean;
+    }
+  | {
+      /** O Host começa a transmitir a tela com a qualidade escolhida. */
+      type: 'screen:start';
+      quality: ScreenQualityId;
+    }
+  | {
+      /** O Host já está publicando no relay: os espectadores podem assistir. */
+      type: 'screen:live';
+    }
+  | {
+      type: 'screen:stop';
+    }
+  | {
+      /** Chave AES-256 (base64) da transmissão e sua época; o servidor só repassa aos membros atuais. */
+      type: 'screen:key';
+      epoch: number;
+      key: string;
+    }
+  | {
+      /** Total de bytes de vídeo+áudio publicados até agora (medidor de uso). */
+      type: 'screen:usage';
+      bytes: number;
     };
 
 /** Votação em andamento para pular um capítulo: passa quando `votes` chega a `needed` (mais da metade da sala). */
@@ -290,6 +316,20 @@ export type ServerMessage =
       type: 'skip:passed';
       start: number;
       target: number;
+    }
+  | {
+      /** Transmissão de tela da sala (null = nenhuma). */
+      type: 'screen:state';
+      screen: RoomScreen | null;
+    }
+  | {
+      type: 'screen:key';
+      epoch: number;
+      key: string;
+    }
+  | {
+      /** Alguém saiu ou foi expulso: o Host da transmissão deve girar a chave. */
+      type: 'screen:rotate_key';
     }
   | {
       type: 'error';
