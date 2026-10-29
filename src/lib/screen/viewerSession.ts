@@ -23,7 +23,13 @@ export class ViewerScreenSession {
   private connecting = false;
   private paused = false;
   private lastStatus: ViewerScreenStatus = 'idle';
+  /** Inscrições do espectador atual (chaves). */
   private offs: Array<() => void> = [];
+  /**
+   * Vigia do fim da transmissão. Vive mais que o espectador: quando o Host fecha a página o relay cai (erro de
+   * transporte) antes do aviso do servidor chegar, e o que a pessoa precisa ler é "acabou", não um erro solto.
+   */
+  private endOff: (() => void) | null = null;
 
   constructor(
     private readonly deps: { signals: ScreenSignals; api: ScreenApi; createViewer(events: ViewerEvents): Promise<ScreenViewer> },
@@ -56,6 +62,7 @@ export class ViewerScreenSession {
     try {
       const token = await this.deps.api.fetchToken();
       if (this.disposed) return;
+      this.watchForEnd();
       const viewer = await this.deps.createViewer({ onStatus: (s, d) => this.onViewerStatus(s, d) });
       if (this.disposed) {
         viewer.stop();
@@ -68,11 +75,6 @@ export class ViewerScreenSession {
       // As chaves já guardadas chegam na hora da inscrição; todas entram antes do primeiro quadro
       const loading: Promise<void>[] = [];
       this.offs.push(this.deps.signals.subscribeScreenKey((k: ScreenKeyMaterial) => void loading.push(viewer.addKey(k))));
-      this.offs.push(
-        this.deps.signals.subscribeScreen((s) => {
-          if (!s) this.end();
-        }),
-      );
       await Promise.all(loading);
       await viewer.watch({ url: token.url, path: token.path });
     } catch (e) {
@@ -94,6 +96,7 @@ export class ViewerScreenSession {
     if (this.disposed) return;
     this.disposed = true;
     this.discardViewer();
+    this.unwatchEnd();
     this.emit('idle');
   }
 
@@ -126,7 +129,20 @@ export class ViewerScreenSession {
   private end(): void {
     if (this.disposed) return;
     this.discardViewer();
+    this.unwatchEnd();
     this.emit('ended');
+  }
+
+  private watchForEnd(): void {
+    if (this.endOff) return;
+    this.endOff = this.deps.signals.subscribeScreen((s) => {
+      if (!s) this.end();
+    });
+  }
+
+  private unwatchEnd(): void {
+    this.endOff?.();
+    this.endOff = null;
   }
 
   private discardViewer(): void {

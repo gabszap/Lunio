@@ -183,9 +183,20 @@ describe('errors', () => {
     await t.session.watch();
     expect(t.statuses.at(-1)![0]).toBe('error');
     expect(t.fv.v.stop).toHaveBeenCalledTimes(1);
-    expect(t.sig.listeners()).toBe(0);
+    expect(t.sig.listeners()).toBe(1); // só o vigia do fim da transmissão (sem chaves penduradas)
     await t.session.watch();
     expect(t.api.fetchToken).toHaveBeenCalledTimes(2);
+  });
+
+  it('a dropped connection followed by the room ending the broadcast reads as ended, not as a stuck error', async () => {
+    // O Host recarregou a página: o relay cai (erro de transporte) antes do aviso do servidor chegar
+    const t = setup();
+    await t.session.watch();
+    t.fv.events().onStatus('error', 'A conexão com a transmissão caiu.');
+    expect(t.statuses.at(-1)![0]).toBe('error');
+    t.sig.serverSets(null);
+    expect(t.statuses.at(-1)![0]).toBe('ended');
+    expect(t.sig.listeners()).toBe(0);
   });
 
   it('the viewer dropping the connection reports error and allows a retry', async () => {

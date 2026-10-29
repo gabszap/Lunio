@@ -113,7 +113,7 @@ export const ScreenHostPill: React.FC = () => {
   const quality = s.screen ? screenQuality(s.screen.quality) : null;
 
   return (
-    <div className={cx('absolute top-3 left-3 z-20 flex items-center gap-3 rounded-[14px] px-3.5 py-2 text-[13px]', floatingCard)} role="status">
+    <div className={cx('absolute top-20 left-3 z-40 flex items-center gap-3 rounded-[14px] px-3.5 py-2 text-[13px]', floatingCard)} role="status">
       {error ? (
         <>
           <TriangleAlert size={16} className="text-lu-error flex-none" />
@@ -163,13 +163,13 @@ export const ScreenStage: React.FC = () => {
       )}
 
       {s.covering && (
-        <GhostButton onClick={s.returnToVideo} className="absolute top-3 right-3 z-20 !h-10">
+        <GhostButton onClick={s.returnToVideo} className="absolute top-20 right-3 z-40 !h-10">
           {t('Voltar ao vídeo')}
         </GhostButton>
       )}
 
       {available && !s.covering && status !== 'error' && (
-        <div className={cx('absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-4 rounded-[16px] px-4 py-3 max-w-[calc(100%-32px)]', floatingCard)}>
+        <div className={cx('absolute top-20 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 rounded-[16px] px-4 py-3 max-w-[calc(100%-32px)]', floatingCard)}>
           <Dot tone="error" pulse />
           <span className="text-[14px] font-medium">{t('O Host está transmitindo a tela')}</span>
           <PrimaryButton onClick={s.watch}>{t('Assistir transmissão')}</PrimaryButton>
@@ -177,7 +177,7 @@ export const ScreenStage: React.FC = () => {
       )}
 
       {status === 'error' && (
-        <div className={cx('absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 rounded-[16px] px-4 py-3 max-w-[calc(100%-32px)]', floatingCard)} role="alert">
+        <div className={cx('absolute top-20 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 rounded-[16px] px-4 py-3 max-w-[calc(100%-32px)]', floatingCard)} role="alert">
           <TriangleAlert size={18} className="text-lu-error flex-none" />
           <span className="text-[14px]">{error}</span>
           {available && <GhostButton onClick={s.watch}>{t('Tentar de novo')}</GhostButton>}
@@ -188,7 +188,7 @@ export const ScreenStage: React.FC = () => {
       )}
 
       {s.endedNotice && (
-        <div className={cx('absolute bottom-24 left-1/2 -translate-x-1/2 z-20 rounded-[14px] px-4 py-2.5 text-[14px]', floatingCard)} role="status">
+        <div className={cx('absolute bottom-24 left-1/2 -translate-x-1/2 z-40 rounded-[14px] px-4 py-2.5 text-[14px]', floatingCard)} role="status">
           {t('A transmissão acabou')}
         </div>
       )}
