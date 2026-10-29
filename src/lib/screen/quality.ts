@@ -18,6 +18,8 @@ export function captureConstraints(q: ScreenQuality): DisplayMediaStreamOptions 
       frameRate: { ideal: fps, max: fps },
     },
     // Áudio do sistema como está: sem cancelamento de eco, supressão de ruído nem ganho automático
+    // O Chromium esconde a aba do Lunio da lista: transmitir a própria aba cria um laço de imagem e som
+    selfBrowserSurface: 'exclude',
     audio: { systemAudio: 'include', echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 },
   } as DisplayMediaStreamOptions;
 }

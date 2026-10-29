@@ -40,6 +40,10 @@ describe('captureConstraints', () => {
     });
   });
 
+  it('hides the Lunio tab itself from the picker (avoids an image loop and doubled sound)', () => {
+    expect((captureConstraints(q('720p30')) as any).selfBrowserSurface).toBe('exclude');
+  });
+
   it('always captures at 60 fps (the output rate is decimated later)', () => {
     expect(captureFrameRate(q('720p30'))).toBe(60);
   });
