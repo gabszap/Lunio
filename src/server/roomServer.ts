@@ -9,6 +9,8 @@ import { warmUpMedia } from './media/resolver';
 import { pruneRoomUploads, uploadIdFromUrl } from './media/uploads';
 import { uploadIndex } from './media/uploadIndex';
 import { roomStore, type PersistedRoom, type RoomStore } from './roomStore';
+import { newScreenSession, screenShareEnabled } from './screenShare';
+import { screenQuality, type RoomScreen } from '../types/screen';
 import type {
   ClientMessage,
   ServerMessage,
@@ -61,6 +63,11 @@ interface RoomInternal {
   hostGraceTimer?: NodeJS.Timeout;
   /** Votação para pular o capítulo atual (só na memória: some com a troca de vídeo ou do ponto do vídeo). */
   skipVote?: { start: number; target: number; voters: Set<string>; lastBroadcast: string };
+  /**
+   * Transmissão de tela do Host (só na memória, nunca vai ao Redis). A chave de criptografia é repassada, não
+   * persistida, e nunca entra em `room:state` nem em log.
+   */
+  screen?: { info: RoomScreen; key?: { epoch: number; key: string }; usageBytes: number; rotateTimer?: NodeJS.Timeout };
 }
 
 /** O servidor dá `<id>_tab####` à segunda aba aberta pela mesma pessoa; o ban vale para o ID de verdade (todas as abas). */
@@ -143,6 +150,36 @@ export class RoomManager {
     return this.rooms.has(roomId);
   }
 
+  /** Transmissão de tela da sala, ou `null`. */
+  public getScreen(roomId: string): RoomScreen | null {
+    return this.rooms.get(roomId)?.screen?.info ?? null;
+  }
+
+  /** É o Host da transmissão e está conectado agora? */
+  public isScreenBroadcaster(roomId: string, userId: string): boolean {
+    const room = this.rooms.get(roomId);
+    if (!room?.screen || room.screen.info.hostId !== userId) return false;
+    for (const s of room.clients.values()) if (s.userId === userId) return true;
+    return false;
+  }
+
+  /** Quantas salas estão transmitindo ao vivo agora. */
+  public getScreenStats(): { live: number } {
+    let live = 0;
+    for (const room of this.rooms.values()) if (room.screen?.info.live) live++;
+    return { live };
+  }
+
+  /** Encerra a transmissão da sala (idempotente). Sem dados sensíveis no log. */
+  public endScreen(room: RoomInternal, reason: 'stopped' | 'host_left' | 'host_changed' | 'room_closed'): void {
+    const screen = room.screen;
+    if (!screen) return;
+    if (screen.rotateTimer) clearTimeout(screen.rotateTimer);
+    room.screen = undefined;
+    console.log(`[Screen] Transmissão encerrada na sala "${room.roomId}" (${reason}).`);
+    if (reason !== 'room_closed') this.broadcast(room, { type: 'screen:state', screen: null });
+  }
+
   /** Quando a sala foi encerrada (ms), ou `undefined` se ainda existe / o servidor não sabe. */
   public getClosedAt(roomId: string): number | undefined {
     return this.closedRooms.get(roomId);
@@ -219,6 +256,7 @@ export class RoomManager {
       },
       members,
       bannedMembers: Array.from(room.bannedMembers ? room.bannedMembers.values() : []),
+      screen: room.screen?.info ?? null,
     };
   }
 
@@ -957,6 +995,47 @@ export class RoomManager {
           clientTime: msg.clientTime,
           serverTime: now,
         });
+        break;
+      }
+
+      case 'screen:start': {
+        if (!isHost) return;
+        if (!screenShareEnabled()) {
+          this.send(ws, { type: 'error', message: 'A transmissão de tela está desligada.', code: 'screen_disabled' });
+          return;
+        }
+        if (currentRoom.screen) {
+          this.send(ws, { type: 'error', message: 'Já existe uma transmissão nesta sala.', code: 'screen_active' });
+          return;
+        }
+        const quality = screenQuality(msg.quality);
+        if (!quality) {
+          this.send(ws, { type: 'error', message: 'Qualidade de transmissão inválida.', code: 'screen_bad_quality' });
+          return;
+        }
+        let active = 0;
+        for (const r of this.rooms.values()) if (r.screen) active++;
+        if (active >= config.screenShare.maxLive) {
+          this.send(ws, { type: 'error', message: 'Há transmissões demais no momento.', code: 'screen_busy' });
+          return;
+        }
+        currentRoom.screen = { info: newScreenSession(currentRoom.roomId, clientSession.userId, quality.id), usageBytes: 0 };
+        console.log(`[Screen] Transmissão iniciada na sala "${currentRoom.roomId}" (${quality.id}).`);
+        this.broadcast(currentRoom, { type: 'screen:state', screen: currentRoom.screen.info });
+        break;
+      }
+
+      case 'screen:live': {
+        const screen = currentRoom.screen;
+        if (!isHost || !screen || screen.info.hostId !== clientSession.userId || screen.info.live) return;
+        screen.info = { ...screen.info, live: true };
+        this.broadcast(currentRoom, { type: 'screen:state', screen: screen.info });
+        break;
+      }
+
+      case 'screen:stop': {
+        if (!isHost || currentRoom.screen?.info.hostId !== clientSession.userId) return;
+        this.endScreen(currentRoom, 'stopped');
         break;
       }
 
