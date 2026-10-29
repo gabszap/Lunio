@@ -9,7 +9,8 @@ import { warmUpMedia } from './media/resolver';
 import { pruneRoomUploads, uploadIdFromUrl } from './media/uploads';
 import { uploadIndex } from './media/uploadIndex';
 import { roomStore, type PersistedRoom, type RoomStore } from './roomStore';
-import { isValidScreenEpoch, isValidScreenKey, newScreenSession, screenShareEnabled } from './screenShare';
+import { isValidScreenEpoch, isValidScreenKey, newScreenSession, sanitizeUsageBytes, screenShareEnabled } from './screenShare';
+import { recordScreenUsage } from './screenUsage';
 import { screenQuality, type RoomScreen } from '../types/screen';
 import type {
   ClientMessage,
@@ -1076,6 +1077,19 @@ export class RoomManager {
         for (const [peerWs, peer] of currentRoom.clients) {
           if (peer.userId !== screen.info.hostId) this.send(peerWs, { type: 'screen:key', epoch: msg.epoch, key: msg.key });
         }
+        break;
+      }
+
+      case 'screen:usage': {
+        const screen = currentRoom.screen;
+        if (!isHost || !screen || screen.info.hostId !== clientSession.userId) return;
+        const delta = sanitizeUsageBytes(msg.bytes, screen.usageBytes);
+        if (delta === null) return;
+        const viewers = new Set<string>();
+        for (const c of currentRoom.clients.values()) viewers.add(baseUserId(c.userId));
+        viewers.delete(baseUserId(screen.info.hostId));
+        screen.usageBytes += delta;
+        recordScreenUsage(delta, viewers.size);
         break;
       }
 

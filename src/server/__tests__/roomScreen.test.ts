@@ -3,6 +3,7 @@ import type { WebSocket } from 'ws';
 import { RoomManager } from '../roomServer';
 import type { PersistedRoom, RoomStore } from '../roomStore';
 import { config } from '../config';
+import { getScreenUsage, resetScreenUsageForTests } from '../screenUsage';
 
 vi.mock('../media/resolver', () => ({ warmUpMedia: vi.fn() }));
 
@@ -60,6 +61,7 @@ function room(guests: number, roomId = 'TELA') {
 }
 
 beforeEach(() => {
+  resetScreenUsageForTests();
   vi.useFakeTimers();
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -324,5 +326,36 @@ describe('transmissão de tela: chave, rotação e fim automático', () => {
     expect(rm.getScreen('TELA')).toBeNull();
     expect(rm.getRoomInfo('TELA').exists).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('transmissão de tela: medidor de uso', () => {
+  it('conta o que o Host relata (delta) vezes os espectadores presentes', () => {
+    const { host } = room(2);
+    send(host, { type: 'screen:start', quality: '1080p60' });
+    send(host, { type: 'screen:usage', bytes: 400 });
+    expect(getScreenUsage()).toMatchObject({ hostBytes: 400, estimatedEgressBytes: 800 });
+    send(host, { type: 'screen:usage', bytes: 1000 });
+    expect(getScreenUsage()).toMatchObject({ hostBytes: 1000, estimatedEgressBytes: 2000 });
+  });
+
+  it('ignora contador que volta atrás, valor absurdo, lixo e quem não é o Host', () => {
+    const { host, viewers: [a] } = room(2);
+    send(host, { type: 'screen:start', quality: '1080p60' });
+    send(host, { type: 'screen:usage', bytes: 1000 });
+    send(host, { type: 'screen:usage', bytes: 500 });
+    send(host, { type: 'screen:usage', bytes: 1e15 });
+    send(host, { type: 'screen:usage', bytes: 'muito' });
+    send(host, { type: 'screen:usage' });
+    send(a, { type: 'screen:usage', bytes: 5000 });
+    expect(getScreenUsage().hostBytes).toBe(1000);
+    send(host, { type: 'screen:usage', bytes: 1200 }); // o contador guardado não foi corrompido
+    expect(getScreenUsage().hostBytes).toBe(1200);
+  });
+
+  it('sem transmissão não conta nada', () => {
+    const { host } = room(1);
+    send(host, { type: 'screen:usage', bytes: 1000 });
+    expect(getScreenUsage().hostBytes).toBe(0);
   });
 });
