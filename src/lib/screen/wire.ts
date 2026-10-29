@@ -51,6 +51,12 @@ export class FrameSealer {
   private aes: CryptoKey | null = null;
   private currentEpoch = 0;
   private counter = 0;
+  /**
+   * 7 bytes aleatórios no meio do IV, novos a cada chave. O contador sozinho recomeça em zero a cada `setKey`: se um
+   * publicador novo reaproveitasse a mesma chave (Host que recarrega a página), repetiria IVs, e repetir IV no AES-GCM
+   * entrega o XOR dos textos e permite forjar quadros. Com 56 bits aleatórios a repetição some na prática.
+   */
+  private ivPrefix = new Uint8Array(7);
 
   get epoch(): number {
     return this.currentEpoch;
@@ -60,6 +66,7 @@ export class FrameSealer {
     this.aes = await importKey(m, 'encrypt');
     this.currentEpoch = m.epoch;
     this.counter = 0;
+    this.ivPrefix = crypto.getRandomValues(new Uint8Array(7));
   }
 
   async seal(track: TrackKind, stamp: number, isKey: boolean, data: Uint8Array): Promise<Uint8Array> {
@@ -72,11 +79,11 @@ export class FrameSealer {
 
     // O contador sobe antes do await: quadros selados ao mesmo tempo nunca dividem um IV
     const n = this.counter++;
+    if (n > 0xffffffff) throw new Error('Chave de transmissão esgotada.');
     const iv = new Uint8Array(IV_BYTES);
     iv[0] = TRACK_BYTE[track];
-    const dv = new DataView(iv.buffer);
-    dv.setUint32(4, Math.floor(n / 2 ** 32));
-    dv.setUint32(8, n % 2 ** 32);
+    iv.set(this.ivPrefix, 1);
+    new DataView(iv.buffer).setUint32(8, n);
 
     const cipher = new Uint8Array(
       await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: header }, aes, data as BufferSource),
@@ -114,8 +121,12 @@ export class FrameOpener {
       this.counts.noKey++;
       return null;
     }
+    const stamp = new DataView(payload.buffer, payload.byteOffset, HEADER_BYTES).getFloat64(0);
+    if (!Number.isFinite(stamp)) {
+      this.counts.malformed++;
+      return null;
+    }
     try {
-      const stamp = new DataView(payload.buffer, payload.byteOffset, HEADER_BYTES).getFloat64(0);
       const plain = await crypto.subtle.decrypt(
         { name: 'AES-GCM', iv: payload.subarray(HEADER_BYTES, HEADER_BYTES + IV_BYTES), additionalData: header },
         entry.aes,

@@ -237,6 +237,39 @@ describe('ScreenPublisher', () => {
     expect(epochs).toEqual([1, 2]);
   });
 
+  it('stop() while the screen picker is still open releases the capture that arrives later', async () => {
+    const s = setup();
+    let release!: (c: Capture) => void;
+    const pending = new Promise<Capture>((r) => (release = r));
+    const lateCapture = { stop: vi.fn() };
+    const browser = { ...(s.publisher as any).deps.browser, capture: () => pending } as PublisherBrowser;
+    const p = new ScreenPublisher({ transport: s.transport, browser }, s.events);
+    const starting = p.start({ url: URL, path: PATH, quality: screenQuality('720p30')!, initialKey: await generateScreenKey(1) });
+    const outcome = starting.then(() => 'started', () => 'rejected');
+    await p.stop();
+    release({ video: new Feed<VideoFrameLike>().reader, audio: null, onEnded() {}, stop: lateCapture.stop });
+    expect(await outcome).toBe('rejected');
+    expect(lateCapture.stop).toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(s.events.onUsage).not.toHaveBeenCalled();
+  });
+
+  it('stop() during the relay handshake closes the broadcast that opens later', async () => {
+    const s = setup();
+    let release!: (h: any) => void;
+    const closed = vi.fn();
+    const slow: ScreenTransport = { publish: () => new Promise((r) => (release = r)), watch: s.transport.watch };
+    const p = new ScreenPublisher({ transport: slow, browser: (s.publisher as any).deps.browser }, s.events);
+    const starting = p.start({ url: URL, path: PATH, quality: screenQuality('720p30')!, initialKey: await generateScreenKey(1) });
+    const outcome = starting.then(() => 'started', () => 'rejected');
+    await tick();
+    await p.stop();
+    release({ video: { write() {}, close() {} }, audio: { write() {}, close() {} }, hasSubscribers: () => false, close: closed });
+    expect(await outcome).toBe('rejected');
+    expect(closed).toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('a failure to publish releases the capture and rejects', async () => {
     const s = setup();
     const failing: ScreenTransport = { publish: () => Promise.reject(new Error('sem relay')), watch: s.transport.watch };
@@ -309,6 +342,17 @@ describe('FrameIntake', () => {
     const got: number[] = [];
     await intake.run(sourceOf(out), (o) => got.push(o.data[0]), () => false);
     expect(got).toEqual([]);
+  });
+
+  it('tells the caller when a frame could not be opened (so video can wait for a keyframe)', async () => {
+    const { key, out } = await sealed(3);
+    const opener = new FrameOpener();
+    await opener.addKey(key);
+    const tampered = out[1].slice();
+    tampered[tampered.length - 1] ^= 1;
+    const onDrop = vi.fn();
+    await new FrameIntake(opener).run(sourceOf([out[0], tampered, new Uint8Array(3), out[2]]), () => {}, () => true, onDrop);
+    expect(onDrop).toHaveBeenCalledTimes(2);
   });
 
   it('a callback that throws does not kill the loop', async () => {

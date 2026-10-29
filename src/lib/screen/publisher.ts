@@ -132,6 +132,10 @@ export class ScreenPublisher {
     };
   }
 
+  /**
+   * `initialKey` tem de ser uma chave NOVA a cada `start()`: quem recarrega a página gera outra, nunca reaproveita a
+   * da transmissão anterior (o IV usa um prefixo aleatório por instância, mas chave nova é a regra).
+   */
   async start(opts: StartOptions): Promise<void> {
     if (this.state !== 'idle') throw new Error('A transmissão já foi iniciada.');
     this.state = 'running';
@@ -141,7 +145,9 @@ export class ScreenPublisher {
     try {
       await this.sealer.setKey(opts.initialKey);
       this.capture = await this.deps.browser.capture(opts.quality);
+      this.assertRunning(); // o seletor de tela pode ter ficado aberto enquanto a sala mudava
       this.handle = await this.deps.transport.publish(opts.url, opts.path);
+      this.assertRunning();
       const muxer = (this.muxer = new FrameMuxer(this.sealer, { video: this.handle.video, audio: this.handle.audio }));
 
       this.venc = this.deps.browser.createVideoEncoder({
@@ -159,6 +165,7 @@ export class ScreenPublisher {
           error: (e) => void this.finish('error', describe(e)),
         });
         await this.aenc.configure(AUDIO_ENCODER_CONFIG);
+        this.assertRunning();
       }
 
       this.capture.onEnded(() => void this.finish('user'));
@@ -176,6 +183,11 @@ export class ScreenPublisher {
       await this.teardown();
       throw e;
     }
+  }
+
+  /** `stop()` (ou um erro) chegou durante um `await` do `start()`: o `catch` do `start` solta o que já foi aberto. */
+  private assertRunning(): void {
+    if (this.state !== 'running') throw new Error('A transmissão foi encerrada durante o início.');
   }
 
   /**

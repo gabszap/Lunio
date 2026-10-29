@@ -81,6 +81,41 @@ export class AudioPlayout {
   }
 }
 
+/**
+ * Relógio do vídeo para transmissão SEM áudio (válida: o áudio é opcional): sem áudio não há relógio mestre. Espera 1 s
+ * de vídeo, ancora no quadro mais novo menos um buffer e passa a andar com o relógio de parede.
+ */
+export class VideoOnlyClock {
+  private firstSeenAt: number | null = null;
+  private latestStamp = -Infinity;
+  private offset: number | null = null;
+
+  constructor(
+    private readonly waitMs = 1000,
+    private readonly bufferMs = 300,
+  ) {}
+
+  note(stampMs: number, nowMs: number): void {
+    if (!Number.isFinite(stampMs)) return;
+    if (this.firstSeenAt === null) this.firstSeenAt = nowMs;
+    this.latestStamp = Math.max(this.latestStamp, stampMs);
+  }
+
+  mediaTimeMs(nowMs: number): number | null {
+    if (this.offset === null) {
+      if (this.firstSeenAt === null || nowMs - this.firstSeenAt < this.waitMs) return null;
+      this.offset = nowMs - (this.latestStamp - this.bufferMs);
+    }
+    return nowMs - this.offset;
+  }
+
+  reset(): void {
+    this.firstSeenAt = null;
+    this.latestStamp = -Infinity;
+    this.offset = null;
+  }
+}
+
 export class VideoPlayout<F extends { t: number }> {
   readonly LEAD_MS = 150 as const;
   readonly DROP_LATE_MS = 250 as const;
@@ -88,12 +123,34 @@ export class VideoPlayout<F extends { t: number }> {
   readonly MAX_DECODED = 8 as const;
   readonly MAX_DECODE_QUEUE = 8 as const;
 
+  /** ~10 s a 30 fps: mais que isso parado é aba em segundo plano, decodificador travado ou carimbo ruim. */
+  readonly MAX_ENCODED = 300 as const;
+
   needKey = true;
   private encoded: EncodedVideo[] = [];
   private decoded: F[] = [];
 
+  get pendingCount(): number {
+    return this.encoded.length;
+  }
+
   enqueue(e: EncodedVideo): void {
+    if (!Number.isFinite(e.t)) return;
     this.encoded.push(e);
+    if (this.encoded.length > this.MAX_ENCODED) this.trimToLatestKeyframe();
+  }
+
+  /** Fila estourou: volta ao quadro-chave mais recente; sem nenhum, descarta tudo e espera o próximo. */
+  private trimToLatestKeyframe(): void {
+    const q = this.encoded;
+    for (let i = q.length - 1; i > 0; i--) {
+      if (q[i].key) {
+        q.splice(0, i);
+        return;
+      }
+    }
+    q.length = 0;
+    this.needKey = true;
   }
 
   /** O decodificador recusou um quadro: recomeça num quadro-chave. */

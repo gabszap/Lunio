@@ -54,7 +54,29 @@ describe('FrameSealer / FrameOpener', () => {
     expect(ivs.size).toBe(2000);
     await sealer.setKey(await generateScreenKey(2));
     const first = await sealer.seal('video', 0, true, bytes(4));
-    expect(Buffer.from(first.subarray(10, 22)).toString('hex')).toBe('010000000000000000000000');
+    // [faixa][7 bytes aleatórios][contador u32]: o contador recomeça em zero com a chave nova
+    expect(first[10]).toBe(1);
+    expect(Buffer.from(first.subarray(18, 22)).toString('hex')).toBe('00000000');
+  });
+
+  it('two sealers using the same key material never share an IV prefix (a restarted Host must not repeat nonces)', async () => {
+    const key = await generateScreenKey(1);
+    const a = new FrameSealer();
+    const b = new FrameSealer();
+    await a.setKey(key);
+    await b.setKey(key);
+    const ivA = (await a.seal('video', 1, true, bytes(4))).subarray(10, 22);
+    const ivB = (await b.seal('video', 1, true, bytes(4))).subarray(10, 22);
+    expect(Buffer.from(ivA).toString('hex')).not.toBe(Buffer.from(ivB).toString('hex'));
+  });
+
+  it('refuses a frame whose timestamp is not a finite number', async () => {
+    const { sealer, opener } = await pair();
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      expect(await opener.open(await sealer.seal('video', bad, true, bytes(8)))).toBeNull();
+    }
+    expect(opener.counts.malformed).toBe(3);
+    expect(opener.counts.ok).toBe(0);
   });
 
   it('refuses a tampered header or ciphertext, a short payload and an unknown epoch', async () => {

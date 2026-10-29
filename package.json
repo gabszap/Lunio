@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@discord/embedded-app-sdk": "^2.5.0",
-    "@moq/net": "^0.4.7",
+    "@moq/net": "0.4.7",
     "@tailwindcss/vite": "^4.1.14",
     "@vidstack/react": "^1.15.6",
     "@viren070/parse-torrent-title": "^0.8.8",

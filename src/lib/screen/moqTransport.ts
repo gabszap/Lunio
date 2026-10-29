@@ -20,6 +20,23 @@ async function until<T>(get: () => T | undefined, opts: { signal?: AbortSignal; 
 }
 
 /**
+ * A `Connection` do `@moq/net` é um pool que reconecta sozinho e já expõe `origin` antes de conectar: só o `status`
+ * diz se o relay aceitou (token recusado ou relay fora do ar ficam em `connecting`/`disconnected`).
+ */
+export async function waitUntilConnected(
+  status: { peek(): string },
+  error: { peek(): Error | undefined },
+  opts: { signal?: AbortSignal; timeoutMs?: number } = {},
+): Promise<void> {
+  await until(() => (status.peek() === 'connected' ? true : undefined), {
+    signal: opts.signal,
+    timeoutMs: opts.timeoutMs ?? CONNECT_TIMEOUT_MS,
+    // Só a frase genérica: a mensagem do erro do transporte pode trazer a URL com o token
+    timeoutMessage: error.peek() ? 'O servidor de transmissão recusou a conexão.' : 'Não foi possível conectar ao servidor de transmissão.',
+  });
+}
+
+/**
  * Transporte sobre o `@moq/net` (relay gerenciado da Cloudflare, WebTransport). O pacote é carregado só quando uma
  * transmissão é usada. Nunca registra a URL (leva o token) nem o caminho da transmissão.
  */
@@ -28,11 +45,8 @@ export function moqTransport(): ScreenTransport {
     const Moq = await import('@moq/net');
     const conn = new Moq.Connection({ url: new URL(url), enabled: true });
     try {
-      const origin = await until(() => conn.origin.peek(), {
-        signal,
-        timeoutMs: CONNECT_TIMEOUT_MS,
-        timeoutMessage: 'Não foi possível conectar ao servidor de transmissão.',
-      });
+      await waitUntilConnected(conn.status, conn.error, { signal });
+      const origin = await until(() => conn.origin.peek(), { signal, timeoutMs: CONNECT_TIMEOUT_MS });
       return { Moq, conn, origin };
     } catch (e) {
       conn.close();

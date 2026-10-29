@@ -1,5 +1,5 @@
 import { codecFromAnnexB } from './h264';
-import { AudioPlayout, VideoPlayout } from './playout';
+import { AudioPlayout, VideoOnlyClock, VideoPlayout } from './playout';
 import { AUDIO_ENCODER_CONFIG } from './quality';
 import type { ScreenTransport, TrackSource, WatchHandle } from './transport';
 import { FrameOpener, type OpenedFrame, type ScreenKeyMaterial } from './wire';
@@ -15,12 +15,17 @@ const MAX_DRAW_WIDTH = 960;
 export class FrameIntake {
   constructor(private readonly opener: FrameOpener) {}
 
-  async run(source: TrackSource, onFrame: (o: OpenedFrame) => void, isCurrent: () => boolean): Promise<'ended' | 'error'> {
+  /** `onDrop`: um quadro não abriu (sem chave ainda, adulterado, curto). O vídeo usa para esperar o próximo quadro-chave. */
+  async run(source: TrackSource, onFrame: (o: OpenedFrame) => void, isCurrent: () => boolean, onDrop?: () => void): Promise<'ended' | 'error'> {
     try {
       for await (const payload of source.frames()) {
         if (!isCurrent()) return 'ended';
         const opened = await this.opener.open(payload);
-        if (!opened || !isCurrent()) continue;
+        if (!opened) {
+          onDrop?.();
+          continue;
+        }
+        if (!isCurrent()) continue;
         try {
           onFrame(opened);
         } catch {
@@ -74,6 +79,9 @@ export class ScreenViewer {
   private readonly intake = new FrameIntake(this.opener);
   private readonly audioPlayout = new AudioPlayout();
   private readonly videoPlayout = new VideoPlayout<Decoded>();
+  /** Relógio de reserva para transmissão sem áudio (o áudio, quando existe, é o relógio mestre). */
+  private readonly videoClock = new VideoOnlyClock();
+  private limiter: DynamicsCompressorNode | null = null;
 
   private state: 'idle' | 'running' | 'stopped' = 'idle';
   private paused = false;
@@ -133,6 +141,7 @@ export class ScreenViewer {
       // Criado aqui porque o "Assistir" do usuário é o gesto que libera o áudio
       const ac = (this.ac = this.deps.audioContext ?? new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' }));
       await ac.resume();
+      if (this.state !== 'running') return; // stop() chegou enquanto o áudio era liberado
       this.buildAudioGraph(ac);
       this.vdec = this.makeVideoDecoder();
       this.adec = this.makeAudioDecoder();
@@ -163,6 +172,8 @@ export class ScreenViewer {
     const { decoded } = this.videoPlayout.reset();
     for (const d of decoded) d.frame.close();
     this.audioPlayout.reset();
+    this.videoClock.reset();
+    this.silenceScheduledAudio();
     try {
       this.adec?.reset();
       this.adec?.configure(this.audioConfig());
@@ -211,7 +222,18 @@ export class ScreenViewer {
     const limiter = new DynamicsCompressorNode(ac, { threshold: -1, knee: 0, ratio: 20, attack: 0.003, release: 0.25 });
     this.gain.connect(limiter);
     limiter.connect(ac.destination);
+    this.limiter = limiter;
     if (this.sinkId) void this.setSinkId(this.sinkId).catch(() => {});
+  }
+
+  /** Os blocos já agendados (até o alvo do buffer, 0,9 s no pior caso) iriam tocar por cima do som novo na retomada. */
+  private silenceScheduledAudio(): void {
+    const ac = this.ac;
+    if (!ac || !this.gain || !this.limiter) return;
+    this.gain.disconnect();
+    this.gain = ac.createGain();
+    this.gain.gain.value = this.volume;
+    this.gain.connect(this.limiter);
   }
 
   private makeVideoDecoder(): VideoDecoder {
@@ -281,7 +303,8 @@ export class ScreenViewer {
       this.events.onStatus(this.pumpFailed ? 'error' : 'ended', this.pumpFailed ? 'A conexão com a transmissão caiu.' : undefined);
     };
     void this.intake.run(audio, (o) => this.onAudio(o), current).then(done);
-    void this.intake.run(video, (o) => this.onVideo(o), current).then(done);
+    // Vídeo que não abre (chave atrasada) deixa referências faltando: espera o próximo quadro-chave em vez de mostrar lixo
+    void this.intake.run(video, (o) => this.onVideo(o), current, () => this.videoPlayout.markNeedKey()).then(done);
   }
 
   private closeSources(): void {
@@ -295,11 +318,13 @@ export class ScreenViewer {
 
   private onAudio(o: OpenedFrame): void {
     this.counters.netAudioMs = ema(this.counters.netAudioMs, Date.now() - o.stamp);
-    this.audioPlayout.pushStamp(o.stamp);
     this.adec?.decode(new EncodedAudioChunk({ type: 'key', timestamp: Math.round(o.stamp * 1000), data: o.data }));
+    // Só depois de aceito: um decode() que lança não pode deixar um carimbo sobrando na fila (o áudio defasaria)
+    this.audioPlayout.pushStamp(o.stamp);
   }
 
   private onVideo(o: OpenedFrame): void {
+    this.videoClock.note(o.stamp, performance.now());
     this.counters.netVideoMs = ema(this.counters.netVideoMs, Date.now() - o.stamp);
     this.videoPlayout.enqueue({ t: o.stamp, key: o.key, data: o.data });
   }
@@ -324,7 +349,8 @@ export class ScreenViewer {
     const ac = this.ac;
     const vdec = this.vdec;
     if (!ac || !vdec) return;
-    const S = this.audioPlayout.mediaTimeMs(ac.currentTime, ac.outputLatency || 0);
+    // Com áudio ele é o relógio; sem áudio (transmissão válida) o vídeo anda pelo relógio de parede
+    const S = this.audioPlayout.mediaTimeMs(ac.currentTime, ac.outputLatency || 0) ?? this.videoClock.mediaTimeMs(performance.now());
     if (S === null) return;
 
     const { chunks, skipped } = this.videoPlayout.takeForDecode(S, vdec.decodeQueueSize);

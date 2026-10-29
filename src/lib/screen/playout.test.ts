@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AudioPlayout, VideoPlayout, type EncodedVideo } from './playout';
+import { AudioPlayout, VideoOnlyClock, VideoPlayout, type EncodedVideo } from './playout';
 
 describe('AudioPlayout', () => {
   it('starts one target ahead of the context clock and chains the next blocks', () => {
@@ -137,5 +137,54 @@ describe('VideoPlayout', () => {
     expect(r.pending).toBe(1);
     expect(v.needKey).toBe(true);
     expect(v.pick(5000).frame).toBeNull();
+  });
+});
+
+describe('VideoPlayout bounds', () => {
+  it('ignores frames whose timestamp is not finite', () => {
+    const v = new VideoPlayout<{ t: number }>();
+    [NaN, Infinity, -Infinity].forEach((t) => v.enqueue(enc(t, true)));
+    expect(v.takeForDecode(1000, 0).chunks).toHaveLength(0);
+    expect(v.pendingCount).toBe(0);
+  });
+
+  it('keeps the encoded queue bounded, cutting back to the latest keyframe', () => {
+    const v = new VideoPlayout<{ t: number }>();
+    for (let i = 0; i < 400; i++) v.enqueue(enc(i * 33, i === 0 || i === 250));
+    expect(v.pendingCount).toBeLessThanOrEqual(v.MAX_ENCODED);
+    const { chunks } = v.takeForDecode(400 * 33, 0);
+    expect(chunks[0]).toMatchObject({ key: true, t: 250 * 33 });
+  });
+
+  it('with no keyframe to cut back to, drops everything and waits for one', () => {
+    const v = new VideoPlayout<{ t: number }>();
+    v.enqueue(enc(0, true));
+    v.takeForDecode(100, 0); // consome o quadro-chave: o decodificador está em dia
+    expect(v.needKey).toBe(false);
+    for (let i = 1; i <= v.MAX_ENCODED + 1; i++) v.enqueue(enc(i * 33, false));
+    expect(v.pendingCount).toBe(0);
+    expect(v.needKey).toBe(true);
+  });
+});
+
+describe('VideoOnlyClock (a broadcast without audio)', () => {
+  it('stays null for the first second, then follows the wall clock buffered behind the newest frame', () => {
+    const c = new VideoOnlyClock();
+    c.note(5000, 0);
+    expect(c.mediaTimeMs(500)).toBeNull();
+    c.note(5900, 900);
+    const s = c.mediaTimeMs(1000)!;
+    expect(s).toBeCloseTo(5900 - 300, 6);
+    expect(c.mediaTimeMs(1300)! - s).toBeCloseTo(300, 6);
+  });
+
+  it('ignores non-finite stamps and reset forgets the anchor', () => {
+    const c = new VideoOnlyClock();
+    c.note(NaN, 0);
+    expect(c.mediaTimeMs(5000)).toBeNull();
+    c.note(100, 0);
+    expect(c.mediaTimeMs(1000)).not.toBeNull();
+    c.reset();
+    expect(c.mediaTimeMs(9000)).toBeNull();
   });
 });
