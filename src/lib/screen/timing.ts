@@ -14,6 +14,11 @@ export class CaptureClock {
     return this.offset + captureMs;
   }
 
+  /** O carimbo de um instante da captura com o offset atual, sem mexer nele (`null` antes da primeira amostra). */
+  peek(captureMs: number): number | null {
+    return this.offset === null ? null : this.offset + captureMs;
+  }
+
   reset(): void {
     this.offset = null;
   }

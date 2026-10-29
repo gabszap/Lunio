@@ -32,6 +32,14 @@ describe('CaptureClock', () => {
     }
   });
 
+  it('peek applies the current offset without moving it', () => {
+    const c = new CaptureClock();
+    expect(c.peek(1000)).toBeNull();
+    c.stamp(1000, 5000);
+    expect(c.peek(2000)).toBe(6000);
+    expect(c.peek(2000)).toBe(6000);
+  });
+
   it('reset forgets the offset', () => {
     const c = new CaptureClock();
     c.stamp(1000, 5000);
