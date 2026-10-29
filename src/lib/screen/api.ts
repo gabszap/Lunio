@@ -40,15 +40,16 @@ export const screenApi: ScreenApi = {
   async isEnabled() {
     const now = Date.now();
     if (enabledCache && now - enabledCache.at < ENABLED_TTL_MS) return enabledCache.value;
-    let value = false;
     try {
       const res = await apiFetch('/api/status');
-      const body: any = res.ok ? await res.json() : null;
-      value = body?.screen?.enabled === true;
+      // Falha (rede, 429 do limite do /api/status…) não é resposta: não fica guardada, senão o botão sumia por 1 min
+      if (!res.ok) return false;
+      const body: any = await res.json();
+      const value = body?.screen?.enabled === true;
+      enabledCache = { at: now, value };
+      return value;
     } catch {
-      value = false;
+      return false;
     }
-    enabledCache = { at: now, value };
-    return value;
   },
 };

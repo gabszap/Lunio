@@ -82,11 +82,19 @@ function installFakeEngine() {
   };
 }
 
+const opened: BrowserContext[] = [];
+
 async function user(browser: import('@playwright/test').Browser) {
   const u = await newUser(browser);
+  opened.push(u.context);
   await u.page.addInitScript(installFakeEngine);
   return u;
 }
+
+// Teste que falha no meio não pode deixar a sala ao vivo para o teste seguinte
+test.afterEach(async () => {
+  for (const c of opened.splice(0)) await c.close().catch(() => {});
+});
 
 const shareBtn = (p: Page) => p.locator('#btn-screen-share');
 const canvas = (p: Page) => p.locator('canvas[aria-hidden="true"]');

@@ -55,6 +55,17 @@ describe('isEnabled', () => {
     expect(apiFetch).toHaveBeenCalledTimes(2);
   });
 
+  it('does not remember a failure: a refused or failed request is retried on the next call', async () => {
+    const { screenApi } = await import('./api');
+    apiFetch.mockResolvedValueOnce(json(429, { error: 'rate_limited', code: 'rate_limited' }));
+    expect(await screenApi.isEnabled()).toBe(false);
+    apiFetch.mockRejectedValueOnce(new Error('net down'));
+    expect(await screenApi.isEnabled()).toBe(false);
+    apiFetch.mockResolvedValueOnce(json(200, { screen: { enabled: true } }));
+    expect(await screenApi.isEnabled()).toBe(true); // sem esperar 60 s: a falha não foi guardada
+    expect(apiFetch).toHaveBeenCalledTimes(3);
+  });
+
   it('is false for a disabled server, a missing field and a failing request', async () => {
     const { screenApi } = await import('./api');
     apiFetch.mockResolvedValueOnce(json(200, { screen: { enabled: false } }));

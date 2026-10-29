@@ -219,6 +219,7 @@ export const EN: Record<string, string> = {
   "Em “Acesso geral”, escolha": "Under “General access”, choose",
   "Em breve": "Coming soon",
   "Indisponível": "Unavailable",
+  "Precisa do Chrome, Edge ou Brave no computador e da transmissão ligada no servidor.": "Needs Chrome, Edge or Brave on a computer, and screen sharing turned on on the server.",
   "Encontrado{version}. Extração rápida de legendas disponível.": "Found{version}. Fast subtitle extraction available.",
   "Encontrado{version}. Faixas, troca de áudio e legendas disponíveis.": "Found{version}. Tracks, audio switching and subtitles available.",
   "Entendido": "Got it",

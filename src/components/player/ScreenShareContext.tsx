@@ -119,11 +119,15 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
   useEffect(() => {
     if (!connected || !isHost || !capabilities.host) return;
     let alive = true;
-    void screenApi.isEnabled().then((v) => alive && setEnabled(v));
+    const check = () => void screenApi.isEnabled().then((v) => alive && setEnabled(v));
+    check();
+    // Uma consulta que falhou (rede, limite do /api/status) não pode esconder o botão para sempre: tenta de novo enquanto estiver "desligado"
+    const retry = enabled ? null : setInterval(check, 20_000);
     return () => {
       alive = false;
+      if (retry) clearInterval(retry);
     };
-  }, [connected, isHost, capabilities.host]);
+  }, [connected, isHost, capabilities.host, enabled]);
 
   // Baixa o motor assim que a pessoa pode transmitir (ou que há uma transmissão para assistir): o seletor de tela tem pouco tempo depois do clique
   useEffect(() => {

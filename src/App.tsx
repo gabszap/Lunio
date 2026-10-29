@@ -443,6 +443,11 @@ export default function App() {
 
   /** "Compartilhar sua tela": cria a sala sem vídeo e abre o player; é lá que o Host escolhe a qualidade e transmite. */
   const startScreenRoom = () => {
+    // Já é Host de uma sala (voltou à Home sem sair): volta a ela em vez de esvaziar o vídeo só neste navegador
+    if (isHostingRoom()) {
+      setView('player');
+      return;
+    }
     withName(() => {
       setPendingSubtitles([]);
       setAutoPlayNext(false);

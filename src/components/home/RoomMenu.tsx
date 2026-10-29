@@ -48,6 +48,8 @@ export const RoomMenu: React.FC<RoomMenuProps> = ({ onPick, onJoin, onCatalog })
             key={s.step}
             type="button"
             disabled={blocked}
+            aria-busy={Boolean(s.needsScreen) && screenState === 'checking'}
+            title={s.needsScreen && screenState === 'unavailable' ? t('Precisa do Chrome, Edge ou Brave no computador e da transmissão ligada no servidor.') : undefined}
             onClick={() => onPick(s.step)}
             className={cx(
               'flex items-center justify-start gap-3.5 min-h-[76px] px-4 rounded-[14px] bg-lu-bg2 border border-lu-border text-left w-full transition-colors',

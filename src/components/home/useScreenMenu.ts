@@ -13,11 +13,15 @@ export function useScreenMenu(): 'available' | 'checking' | 'unavailable' {
   useEffect(() => {
     if (discord || !hostCapable) return;
     let alive = true;
-    void screenApi.isEnabled().then((v) => alive && setEnabled(v));
+    const check = () => void screenApi.isEnabled().then((v) => alive && setEnabled(v));
+    check();
+    // Falha momentânea da consulta não pode deixar a opção "Indisponível" para sempre: tenta de novo enquanto estiver desligada
+    const retry = enabled ? null : setInterval(check, 20_000);
     return () => {
       alive = false;
+      if (retry) clearInterval(retry);
     };
-  }, [discord, hostCapable]);
+  }, [discord, hostCapable, enabled]);
 
   return screenMenuState({ discord, hostCapable, enabled });
 }
