@@ -185,9 +185,13 @@ export class RoomManager {
     const screen = room.screen;
     if (!screen) return;
     if (screen.rotateTimer) clearTimeout(screen.rotateTimer);
+    const hadViewers = screen.viewers.size > 0;
     room.screen = undefined;
     console.log(`[Screen] Transmissão encerrada na sala "${room.roomId}" (${reason}).`);
-    if (reason !== 'room_closed') this.broadcast(room, { type: 'screen:state', screen: null });
+    if (reason !== 'room_closed') {
+      this.broadcast(room, { type: 'screen:state', screen: null });
+      if (hadViewers) this.broadcastMembersUpdate(room);
+    }
   }
 
   /** Toda troca de Host passa por aqui: a transmissão é de quem a iniciou e acaba quando outra pessoa assume. */
@@ -207,7 +211,10 @@ export class RoomManager {
   }
 
   private dropScreenViewer(room: RoomInternal, userId: string): void {
-    if (room.screen?.viewers.delete(baseUserId(userId))) this.notifyScreenViewers(room);
+    if (room.screen?.viewers.delete(baseUserId(userId))) {
+      this.notifyScreenViewers(room);
+      this.broadcastMembersUpdate(room);
+    }
   }
 
   /**
@@ -287,6 +294,7 @@ export class RoomManager {
       state: c.state,
       currentTime: c.currentTime,
       ping: c.lastPing,
+      watchingScreen: room.screen?.viewers.has(baseUserId(c.userId)) ? true : undefined,
     }));
 
     return {
@@ -746,6 +754,7 @@ export class RoomManager {
       state: c.state,
       currentTime: c.currentTime,
       ping: c.lastPing,
+      watchingScreen: room.screen?.viewers.has(baseUserId(c.userId)) ? true : undefined,
     }));
 
     this.broadcast(room, {
@@ -1131,6 +1140,7 @@ export class RoomManager {
           if (screen.viewers.get(id) === clientSession.username) return;
           screen.viewers.set(id, clientSession.username);
           this.notifyScreenViewers(currentRoom);
+          this.broadcastMembersUpdate(currentRoom);
         } else {
           this.dropScreenViewer(currentRoom, id);
         }

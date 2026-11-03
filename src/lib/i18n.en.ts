@@ -434,6 +434,7 @@ export const EN: Record<string, string> = {
   "Transmitir": "Start sharing",
   "Parar transmissão": "Stop sharing",
   "Transmitindo": "Sharing",
+  "Assistindo": "Watching",
   "Conectando à transmissão…": "Connecting to the broadcast…",
   "Ninguém assistindo ainda": "Nobody watching yet",
   "Assistindo ({n}): {names}": "Watching ({n}): {names}",

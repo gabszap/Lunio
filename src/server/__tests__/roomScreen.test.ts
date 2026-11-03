@@ -532,3 +532,30 @@ function streamingRoom(guests: number) {
   for (const s of r.all) s.clear();
   return r;
 }
+
+describe('transmissão de tela: status dos membros', () => {
+  const flag = (s: FakeSocket, id: string) => s.last('members:update')?.members.find((m: any) => m.id === id)?.watchingScreen === true;
+
+  it('quem está assistindo aparece como tal na lista de membros de todos, e some ao parar', () => {
+    const { host, viewers: [a, b] } = streamingRoom(2);
+    send(a, { type: 'screen:watching', watching: true });
+    for (const s of [host, a, b]) {
+      expect(flag(s, 'g1')).toBe(true);
+      expect(flag(s, 'g2')).toBe(false);
+    }
+    expect(rm.getRoomState(rm.getOrCreateRoom('TELA')).members.find((m) => m.id === 'g1')?.watchingScreen).toBe(true);
+    send(a, { type: 'screen:watching', watching: false });
+    expect(flag(host, 'g1')).toBe(false);
+  });
+
+  it('expulsar e o fim da transmissão também limpam o status', () => {
+    const { host, viewers: [a, b] } = streamingRoom(2);
+    send(a, { type: 'screen:watching', watching: true });
+    send(b, { type: 'screen:watching', watching: true });
+    send(host, { type: 'room:kick', targetUserId: 'g1' });
+    expect(flag(host, 'g2')).toBe(true);
+    send(host, { type: 'screen:stop' });
+    expect(flag(host, 'g2')).toBe(false);
+    expect(flag(b, 'g2')).toBe(false);
+  });
+});

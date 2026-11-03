@@ -13,6 +13,8 @@ export interface RoomMember {
   state: MemberPlaybackState;
   currentTime: number;
   ping: number;
+  /** Está assistindo à transmissão de tela agora (informado pelo servidor a todos; vale só durante a transmissão). */
+  watchingScreen?: boolean;
 }
 
 export interface RoomMedia {
