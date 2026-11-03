@@ -27,6 +27,7 @@ import { CatalogEpisode, episodeTag, loadActiveSeriesContext, saveActiveSeriesCo
 import type { PlaylistItem } from './types/sync';
 import { PlaylistPanel } from './components/PlaylistPanel';
 import { logger } from './lib/logger';
+import { clearLastRoom, saveLastRoom } from './lib/lastRoom';
 import { refFromSeriesContext, startPlayback, type CatalogRef } from './lib/continueWatching';
 import { describeSourceForLog } from './lib/mediaLog';
 import { shareableFingerprint } from './lib/media';
@@ -186,6 +187,8 @@ export default function App() {
 
   /** Sai da sala de verdade: desconecta, limpa ?room=, descarrega o vídeo e volta para a tela inicial. */
   const leaveToHome = useCallback(() => {
+    const leftCode = syncManager.getRoomState()?.roomId;
+    if (leftCode && !discordManager.isDiscordActivity()) saveLastRoom(leftCode, Date.now(), true); // a hora de agora é a de sair
     if (!discordManager.isDiscordActivity()) syncManager.leaveRoom();
     setRoomInUrl(null);
     setCurrentPayload(EMPTY_PAYLOAD);
@@ -256,7 +259,11 @@ export default function App() {
     const unsubSync = syncManager.subscribeState(() => {
       setSyncStatus(syncManager.getStatus());
       const room = syncManager.getRoomState();
-      if (room) wasInRoomRef.current = true;
+      if (room) {
+        wasInRoomRef.current = true;
+        // "Voltar à sala" na Home: lembra a sala (no Discord a sala é a da atividade, não precisa)
+        if (!discordManager.isDiscordActivity()) saveLastRoom(room.roomId);
+      }
       // Player vazio numa sala que já tem vídeo (ex.: o Host recarregou a página): carrega o vídeo da sala.
       // O listener de mídia só cobre espectadores, porque assume que o Host já está com o vídeo aberto.
       if (room?.media?.url && !currentUrlRef.current) {
@@ -299,6 +306,7 @@ export default function App() {
       const kickedFromInside = wasInRoomRef.current;
       wasInRoomRef.current = false;
       if (code === 'banned' || code === 'kicked') {
+        clearLastRoom(); // não dá para voltar
         setRoomInUrl(null);
         setCurrentPayload(EMPTY_PAYLOAD);
         setPendingSubtitles([]);
@@ -576,6 +584,7 @@ export default function App() {
               setJoinPrefill({ code: '', error: null });
               setHomeStep('join');
             }}
+            onRejoin={requestJoin}
             onCatalog={() => setHomeTab('catalog')}
           />
         );

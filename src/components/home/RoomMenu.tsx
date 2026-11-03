@@ -3,6 +3,7 @@ import { ArrowRight, Captions, FolderOpen, Link, LogIn, Magnet, MonitorUp, Refre
 import { GhostButton, HomeCard, TextButton, cx } from '../ui';
 import { t, msg } from '../../lib/i18n';
 import { useScreenMenu } from './useScreenMenu';
+import { LastRoomCard } from './LastRoomCard';
 
 export type SourceStep = 'upload' | 'torrent' | 'youtube' | 'drive' | 'screen' | 'stream';
 
@@ -29,13 +30,15 @@ const SOURCES: SourceOption[] = [
 interface RoomMenuProps {
   onPick: (step: SourceStep) => void;
   onJoin: () => void;
+  /** Entra de volta na última sala (o App pede o apelido, se for preciso). */
+  onRejoin: (code: string) => void;
   onCatalog: () => void;
 }
 
-export const RoomMenu: React.FC<RoomMenuProps> = ({ onPick, onJoin, onCatalog }) => {
+export const RoomMenu: React.FC<RoomMenuProps> = ({ onPick, onJoin, onRejoin, onCatalog }) => {
   const screenState = useScreenMenu();
-  return (
-  <>
+  return (  <>
+    <LastRoomCard onRejoin={onRejoin} />
     <HomeCard>
       <h1 className="m-0 text-[22px] sm:text-[24px] font-semibold tracking-[-0.02em] leading-tight">{t('Crie uma sala')}</h1>
       <p className="mt-1.5 mb-5 text-[14px] text-lu-muted">{t('Solte um vídeo e assista na hora com os amigos.')}</p>
