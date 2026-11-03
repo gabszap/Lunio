@@ -12,6 +12,7 @@ import { roomStore, type PersistedRoom, type RoomStore } from './roomStore';
 import { isValidScreenEpoch, isValidScreenKey, newScreenSession, sanitizeUsageBytes, screenShareEnabled } from './screenShare';
 import { recordScreenUsage } from './screenUsage';
 import { screenQuality, type RoomScreen } from '../types/screen';
+import { isLinkId, linksOf, resolveLinkId, scrubFor, type LinkEntry } from './links';
 import type {
   ClientMessage,
   ServerMessage,
@@ -78,6 +79,8 @@ interface RoomInternal {
     /** Quem está assistindo (id sem o sufixo de aba -> apelido). Só o Host da transmissão fica sabendo. */
     viewers: Map<string, string>;
   };
+  /** Itens que o Host acabou de tirar da fila para tocar: o `media:set` que vem logo depois ainda chega com o id deles. */
+  takenLinks: Array<LinkEntry & { at: number }>;
 }
 
 /** O servidor dá `<id>_tab####` à segunda aba aberta pela mesma pessoa; o ban vale para o ID de verdade (todas as abas). */
@@ -97,8 +100,14 @@ const TIMELINE_PERSIST_GAP_MS = 5000;
 /** Servidor parado por mais que isto: a sala volta pausada (não finge que o vídeo andou o tempo todo). */
 const RESTORE_MAX_PLAYING_GAP_MS = 120_000;
 
+/** Quanto tempo o item tirado da fila ainda pode ser tocado pelo id (o `playlist:take` e o `media:set` saem juntos). */
+const TAKEN_LINK_TTL_MS = 2 * 60_000;
+/** Identidade do vídeo que pode ir aos outros: só as que não carregam o link (`ih:`/`vh:`). */
+const FINGERPRINT_RE = /^(ih|vh):[\w:|.\- ]{1,300}$/i;
+
 export class RoomManager {
   private rooms = new Map<string, RoomInternal>();
+  private sessions = new WeakMap<WebSocket, ClientSession>();
   // Salas removidas por inatividade (para a Home distinguir "encerrada" de "código errado")
   private closedRooms = new Map<string, number>();
   private persistTimers = new Map<string, NodeJS.Timeout>();
@@ -264,6 +273,7 @@ export class RoomManager {
         chatHistory: [],
         pendingLeaves: new Map(),
         announcedJoins: new Set(),
+        takenLinks: [],
         bannedMembers: new Map(),
       };
       this.rooms.set(roomId, room);
@@ -316,10 +326,12 @@ export class RoomManager {
 
   public broadcast(room: RoomInternal, message: ServerMessage, excludeWs?: WebSocket) {
     const payload = JSON.stringify(message);
-    for (const [ws] of room.clients) {
+    // Cada pessoa vê inteiro só o link que ela mesma enviou; o dos outros vai como id opaco
+    const links = payload.includes('http') ? this.linksFor(room) : [];
+    for (const [ws, session] of room.clients) {
       if (ws !== excludeWs && ws.readyState === WebSocket.OPEN) {
         try {
-          ws.send(payload);
+          ws.send(links.length ? scrubFor(links, session.userId, payload) : payload);
         } catch (err) {
           console.warn('[WatchParty] Erro ao enviar mensagem para socket:', err);
         }
@@ -419,6 +431,7 @@ export class RoomManager {
     }
 
     room.clients.set(ws, session);
+    this.sessions.set(ws, session);
 
     console.log(
       `[WatchParty] 👤 "${user.username}" (${session.userId}) ${isReconnecting ? 'reconectou silenciosamente' : 'entrou'} na sala "${roomId}". Membros: ${room.clients.size}`
@@ -642,6 +655,7 @@ export class RoomManager {
         chatHistory: [],
         pendingLeaves: new Map(),
         announcedJoins: new Set(),
+        takenLinks: [],
         bannedMembers: new Map(p.bans.map((b) => [b.userId, b])),
         hostGraceUntil: now + config.hostGraceMs,
       };
@@ -765,10 +779,30 @@ export class RoomManager {
     this.refreshSkipVote(room);
   }
 
+  /** Links da sala que passam pela troca por id (mídia, fila e o que acabou de sair dela). */
+  private linksFor(room: RoomInternal): LinkEntry[] {
+    const now = Date.now();
+    room.takenLinks = room.takenLinks.filter((l) => now - l.at < TAKEN_LINK_TTL_MS);
+    const links = linksOf(room);
+    for (const t of room.takenLinks) if (!links.some((l) => l.id === t.id)) links.push(t);
+    return links;
+  }
+
+  /** O link de verdade por trás de um id da sala (as rotas com `?url=` usam). */
+  public resolveLink(roomId: string, id: string): string | null {
+    const room = this.rooms.get(roomId);
+    if (!room || !isLinkId(id)) return null;
+    return (resolveLinkId(room, id) ?? this.linksFor(room).find((l) => l.id === id) ?? null)?.url ?? null;
+  }
+
   public send(ws: WebSocket, message: ServerMessage) {
     if (ws.readyState === WebSocket.OPEN) {
       try {
-        ws.send(JSON.stringify(message));
+        let payload = JSON.stringify(message);
+        const session = this.sessions.get(ws);
+        const room = session && this.rooms.get(session.roomId);
+        if (room && payload.includes('http')) payload = scrubFor(this.linksFor(room), session!.userId, payload);
+        ws.send(payload);
       } catch (e) {
         console.warn('[WatchParty] Falha ao enviar mensagem:', e);
       }
@@ -921,6 +955,7 @@ export class RoomManager {
           url,
           title,
           mimeType: typeof msg.mimeType === 'string' ? msg.mimeType.slice(0, 100) : undefined,
+          fingerprint: typeof msg.fingerprint === 'string' && FINGERPRINT_RE.test(msg.fingerprint) ? msg.fingerprint : undefined,
           addedById: clientSession.userId,
           addedBy: clientSession.username,
         });
@@ -955,7 +990,10 @@ export class RoomManager {
 
       case 'playlist:take': {
         if (!isHost) return;
-        if (!currentRoom.playlist.some((i) => i.id === msg.itemId)) return;
+        const taken = currentRoom.playlist.find((i) => i.id === msg.itemId);
+        if (!taken) return;
+        // O `media:set` do vídeo tirado chega logo depois, ainda com o id dele
+        currentRoom.takenLinks = [...this.linksFor(currentRoom).filter((l) => l.url === taken.url).map((l) => ({ ...l, at: Date.now() })), ...currentRoom.takenLinks].slice(0, 5);
         currentRoom.playlist = currentRoom.playlist.filter((i) => i.id !== msg.itemId);
         this.broadcast(currentRoom, { type: 'playlist:update', playlist: currentRoom.playlist });
         break;
@@ -963,10 +1001,21 @@ export class RoomManager {
 
       case 'media:set': {
         if (!isHost) return;
+        // O Host toca o link que enviou agora ou, pelo id, o de um item da fila (que continua sendo de quem o adicionou)
+        let mediaUrl = msg.media.url;
+        let ownerId = clientSession.userId;
+        if (isLinkId(mediaUrl)) {
+          const known = this.linksFor(currentRoom).find((l) => l.id === mediaUrl);
+          if (!known) return;
+          mediaUrl = known.url;
+          ownerId = known.ownerId;
+        }
         const newGeneration = (currentRoom.media?.generation || 0) + 1;
         currentRoom.media = {
           generation: newGeneration,
-          url: msg.media.url,
+          url: mediaUrl,
+          ownerId,
+          fingerprint: typeof msg.media.fingerprint === 'string' && FINGERPRINT_RE.test(msg.media.fingerprint) ? msg.media.fingerprint : undefined,
           title: msg.media.title,
           duration: msg.media.duration,
           parsedTorrent: msg.media.parsedTorrent,
@@ -1028,7 +1077,8 @@ export class RoomManager {
       }
 
       case 'media:chapters': {
-        if (!isHost || !currentRoom.media || msg.url !== currentRoom.media.url || !Array.isArray(msg.chapters)) return;
+        const chaptersUrl = isLinkId(msg.url) ? this.resolveLink(currentRoom.roomId, msg.url) : msg.url;
+        if (!isHost || !currentRoom.media || chaptersUrl !== currentRoom.media.url || !Array.isArray(msg.chapters)) return;
         // Dado do cliente: só números finitos e títulos curtos, no máximo 200 capítulos
         const chapters = msg.chapters
           .slice(0, 200)

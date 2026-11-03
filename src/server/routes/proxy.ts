@@ -1,3 +1,4 @@
+import { urlParam } from './linkParam';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { sendApiError } from '../http';
 import { isBlockedError } from '../security';
@@ -11,7 +12,8 @@ import { handleUploadServe } from './upload';
 export async function handleProxy(req: IncomingMessage, res: ServerResponse) {
   try {
     const reqUrl = new URL(req.url || '', 'http://localhost');
-    const targetUrl = reqUrl.searchParams.get('url');
+    const targetUrl = urlParam(req, res, reqUrl);
+    if (targetUrl === false) return; // id de link desconhecido: já respondeu 404
     const audioTrack = reqUrl.searchParams.get('audio');
     const seekSeconds = Math.min(86400, Math.max(0, parseFloat(reqUrl.searchParams.get('ss') || '0') || 0));
     const rawSession = reqUrl.searchParams.get('session') || '';

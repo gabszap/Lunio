@@ -449,11 +449,17 @@ export const Slider: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = ({ 
 );
 
 /** Fecha um popover ao clicar fora ou apertar Esc. */
-export function useDismiss(open: boolean, onClose: () => void, ref: React.RefObject<HTMLElement | null>) {
+/**
+ * Fecha ao clicar fora de `ref` ou com Esc. `alsoInside`: elementos que contam como "dentro" mesmo estando fora de `ref`
+ * (o botão que abre o painel: sem isso o mousedown fecha e o click reabre).
+ */
+export function useDismiss(open: boolean, onClose: () => void, ref: React.RefObject<HTMLElement | null>, alsoInside?: React.RefObject<HTMLElement | null>) {
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+      const target = e.target as Node;
+      if (alsoInside?.current?.contains(target)) return;
+      if (ref.current && !ref.current.contains(target)) onClose();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -464,7 +470,7 @@ export function useDismiss(open: boolean, onClose: () => void, ref: React.RefObj
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open, onClose, ref]);
+  }, [open, onClose, ref, alsoInside]);
 }
 
 // ───────────────────────── Form fields ─────────────────────────

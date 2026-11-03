@@ -2,9 +2,11 @@ import { useEffect, useState, type Dispatch, type MutableRefObject, type SetStat
 import type { AudioTrackOption, Chapter, SubtitleTrack, VideoInfo } from '../../types/media';
 import { formatTime } from '../../lib/chapters';
 import { logger } from '../../lib/logger';
+import { isRemoteSource } from '../../lib/linkId';
 import { getYouTubeId, resolveMediaRef } from '../../lib/media';
 import { sessionManager } from '../../lib/session';
 import { getProgressStorageKey } from './progress';
+import { readStartTime } from '../../lib/startTime';
 import type { useAlternateAudio } from './useAlternateAudio';
 import type { useSubtitles } from './useSubtitles';
 
@@ -13,7 +15,7 @@ import type { useSubtitles } from './useSubtitles';
  * resolve as legendas e sugere "continuar de onde parou".
  */
 export function useMediaInspection(args: {
-  source: { src: string };
+  source: { src: string; fingerprint?: string };
   hasSource: boolean;
   title?: string;
   initialChapters: Chapter[];
@@ -66,7 +68,8 @@ export function useMediaInspection(args: {
     // Checa se há progresso salvo para sugerir retomada em popup (o vídeo sempre inicia do 0)
     try {
       const savedTime = parseFloat(localStorage.getItem(getProgressStorageKey(source.src)) || '0');
-      if (savedTime > 10 && !autoPlay) {
+      // O `?t=` do link ou o instante do "continuar assistindo" já decidem a posição: nada de perguntar
+      if (savedTime > 10 && !autoPlay && readStartTime() === null) {
         setResumePrompt({ time: savedTime, formatted: formatTime(savedTime) });
       } else {
         setResumePrompt(null);
@@ -89,7 +92,7 @@ export function useMediaInspection(args: {
       };
     }
 
-    const isRemoteStream = source.src.startsWith('http://') || source.src.startsWith('https://');
+    const isRemoteStream = isRemoteSource(source.src);
 
     // Roteia via proxy nativo para bypass de CORS, SSL e redirecionamento de links debrid
     if (isRemoteStream && !source.src.startsWith('/api/proxy')) {
@@ -103,7 +106,7 @@ export function useMediaInspection(args: {
       setIsInspecting(true);
       logger.info('[Mídia] Lendo faixas de áudio, legendas e capítulos…');
 
-      resolveMediaRef(source.src, initialSubtitles)
+      resolveMediaRef(source.src, initialSubtitles, source.fingerprint)
         .then(async (resolvedMedia) => {
           if (isCancelled || !resolvedMedia) return;
 

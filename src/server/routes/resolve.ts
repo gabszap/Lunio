@@ -1,3 +1,4 @@
+import { urlParam } from './linkParam';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { sendApiError } from '../http';
 import { isBlockedError } from '../security';
@@ -7,7 +8,8 @@ import { resolveFinalCdnUrl } from '../media/resolver';
 export async function handleResolve(req: IncomingMessage, res: ServerResponse) {
   try {
     const reqUrl = new URL(req.url || '', 'http://localhost');
-    const targetUrl = reqUrl.searchParams.get('url');
+    const targetUrl = urlParam(req, res, reqUrl);
+    if (targetUrl === false) return; // id de link desconhecido: já respondeu 404
     if (!targetUrl) {
       sendApiError(res, 400, 'bad_request', 'Parâmetro url ausente.');
       return;

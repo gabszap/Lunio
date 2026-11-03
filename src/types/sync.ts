@@ -26,6 +26,10 @@ export interface RoomMedia {
   chapters?: Chapter[];
   subtitles?: SubtitleTrack[];
   audioTracks?: AudioTrackOption[];
+  /** Quem enviou o link (o servidor preenche): só essa pessoa o vê inteiro, os outros recebem um id opaco. */
+  ownerId?: string;
+  /** Identidade estável do vídeo (`ih:`/`vh:`, sem o link) para os outros reaproveitarem o cache de legendas e fontes. */
+  fingerprint?: string;
 }
 
 /** Item da fila (playlist) da sala. A mídia só é resolvida (faixas, legendas) quando o Host toca o item. */
@@ -34,6 +38,7 @@ export interface PlaylistItem {
   url: string;
   title: string;
   mimeType?: string;
+  fingerprint?: string;
   addedById: string;
   addedBy: string;
 }
@@ -124,6 +129,7 @@ export type ClientMessage =
         chapters?: Chapter[];
         subtitles?: SubtitleTrack[];
         audioTracks?: AudioTrackOption[];
+        fingerprint?: string;
       };
       initialPosition?: number;
     }
@@ -190,6 +196,7 @@ export type ClientMessage =
       url: string;
       title: string;
       mimeType?: string;
+      fingerprint?: string;
     }
   | {
       type: 'playlist:remove';

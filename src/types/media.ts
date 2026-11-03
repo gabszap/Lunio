@@ -1,6 +1,8 @@
 export type MediaSource = {
   src: string;
   type?: string;
+  /** Identidade do vídeo vinda de quem enviou o link (`ih:`/`vh:`): quem só recebe o id opaco a usa no cache. */
+  fingerprint?: string;
 };
 
 export type Chapter = {
@@ -170,6 +172,7 @@ export type MediaPayload = {
   chapters?: Chapter[];
   audioTracks?: AudioTrackOption[];
   isMkv?: boolean;
+  fingerprint?: string;
 };
 
 export type PlayerPreset = {
@@ -179,3 +182,24 @@ export type PlayerPreset = {
   badge: string;
   payload: MediaPayload;
 };
+
+/** Contexto da série quando a sala ou player inicia a partir de um episódio do catálogo. */
+export interface CatalogSeriesContext {
+  seriesId: string;
+  seriesTitle: string;
+  seriesType: string;
+  /** Capa da série (para o "continuar assistindo"). */
+  seriesPoster?: string;
+  currentEpisodeId: string;
+  season: number;
+  episode: number;
+  episodes: Array<{
+    id: string;
+    season: number;
+    episode: number;
+    title: string;
+    overview?: string;
+    thumbnail?: string;
+    released?: string;
+  }>;
+}
