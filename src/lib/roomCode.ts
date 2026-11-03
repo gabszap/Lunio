@@ -63,7 +63,7 @@ export function roomCodeFrom(input: string): string | null {
  */
 export function formatRoomUrl(roomId: string): string {
   if (typeof window === 'undefined') return `?room=${roomId}`;
-  const url = new URL(window.location.href);
+  const url = new URL('/', window.location.origin);
   url.searchParams.set('room', roomId);
   return url.toString();
 }

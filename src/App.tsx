@@ -54,7 +54,8 @@ function setRoomInUrl(code: string | null) {
   const url = new URL(window.location.href);
   if (code) url.searchParams.set('room', code);
   else url.searchParams.delete('room');
-  window.history.replaceState(null, '', url.pathname + url.search);
+  // A sala vive na raiz: o link não carrega a aba de onde foi criada (/home, /catalog...)
+  window.history.replaceState(null, '', (code ? '/' : url.pathname) + url.search);
 }
 
 export default function App() {

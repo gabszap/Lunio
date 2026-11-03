@@ -8,7 +8,7 @@ export interface RecentStream {
   date: string;
 }
 
-const RECENT_KEY = 'streamplayer_recent_streams';
+const RECENT_KEY = 'lunio_recent_streams';
 
 export function loadRecentStreams(): RecentStream[] {
   try {

@@ -181,7 +181,8 @@ export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClos
 
   /** Copia o link da sala; com `atSeconds`, ele abre o vídeo naquele instante (`?t=`: vale para o Host ou quem assiste sozinho). */
   const copyRoomLink = (atSeconds?: number) => {
-    const url = new URL(window.location.href);
+    // Só a raiz + ?room= (e ?t=): sem /home, /catalog ou outros parâmetros da página atual
+    const url = new URL('/', window.location.origin);
     url.searchParams.set('room', currentRoomId);
     if (atSeconds === undefined) url.searchParams.delete('t'); // o link da sala não carrega o instante de quem copiou
     else url.searchParams.set('t', String(Math.floor(atSeconds)));

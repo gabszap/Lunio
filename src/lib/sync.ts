@@ -116,7 +116,7 @@ class SyncManager implements ScreenSignals {
     let savedAvatarUrl: string | undefined;
 
     try {
-      const saved = sessionStorage.getItem('streamplayer_watchparty_user');
+      const saved = sessionStorage.getItem('lunio_watchparty_user');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed.username && !parsed.username.startsWith('Espectador #') && parsed.username !== 'Usuário Local') {
@@ -139,7 +139,7 @@ class SyncManager implements ScreenSignals {
     };
 
     try {
-      sessionStorage.setItem('streamplayer_watchparty_user', JSON.stringify(user));
+      sessionStorage.setItem('lunio_watchparty_user', JSON.stringify(user));
     } catch {}
 
     return user;
@@ -147,7 +147,7 @@ class SyncManager implements ScreenSignals {
 
   public hasCustomUsername(): boolean {
     try {
-      return sessionStorage.getItem('streamplayer_has_custom_user') === 'true';
+      return sessionStorage.getItem('lunio_has_custom_user') === 'true';
     } catch {
       return false;
     }
@@ -163,8 +163,8 @@ class SyncManager implements ScreenSignals {
       avatarUrl: avatarUrl !== undefined ? avatarUrl : this.user.avatarUrl,
     };
     try {
-      sessionStorage.setItem('streamplayer_watchparty_user', JSON.stringify(this.user));
-      sessionStorage.setItem('streamplayer_has_custom_user', 'true');
+      sessionStorage.setItem('lunio_watchparty_user', JSON.stringify(this.user));
+      sessionStorage.setItem('lunio_has_custom_user', 'true');
     } catch {}
 
     // Notifica o servidor imediatamente da mudança de nome
@@ -490,7 +490,7 @@ class SyncManager implements ScreenSignals {
             id: msg.assignedUserId,
           };
           try {
-            sessionStorage.setItem('streamplayer_watchparty_user', JSON.stringify(this.user));
+            sessionStorage.setItem('lunio_watchparty_user', JSON.stringify(this.user));
           } catch {}
         }
         const prevMedia = this.roomState?.media;

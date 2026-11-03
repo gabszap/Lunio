@@ -4,6 +4,9 @@ import App from './App.tsx';
 import './index.css';
 import { safeStringify } from './lib/logger';
 import { ensureSession } from './lib/access';
+import { migrateLegacyStorage } from './lib/legacyStorage';
+
+migrateLegacyStorage();
 
 // Global guard against circular structure exceptions in AI Studio iframe console bridges
 (() => {

@@ -71,7 +71,7 @@ test.describe('Watch Party', () => {
     await createRoom(host.page, 'Ana');
     await waitReady(host.page);
     // o próximo vídeo já tem progresso salvo (antes isso mostrava "Continuar de onde parou?")
-    await host.page.evaluate((u) => localStorage.setItem(`streamplayer_progress_${encodeURIComponent(u.slice(0, 100))}`, '60'), SUBTITLES_URL);
+    await host.page.evaluate((u) => localStorage.setItem(`lunio_progress_${encodeURIComponent(u.slice(0, 100))}`, '60'), SUBTITLES_URL);
 
     // sem itens: cinza e sem ação
     const next = host.page.locator('#btn-next-in-queue');
