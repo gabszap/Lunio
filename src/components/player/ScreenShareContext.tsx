@@ -22,11 +22,6 @@ export interface HostLiveStats {
   height: number;
 }
 
-/** O que quem assiste vê chegando: fps desenhados e Mbps do último segundo. */
-export interface ViewerLiveStats {
-  fps: number;
-  mbps: number;
-}
 
 export interface ScreenShareValue {
   /** O botão "Transmitir a tela" deve aparecer (Host, sala, navegador capaz, servidor com a flag ligada). */
@@ -51,7 +46,7 @@ export interface ScreenShareValue {
   /** Volume (0 a 1) e mudo da transmissão para quem assiste: independentes do vídeo da sala. */
   volume: number;
   muted: boolean;
-  viewer: { status: ViewerScreenStatus; error: string | null; stats: ViewerLiveStats | null };
+  viewer: { status: ViewerScreenStatus; error: string | null };
   /** O palco da transmissão cobre o vídeo da sala (conectando ou assistindo): o vídeo fica mudo e escondido por baixo. */
   covering: boolean;
   /** A transmissão acabou há pouco (aviso de alguns segundos). */
@@ -85,7 +80,7 @@ const INERT: ScreenShareValue = {
   viewers: [],
   volume: 1,
   muted: false,
-  viewer: { status: 'idle', error: null, stats: null },
+  viewer: { status: 'idle', error: null },
   covering: false,
   endedNotice: false,
   lastQuality: DEFAULT_SCREEN_QUALITY,
@@ -143,7 +138,6 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [hostStats, setHostStats] = useState<HostLiveStats | null>(null);
   const [preview, setPreview] = useState<MediaStream | null>(null);
   const [viewers, setViewers] = useState(() => syncManager.getScreenViewers());
-  const [viewerStats, setViewerStats] = useState<ViewerLiveStats | null>(null);
   const [showPreview, setShowPreview] = useState(true);
   const [hasRoomMedia, setHasRoomMedia] = useState(() => Boolean(syncManager.getRoomState()?.media));
   const [{ volume, muted }, setVol] = useState(readVolume);
@@ -230,25 +224,6 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [hostStatus]);
-
-  // Números do que chega a quem assiste (fps desenhados e Mbps do último segundo)
-  useEffect(() => {
-    if (viewerStatus !== 'watching') {
-      setViewerStats(null);
-      return;
-    }
-    let lastBytes = viewerRef.current?.stats?.bytesIn ?? 0;
-    const tick = () => {
-      const s = viewerRef.current?.stats;
-      if (!s) return;
-      const mbps = Math.round((Math.max(0, s.bytesIn - lastBytes) * 8) / 1e5) / 10;
-      lastBytes = s.bytesIn;
-      setViewerStats((prev) => (prev && prev.fps === s.fps && prev.mbps === mbps ? prev : { fps: s.fps, mbps }));
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [viewerStatus]);
 
   // Aviso curto quando a transmissão acaba
   useEffect(() => {
@@ -427,7 +402,7 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
       viewers,
       volume,
       muted,
-      viewer: { status: viewerStatus, error: viewerError, stats: viewerStats },
+      viewer: { status: viewerStatus, error: viewerError },
       covering: viewerStatus === 'connecting' || viewerStatus === 'watching',
       endedNotice,
       lastQuality,
@@ -443,7 +418,7 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
       togglePreview,
       attachCanvas,
     }),
-    [canBroadcast, capabilities.viewer, screen, isBroadcaster, hostStatus, hostError, hostNotice, hostStats, preview, showPreview, hasRoomMedia, viewers, volume, muted, viewerStatus, viewerError, viewerStats, endedNotice, lastQuality, startBroadcast, stopBroadcast, watch, returnToVideo, dismissError, setVolume, toggleMuted, switchScreen, changeQuality, togglePreview, attachCanvas]
+    [canBroadcast, capabilities.viewer, screen, isBroadcaster, hostStatus, hostError, hostNotice, hostStats, preview, showPreview, hasRoomMedia, viewers, volume, muted, viewerStatus, viewerError, endedNotice, lastQuality, startBroadcast, stopBroadcast, watch, returnToVideo, dismissError, setVolume, toggleMuted, switchScreen, changeQuality, togglePreview, attachCanvas]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

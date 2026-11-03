@@ -127,10 +127,16 @@ export const ScreenShareStandbyButton: React.FC = () => {
   return <ScreenShareControl variant="button" open={open} onOpenChange={setOpen} />;
 };
 
-/** "1080p · 60 fps" (ou "4K · 60 fps"): o rótulo curto da qualidade nas barras. */
+/** "1080p · 60 fps" (ou "4K · 60 fps"): o rótulo curto da qualidade na barra do Host. */
 const shortQuality = (id: ScreenQualityId): string => {
   const q = screenQuality(id)!;
   return `${q.height >= 2160 ? '4K' : `${q.height}p`} · ${q.fps} fps`;
+};
+
+/** "1080p" (ou "4K"): quem assiste vê só a resolução da transmissão. */
+const resolutionLabel = (id: ScreenQualityId): string => {
+  const q = screenQuality(id)!;
+  return q.height >= 2160 ? '4K' : `${q.height}p`;
 };
 
 /** O que o Host está enviando, como imagem do player (no lugar do "Nenhum vídeo na sala"). */
@@ -143,9 +149,11 @@ const HostPreviewBackdrop: React.FC<{ stream: MediaStream }> = ({ stream }) => {
 };
 
 // Barra flutuante embaixo, como a dos apps de compartilhar tela: pílula escura com botões de 40 px
-const barBase = 'absolute left-1/2 -translate-x-1/2 z-40 flex flex-wrap items-center justify-center gap-1 rounded-[20px] p-1.5 max-w-[calc(100%-24px)]';
-const barBtn = 'inline-flex items-center justify-center h-10 rounded-[12px] text-[13px] font-medium text-lu-text hover:bg-white/8 transition-colors flex-none';
-const barInfo = 'inline-flex items-center gap-1.5 h-10 px-3 rounded-[12px] bg-white/5 text-[13px] text-lu-muted tabular whitespace-nowrap flex-none';
+// Vidro: fundo translúcido com desfoque forte e borda clara, para a imagem aparecer por trás (como nos apps de chamada)
+const glass = 'bg-white/[0.07] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.14] shadow-[0_12px_40px_rgba(0,0,0,0.35)]';
+const barBase = 'absolute left-1/2 -translate-x-1/2 z-40 w-max flex flex-nowrap items-center justify-center gap-1 rounded-full p-1.5 max-w-[calc(100%-24px)]';
+const barBtn = 'inline-flex items-center justify-center h-10 rounded-full text-[13px] font-medium text-lu-text hover:bg-white/10 transition-colors flex-none';
+const barInfo = 'inline-flex items-center gap-1.5 h-10 px-3.5 rounded-full bg-white/[0.08] text-[13px] text-lu-text/80 tabular whitespace-nowrap flex-none';
 
 const Divider: React.FC = () => <span className="w-px h-6 bg-lu-border mx-1 flex-none" aria-hidden="true" />;
 
@@ -182,7 +190,7 @@ const QualityPicker: React.FC<{ current: ScreenQualityId; onPick: (id: ScreenQua
   useDismiss(open, close, ref);
   return (
     <div className="relative" ref={ref}>
-      <button type="button" aria-label={t('Qualidade da transmissão')} aria-expanded={open} onClick={() => setOpen((v) => !v)} className={cx(barBtn, 'gap-1.5 px-3 bg-white/5 whitespace-nowrap')}>
+      <button type="button" aria-label={t('Qualidade da transmissão')} aria-expanded={open} onClick={() => setOpen((v) => !v)} className={cx(barBtn, 'gap-1.5 px-3.5 bg-white/[0.08] whitespace-nowrap')}>
         <span className="tabular">{shortQuality(current)}</span>
         <ChevronUp size={14} className={cx('transition-transform', !open && 'rotate-180')} />
       </button>
@@ -227,11 +235,11 @@ const ViewersChip: React.FC<{ viewers: Array<{ id: string; username: string }> }
 
 /** Barra do Host enquanto transmite: parar, trocar a tela, qualidade, números, quem assiste, prévia e tela cheia. */
 const HostBar: React.FC<{ s: ScreenShareValue; lift: boolean }> = ({ s, lift }) => {
-  const { stats, preview, showPreview } = s.host;
+  const { stats } = s.host;
   const quality = s.screen?.quality ?? s.lastQuality;
   return (
-    <div className={cx(barBase, floatingCard, lift ? 'bottom-28' : 'bottom-6')}>
-      <button type="button" onClick={s.stopBroadcast} className={cx(barBtn, 'gap-2 px-3.5 bg-lu-error/15 text-lu-error hover:!bg-lu-error/25 border border-lu-error/30')}>
+    <div className={cx(barBase, glass, lift ? 'bottom-28' : 'bottom-6')}>
+      <button type="button" onClick={s.stopBroadcast} className={cx(barBtn, 'gap-2 px-4 bg-lu-error/20 text-red-200 hover:!bg-lu-error/35 border border-lu-error/40')}>
         <MonitorOff size={17} />
         <span>{t('Parar de compartilhar')}</span>
       </button>
@@ -243,48 +251,57 @@ const HostBar: React.FC<{ s: ScreenShareValue; lift: boolean }> = ({ s, lift }) 
       </button>
       <Divider />
       <QualityPicker current={quality} onPick={(id) => void s.changeQuality(screenQuality(id)!)} />
-      {stats && <span className={barInfo}>{t('{fps} fps · {mbps} Mbps', { fps: stats.fps, mbps: fmt(stats.mbps) })}</span>}
+      {stats && <span className={cx(barInfo, 'max-md:hidden')}>{t('{fps} fps · {mbps} Mbps', { fps: stats.fps, mbps: fmt(stats.mbps) })}</span>}
       <ViewersChip viewers={s.viewers} />
-      {preview && (
-        <button
-          type="button"
-          aria-label={showPreview ? t('Esconder a prévia') : t('Ver a prévia')}
-          title={showPreview ? t('Esconder a prévia') : `${t('Ver a prévia')}. ${t('Se você compartilha a tela inteira, a prévia aparece dentro dela (efeito espelho).')}`}
-          aria-pressed={showPreview}
-          onClick={s.togglePreview}
-          className={cx(barBtn, 'w-10')}
-        >
-          {showPreview ? <Eye size={18} /> : <EyeOff size={18} />}
-        </button>
-      )}
       <FullscreenButton />
     </div>
   );
 };
 
+/** Liga/desliga a prévia (a imagem do player): fica no canto da imagem, fora da barra. */
+const PreviewToggle: React.FC<{ s: ScreenShareValue }> = ({ s }) => (
+  <button
+    type="button"
+    aria-label={s.host.showPreview ? t('Esconder a prévia') : t('Ver a prévia')}
+    title={s.host.showPreview ? t('Esconder a prévia') : `${t('Ver a prévia')}. ${t('Se você compartilha a tela inteira, a prévia aparece dentro dela (efeito espelho).')}`}
+    aria-pressed={s.host.showPreview}
+    onClick={s.togglePreview}
+    className={cx('absolute top-20 right-3 z-40 inline-flex items-center justify-center w-10 h-10 rounded-full text-lu-text hover:bg-white/15 transition-colors', glass)}
+  >
+    {s.host.showPreview ? <Eye size={18} /> : <EyeOff size={18} />}
+  </button>
+);
+
 /** Barra de quem assiste: volume da transmissão, qualidade e números, tela cheia e "Voltar ao vídeo" (se a sala tem vídeo). */
 const ViewerBar: React.FC<{ s: ScreenShareValue; lift: boolean }> = ({ s, lift }) => {
   const effective = s.muted ? 0 : s.volume;
   const Icon = effective === 0 ? VolumeX : effective < 0.5 ? Volume1 : Volume2;
-  const stats = s.viewer.stats;
+  const percent = Math.round(effective * 100);
   return (
-    <div className={cx(barBase, floatingCard, lift ? 'bottom-28' : 'bottom-6')}>
-      <button type="button" aria-label={s.muted ? t('Ativar o som da transmissão') : t('Silenciar a transmissão')} onClick={s.toggleMuted} className={cx(barBtn, 'w-10')}>
-        <Icon size={18} />
-      </button>
-      <input
-        type="range"
-        min="0"
-        max="1"
-        step="0.01"
-        aria-label={t('Volume da transmissão')}
-        value={effective}
-        onChange={(e) => s.setVolume(parseFloat(e.target.value))}
-        className="w-[96px] m-0 mr-1 cursor-pointer max-sm:hidden"
-      />
-      <Divider />
-      {s.screen && <span className={barInfo}>{shortQuality(s.screen.quality)}</span>}
-      {stats && <span className={cx(barInfo, 'max-sm:hidden')}>{t('{fps} fps · {mbps} Mbps', { fps: stats.fps, mbps: fmt(stats.mbps) })}</span>}
+    <div className={cx(barBase, glass, lift ? 'bottom-28' : 'bottom-6')}>
+      {/* Volume: o botão muta; ao passar o mouse (ou focar) abre o controle vertical com a porcentagem */}
+      <div className="relative group/vol flex-none">
+        <button type="button" aria-label={s.muted ? t('Ativar o som da transmissão') : t('Silenciar a transmissão')} onClick={s.toggleMuted} className={cx(barBtn, 'w-10')}>
+          <Icon size={18} />
+        </button>
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 pb-2 hidden group-hover/vol:block group-focus-within/vol:block">
+          <div className={cx('flex flex-col items-center gap-2 rounded-full px-2 py-3', glass)}>
+            <span className="text-[12px] tabular text-lu-text/90 w-9 text-center">{percent}%</span>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              aria-label={t('Volume da transmissão')}
+              value={effective}
+              onChange={(e) => s.setVolume(parseFloat(e.target.value))}
+              style={{ writingMode: 'vertical-lr', direction: 'rtl', width: 20, height: 108 }}
+              className="m-0 cursor-pointer"
+            />
+          </div>
+        </div>
+      </div>
+      {s.screen && <span className={barInfo}>{resolutionLabel(s.screen.quality)}</span>}
       <FullscreenButton />
       {s.hasRoomMedia && (
         <>
@@ -325,12 +342,13 @@ export const ScreenStage: React.FC<{ lift?: boolean }> = ({ lift = false }) => {
       )}
 
       {s.host.status === 'starting' && (
-        <div className={cx(barBase, floatingCard, 'bottom-6 px-4 py-2.5 text-[13px] gap-3')} role="status">
+        <div className={cx(barBase, glass, 'bottom-6 px-4 py-2.5 text-[13px] gap-3')} role="status">
           <Spinner size={16} />
           <span>{t('Conectando à transmissão…')}</span>
         </div>
       )}
       {hostLive && <HostBar s={s} lift={lift} />}
+      {hostLive && s.host.preview && <PreviewToggle s={s} />}
       {s.covering && <ViewerBar s={s} lift={lift} />}
 
       {available && !s.covering && status !== 'error' && (
