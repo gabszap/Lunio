@@ -56,7 +56,7 @@ function fakePublisher(opts: { startError?: Error; startGate?: Promise<void> } =
     }),
     rotateKey: vi.fn(async () => ({ epoch: ++pub.epoch, key: 'k' + pub.epoch })),
     stop: vi.fn(async () => {}),
-    replaceSource: vi.fn(async () => 'switched' as const),
+    replaceSource: vi.fn(async (): Promise<'switched' | 'cancelled'> => 'switched'),
     previewStream: { id: 'preview' } as unknown as MediaStream,
     stats: { hasSubscribers: true, fps: 28, width: 1920, height: 1080, bytesOut: 1234 },
     epoch: 1,
