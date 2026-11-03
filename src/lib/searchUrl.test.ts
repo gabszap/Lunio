@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { detailFromPath, detailPath, readDetailFromUrl, readSearchFromUrl, readSeasonFromUrl, writeDetailToUrl, writeSearchToUrl, writeSeasonToUrl } from './searchUrl';
+import { detailFromPath, detailPath, discoverFromUrl, discoverPath, writeDiscoverToUrl, readDetailFromUrl, readSearchFromUrl, readSeasonFromUrl, writeDetailToUrl, writeSearchToUrl, writeSeasonToUrl } from './searchUrl';
 
 describe('readSearchFromUrl', () => {
   it('lê a busca (com acento, dois-pontos e espaço, nas duas formas de codificar)', () => {
@@ -58,9 +58,27 @@ describe('título aberto (/detail/<tipo>/<id>)', () => {
   });
 
   it('caminho inválido não vira título', () => {
-    for (const bad of ['/detail', '/detail/series', '/detail/series/', '/detail/Series/tt1', '/detail/series/a%20b', '/detail/series/a/b', '/detail/../x/tt1', '/detail/series/%E0%A4%A', '/catalog', '/']) {
+    for (const bad of ['/detail', '/detail/series', '/detail/series/', '/detail/Series/tt1', '/detail/series/a%20b', '/detail/series/a/b/c', '/detail/series/a/a%20b', '/detail/../x/tt1', '/detail/series/%E0%A4%A', '/detail/series/a/%E0%A4%A', '/catalog', '/']) {
       expect(detailFromPath(bad), bad).toBeNull();
     }
+  });
+
+  it('o episódio é o terceiro segmento (/detail/<tipo>/<id>/<videoId>), com ida e volta', () => {
+    expect(detailFromPath('/detail/series/a/b')).toEqual({ type: 'series', id: 'a', videoId: 'b' });
+    const ref = { type: 'series', id: 'mal:61469', videoId: 'tt2359704:6:1' };
+    expect(detailPath(ref)).toBe('/detail/series/mal%3A61469/tt2359704%3A6%3A1');
+    expect(detailFromPath(detailPath(ref))).toEqual(ref);
+    expect(detailFromPath('/detail/series/mal%3A61469/tt2359704%3A6%3A1/')).toEqual(ref);
+    expect(readDetailFromUrl('?season=6', '/detail/series/mal%3A61469/tt2359704%3A6%3A1')).toEqual(ref);
+  });
+
+  it('o id do episódio aceita mais que o do título (+, ids compostos), mas não espaço nem /', () => {
+    for (const videoId of ['kitsu:123:1:2', 'ep+1', 'a@b~c']) {
+      const ref = { type: 'series', id: 'tt1', videoId };
+      expect(detailFromPath(detailPath(ref)), videoId).toEqual(ref);
+    }
+    expect(detailFromPath('/detail/series/tt1/a%20b')).toBeNull();
+    expect(detailFromPath('/detail/series/tt1/a%2Fb')).toBeNull();
   });
 
   it('o link antigo (?detail=) continua sendo lido, inclusive id composto e codificado', () => {
@@ -97,6 +115,16 @@ describe('título aberto (/detail/<tipo>/<id>)', () => {
       expect(current).toBe('/detail/series/tt5607616');
       writeDetailToUrl(null);
       expect(current).toBe('/catalog');
+    });
+
+    it('grava o episódio no caminho, mantém ?season= e volta ao título (sem o episódio) ou ao catálogo', () => {
+      current = '/detail/series/mal%3A61469?season=6';
+      writeDetailToUrl({ type: 'series', id: 'mal:61469', videoId: 'tt2359704:6:1' });
+      expect(current).toBe('/detail/series/mal%3A61469/tt2359704%3A6%3A1?season=6');
+      writeDetailToUrl({ type: 'series', id: 'mal:61469' });
+      expect(current).toBe('/detail/series/mal%3A61469?season=6');
+      writeDetailToUrl(null);
+      expect(current).toBe('/catalog?season=6');
     });
 
     it('troca o link antigo (?detail=) pelo caminho e não mexe numa rota que não é de título', () => {
@@ -139,5 +167,46 @@ describe('temporada aberta (?season=)', () => {
       writeSeasonToUrl(null);
       expect(current).toBe('/detail/series/mal%3A31240');
     });
+  });
+});
+
+describe('Explorar (/discover/<tipo>/<catálogo>)', () => {
+  let current = '/discover/series/streaming.cru_series';
+  const replaceState = vi.fn((_s: unknown, _t: string, url: string) => {
+    current = url;
+  });
+  beforeEach(() => {
+    current = '/catalog?search=abc';
+    replaceState.mockClear();
+    vi.stubGlobal('window', {
+      get location() {
+        const u = new URL(current, 'https://lunio.test');
+        return { href: u.href, pathname: u.pathname, search: u.search, hash: u.hash };
+      },
+      history: { replaceState },
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('lê tipo, catálogo (com ponto e dois-pontos codificado) e gênero; o resto é null', () => {
+    expect(discoverFromUrl('/discover/series/streaming.cru_series', '')).toEqual({ type: 'series', id: 'streaming.cru_series' });
+    expect(discoverFromUrl('/discover/anime/mal.genres', '?genre=A%C3%A7%C3%A3o')).toEqual({ type: 'anime', id: 'mal.genres', genre: 'Ação' });
+    expect(discoverFromUrl('/discover/movie/a%3Ab', '')).toEqual({ type: 'movie', id: 'a:b' });
+    for (const bad of ['/discover', '/discover/series', '/discover/../x/y', '/discover/Série/x', '/discover/series/a%2Fb', '/catalog', '/detail/series/x']) {
+      expect(discoverFromUrl(bad, ''), bad).toBeNull();
+    }
+    expect(discoverPath({ type: 'anime', id: 'mal:1' })).toBe('/discover/anime/mal%3A1');
+  });
+
+  it('grava o Explorar no lugar da busca e volta a /catalog ao sair', () => {
+    writeDiscoverToUrl({ type: 'series', id: 'streaming.cru_series', genre: 'Ação' });
+    expect(current).toBe('/discover/series/streaming.cru_series?genre=A%C3%A7%C3%A3o');
+    writeDiscoverToUrl({ type: 'series', id: 'streaming.cru_series' }); // sem gênero: sai do endereço
+    expect(current).toBe('/discover/series/streaming.cru_series');
+    writeDiscoverToUrl(null);
+    expect(current).toBe('/catalog');
+    replaceState.mockClear();
+    writeDiscoverToUrl(null); // já fora: não mexe no histórico
+    expect(replaceState).not.toHaveBeenCalled();
   });
 });

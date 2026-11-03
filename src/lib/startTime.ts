@@ -26,14 +26,31 @@ export function parseStartTime(raw: string | null | undefined): number | null {
   return seconds;
 }
 
-/** O `?t=` do endereço atual, em segundos (ou null). */
-export function readStartTime(): number | null {
-  if (typeof window === 'undefined') return null;
-  return parseStartTime(new URLSearchParams(window.location.search).get('t'));
+/** Instante pedido por dentro do app ("continuar assistindo"): vale como o `?t=`, uma vez, e perde a validade se o vídeo não abrir logo. */
+const PENDING_TTL_MS = 2 * 60 * 1000;
+let pending: { seconds: number; at: number } | null = null;
+
+export function setPendingStart(seconds: number | null, now = Date.now()) {
+  pending = seconds !== null && Number.isFinite(seconds) && seconds > 0 ? { seconds, at: now } : null;
+}
+
+/** Há um instante pedido pelo app esperando o vídeo abrir? */
+export function hasPendingStart(now = Date.now()): boolean {
+  return pending !== null && now - pending.at < PENDING_TTL_MS;
+}
+
+/** O `?t=` do endereço atual ou, sem ele, o instante pedido pelo app, em segundos (ou null). */
+export function readStartTime(now = Date.now()): number | null {
+  if (typeof window !== 'undefined') {
+    const fromUrl = parseStartTime(new URLSearchParams(window.location.search).get('t'));
+    if (fromUrl !== null) return fromUrl;
+  }
+  return hasPendingStart(now) ? pending!.seconds : null;
 }
 
 /** Tira o `?t=` do endereço: depois de usado, recarregar a página ou copiar o link da sala não o leva de volta àquele ponto. */
 export function clearStartTime() {
+  pending = null;
   if (typeof window === 'undefined') return;
   const url = new URL(window.location.href);
   if (!url.searchParams.has('t')) return;

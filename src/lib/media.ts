@@ -160,6 +160,12 @@ function normalizeUrlForIdentity(url: string): string {
  *  4. URL normalizada (sem parâmetros efêmeros)
  * O servidor faz o hash para obter um nome de arquivo seguro.
  */
+/** A identidade que dá para repassar aos outros da sala sem o link (`ih:`/`vh:`); sem ela (`url:`), nada. */
+export function shareableFingerprint(url: string): string | undefined {
+  const fp = buildMediaFingerprint({ url, ...parseStreamIdentity(url) });
+  return fp.startsWith('url:') ? undefined : fp;
+}
+
 export function buildMediaFingerprint(input: MediaIdentityInput): string {
   if (input.explicit && input.explicit.trim().length > 3) return input.explicit.trim();
   const parsed = parseStreamIdentity(input.url);
@@ -191,11 +197,12 @@ export async function inspectMediaTracks(url: string, fingerprint?: string) {
  */
 export async function resolveMediaRef(
   url: string,
-  externalSubs: any[] = []
+  externalSubs: any[] = [],
+  sharedFingerprint?: string
 ): Promise<ResolvedMediaRef> {
   // Identidade da mídia derivada uma única vez: vai para tracks, legenda, fontes e sessão
   const identity = parseStreamIdentity(url);
-  const mediaFingerprint = buildMediaFingerprint({ url, ...identity });
+  const mediaFingerprint = buildMediaFingerprint({ url, ...identity, explicit: sharedFingerprint });
   const data = await inspectMediaTracks(url, mediaFingerprint);
 
   const audioTracks: AudioTrackRef[] = (data?.audios || []).map((a: any) => ({

@@ -3,6 +3,7 @@ import type { WebSocket } from 'ws';
 import { RoomManager } from '../roomServer';
 import { warmUpMedia } from '../media/resolver';
 import { verifyToken } from '../access';
+import { linkIdFor } from '../links';
 
 // O aquecimento do link faz rede de verdade; aqui só interessa que foi pedido
 vi.mock('../media/resolver', () => ({ warmUpMedia: vi.fn() }));
@@ -478,5 +479,98 @@ describe('sala vazia e nomes', () => {
     const late = connect('SALA1', 'u2');
     // quem entra depois recebe só as últimas 20 do histórico
     expect(late.of('chat:message').filter((m) => m.message.userId === 'u1')).toHaveLength(20);
+  });
+});
+
+describe('links opacos', () => {
+  const HOST_LINK = 'https://api.exemplo.test/dl?token=CHAVE-DO-HOST&f=1';
+  const ANA_LINK = 'https://cdn.exemplo.test/CHAVE-DA-ANA/ep2.mkv';
+  const everything = (s: FakeSocket) => JSON.stringify(s.sent);
+  const linkIdOf = linkIdFor;
+
+  it('o espectador não recebe o link do Host em lugar nenhum, o Host sim, e o id é o mesmo para quem assiste', () => {
+    const host = connect('LK1', 'h', 'Host');
+    const a = connect('LK1', 'a', 'Ana');
+    const b = connect('LK1', 'b', 'Bia');
+    send(host, { type: 'media:set', media: { url: HOST_LINK, title: 'Ep 1', duration: 0, subtitles: [{ id: 's', url: `/api/subtitle?url=${encodeURIComponent(HOST_LINK)}&track=2` }] } });
+
+    expect(everything(host)).toContain('CHAVE-DO-HOST');
+    for (const s of [a, b]) {
+      expect(everything(s)).not.toContain('CHAVE-DO-HOST');
+      expect(everything(s)).not.toContain(encodeURIComponent(HOST_LINK));
+    }
+    const idA = a.last('media:sync').media.url;
+    expect(idA).toMatch(/^lk_[\w-]{22}$/);
+    expect(b.last('media:sync').media.url).toBe(idA);
+    expect(a.last('media:sync').media.subtitles[0].url).toBe(`/api/subtitle?url=${idA}&track=2`);
+
+    // Quem entra depois também recebe só o id
+    const late = connect('LK1', 'l', 'Lia');
+    expect(JSON.stringify(late.sent)).not.toContain('CHAVE-DO-HOST');
+    expect(late.last('room:state').state.media.url).toBe(idA);
+    expect(rm.resolveLink('LK1', idA)).toBe(HOST_LINK);
+  });
+
+  it('cada link da fila só aparece inteiro para quem o adicionou', () => {
+    const host = connect('LK2', 'h', 'Host');
+    const ana = connect('LK2', 'a', 'Ana');
+    send(ana, { type: 'playlist:add', url: ANA_LINK, title: 'Ep 2' });
+    send(host, { type: 'playlist:add', url: HOST_LINK, title: 'Ep 1' });
+    expect(everything(ana)).toContain('CHAVE-DA-ANA');
+    expect(everything(ana)).not.toContain('CHAVE-DO-HOST');
+    expect(everything(host)).toContain('CHAVE-DO-HOST');
+    expect(everything(host)).not.toContain('CHAVE-DA-ANA'); // nem o Host vê o link de outra pessoa
+    expect(host.last('playlist:update').playlist[0].url).toMatch(/^lk_/);
+  });
+
+  it('o Host toca o item de outra pessoa pelo id e o dono do vídeo continua sendo quem o adicionou', () => {
+    const host = connect('LK3', 'h', 'Host');
+    const ana = connect('LK3', 'a', 'Ana');
+    const bia = connect('LK3', 'b', 'Bia');
+    send(ana, { type: 'playlist:add', url: ANA_LINK, title: 'Ep 2' });
+    const item = host.last('playlist:update').playlist[0];
+    send(host, { type: 'playlist:take', itemId: item.id });
+    send(host, { type: 'media:set', media: { url: item.url, title: 'Ep 2', duration: 0 } });
+
+    expect(stateOf('LK3').media).toMatchObject({ url: ANA_LINK, ownerId: 'a' });
+    expect(ana.last('media:sync').media.url).toBe(ANA_LINK);
+    expect(host.last('media:sync').media.url).toBe(item.url);
+    expect(everything(bia)).not.toContain('CHAVE-DA-ANA');
+  });
+
+  it('id desconhecido em media:set é ignorado e o link de outra sala não vale', () => {
+    const host = connect('LK4', 'h', 'Host');
+    send(host, { type: 'media:set', media: { url: 'lk_' + 'z'.repeat(22), title: 'X', duration: 0 } });
+    expect(stateOf('LK4').media).toBeNull();
+
+    const other = connect('LK5', 'o', 'Outro');
+    send(other, { type: 'media:set', media: { url: HOST_LINK, title: 'Y', duration: 0 } });
+    const id = stateOf('LK5').media!.url;
+    expect(rm.resolveLink('LK4', linkIdOf('LK5', HOST_LINK))).toBeNull();
+    expect(id).toBe(HOST_LINK); // o estado interno guarda o link; só o que sai é trocado
+  });
+
+  it('arquivo enviado ao próprio site e YouTube não são trocados', () => {
+    const host = connect('LK6', 'h', 'Host');
+    const guest = connect('LK6', 'g', 'Gui');
+    const upload = 'http://127.0.0.1:3000/api/uploads/0123456789abcdef/video.mkv?t=abc';
+    send(host, { type: 'media:set', media: { url: upload, title: 'Envio', duration: 0 } });
+    expect(guest.last('media:sync').media.url).toBe(upload);
+    send(host, { type: 'media:set', media: { url: 'https://www.youtube.com/watch?v=abcdefghijk', title: 'YT', duration: 0 } });
+    expect(guest.last('media:sync').media.url).toBe('https://www.youtube.com/watch?v=abcdefghijk');
+  });
+
+  it('capítulos aceitam o link e o id da mídia atual; fingerprint só passa sem o link dentro', () => {
+    const host = connect('LK7', 'h', 'Host');
+    send(host, { type: 'media:set', media: { url: HOST_LINK, title: 'Ep', duration: 0, fingerprint: 'url:https://api.exemplo.test/dl?f=1' } });
+    expect(stateOf('LK7').media!.fingerprint).toBeUndefined();
+    send(host, { type: 'media:set', media: { url: HOST_LINK, title: 'Ep', duration: 0, fingerprint: 'ih:abc123|f:1|n:ep.mkv|s:' } });
+    expect(stateOf('LK7').media!.fingerprint).toBe('ih:abc123|f:1|n:ep.mkv|s:');
+
+    const id = linkIdOf('LK7', HOST_LINK);
+    send(host, { type: 'media:chapters', url: id, chapters: [{ startTime: 0, endTime: 90, title: 'OP' }] });
+    expect(stateOf('LK7').media!.chapters).toHaveLength(1);
+    send(host, { type: 'media:chapters', url: HOST_LINK, chapters: [{ startTime: 0, endTime: 30, title: 'A' }, { startTime: 30, title: 'B' }] });
+    expect(stateOf('LK7').media!.chapters).toHaveLength(2);
   });
 });
