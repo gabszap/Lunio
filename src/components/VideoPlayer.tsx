@@ -50,7 +50,7 @@ import { usePlayerPrefs } from './player/usePlayerPrefs';
 import { usePlayerShortcuts } from './player/usePlayerShortcuts';
 import { useRoomSync } from './player/useRoomSync';
 import { useSubtitles } from './player/useSubtitles';
-import { ScreenHostPill, ScreenShareStandbyButton, ScreenStage } from './player/ScreenShare';
+import { ScreenShareStandbyButton, ScreenStage } from './player/ScreenShare';
 import { useScreenShare } from './player/ScreenShareContext';
 
 export type { AspectMode } from './player/usePlayerPrefs';
@@ -412,12 +412,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onCloseWatchParty={handleCloseWatchParty}
         onOpenRoomLobby={onOpenRoomLobby}
         onLeaveRoom={onLeaveRoom}
-        stage={
-          <>
-            <ScreenStage />
-            <ScreenHostPill />
-          </>
-        }
+        stage={<ScreenStage />}
         hostAction={<ScreenShareStandbyButton />}
       />
     );
@@ -531,8 +526,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       </MediaPlayer>
 
       {/* Transmissão de tela: palco do espectador (por cima do vídeo) e faixa do Host */}
-      <ScreenStage />
-      <ScreenHostPill />
+      <ScreenStage lift />
 
       {/* Legenda obrigatória sendo preparada (PlaybackReadiness v8) */}
       {subs.isPreparingSubtitle && readiness.selectedSubtitle.required && !subs.subtitleFailurePrompt && (

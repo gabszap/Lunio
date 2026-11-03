@@ -37,6 +37,8 @@ interface ClientSession {
   state: MemberPlaybackState;
   currentTime: number;
   lastPing: number;
+  /** O Host expulsou ou baniu: a chave da transmissão já foi pedida, a saída de vez não pede de novo. */
+  removedByHost?: boolean;
 }
 
 interface RoomInternal {
@@ -491,7 +493,7 @@ export class RoomManager {
               // Transmissão: sem o Host dela acaba; se foi outra pessoa, a chave precisa girar
               if (room.screen?.info.hostId === session.userId) this.endScreen(room, 'host_left');
               else {
-                this.requestKeyRotation(room);
+                if (!session.removedByHost) this.requestKeyRotation(room);
                 this.dropScreenViewer(room, session.userId);
               }
 
@@ -1177,6 +1179,7 @@ export class RoomManager {
             try {
               targetWs.close(4001, 'Kicked by host');
             } catch {}
+            targetSession.removedByHost = true;
             this.handleLeave(targetWs);
             this.requestKeyRotation(currentRoom); // o expulso ainda tem a chave: gira já, sem esperar a saída de vez
             this.dropScreenViewer(currentRoom, targetSession.userId);
@@ -1209,6 +1212,7 @@ export class RoomManager {
             try {
               targetWs.close(4002, 'Banned by host');
             } catch {}
+            targetSession.removedByHost = true;
             this.handleLeave(targetWs);
             this.requestKeyRotation(currentRoom); // o banido ainda tem a chave: gira já
             this.dropScreenViewer(currentRoom, targetSession.userId);

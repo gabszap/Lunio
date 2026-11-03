@@ -62,6 +62,9 @@ export const RoomMenu: React.FC<RoomMenuProps> = ({ onPick, onJoin, onCatalog })
             <span className="flex flex-col gap-0.5 min-w-0">
               <span className="flex items-center gap-2 text-[14px] font-semibold text-lu-text">
                 {t(s.title)}
+                {s.needsScreen && (
+                  <span className="px-1.5 py-px rounded-md bg-lu-tint text-[11px] font-semibold text-lu-accent whitespace-nowrap">{t('Beta')}</span>
+                )}
                 {s.soon && (
                   <span className="px-1.5 py-px rounded-md bg-lu-elevated text-[11px] font-medium text-lu-muted whitespace-nowrap">{t('Em breve')}</span>
                 )}

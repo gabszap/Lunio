@@ -503,3 +503,32 @@ describe('transmissão de tela: mudar a qualidade com a transmissão no ar', () 
     expect(none.host.of('screen:state')).toHaveLength(0);
   });
 });
+
+describe('transmissão de tela: uma rotação só por expulsão', () => {
+  it('expulsar ou banir pede a rotação uma vez; a saída definitiva do expulso, 4 s depois, não pede outra', () => {
+    const { host } = streamingRoom(2);
+    send(host, { type: 'room:kick', targetUserId: 'g1' });
+    vi.advanceTimersByTime(500);
+    expect(host.of('screen:rotate_key')).toHaveLength(1);
+    send(host, { type: 'room:ban', targetUserId: 'g2' });
+    vi.advanceTimersByTime(500);
+    expect(host.of('screen:rotate_key')).toHaveLength(2);
+    vi.advanceTimersByTime(10_000); // as saídas definitivas dos dois acontecem aqui
+    expect(host.of('screen:rotate_key')).toHaveLength(2);
+  });
+
+  it('quem sai por conta própria ainda faz o Host girar a chave', () => {
+    const { host, viewers: [a] } = streamingRoom(1);
+    send(a, { type: 'room:leave' });
+    vi.advanceTimersByTime(4600);
+    expect(host.of('screen:rotate_key')).toHaveLength(1);
+  });
+});
+
+function streamingRoom(guests: number) {
+  const r = room(guests);
+  send(r.host, { type: 'screen:start', quality: '720p30' });
+  send(r.host, { type: 'screen:live' });
+  for (const s of r.all) s.clear();
+  return r;
+}

@@ -22,6 +22,12 @@ export interface HostLiveStats {
   height: number;
 }
 
+/** O que quem assiste vê chegando: fps desenhados e Mbps do último segundo. */
+export interface ViewerLiveStats {
+  fps: number;
+  mbps: number;
+}
+
 export interface ScreenShareValue {
   /** O botão "Transmitir a tela" deve aparecer (Host, sala, navegador capaz, servidor com a flag ligada). */
   canBroadcast: boolean;
@@ -29,13 +35,23 @@ export interface ScreenShareValue {
   canWatch: boolean;
   screen: RoomScreen | null;
   isBroadcaster: boolean;
-  host: { status: HostScreenStatus; error: string | null; notice: string | null; stats: HostLiveStats | null; preview: MediaStream | null };
+  host: {
+    status: HostScreenStatus;
+    error: string | null;
+    notice: string | null;
+    stats: HostLiveStats | null;
+    preview: MediaStream | null;
+    /** A prévia fica como imagem do player enquanto transmite (o Host pode escondê-la). */
+    showPreview: boolean;
+  };
+  /** A sala tem um vídeo (além da transmissão)? Sem vídeo, quem entra já abre a transmissão sozinho. */
+  hasRoomMedia: boolean;
   /** Quem está assistindo agora (o servidor só informa o Host que transmite). */
   viewers: Array<{ id: string; username: string }>;
   /** Volume (0 a 1) e mudo da transmissão para quem assiste: independentes do vídeo da sala. */
   volume: number;
   muted: boolean;
-  viewer: { status: ViewerScreenStatus; error: string | null };
+  viewer: { status: ViewerScreenStatus; error: string | null; stats: ViewerLiveStats | null };
   /** O palco da transmissão cobre o vídeo da sala (conectando ou assistindo): o vídeo fica mudo e escondido por baixo. */
   covering: boolean;
   /** A transmissão acabou há pouco (aviso de alguns segundos). */
@@ -52,6 +68,9 @@ export interface ScreenShareValue {
   toggleMuted(): void;
   /** "Trocar a tela" sem parar a transmissão. */
   switchScreen(): Promise<void>;
+  /** Muda a qualidade com a transmissão no ar (a escolha fica guardada para a próxima). */
+  changeQuality(q: ScreenQuality): Promise<void>;
+  togglePreview(): void;
   /** O `<canvas>` do palco registra-se aqui; sobrevive à troca do `VideoPlayer` (que é remontado a cada vídeo). */
   attachCanvas(el: HTMLCanvasElement | null): void;
 }
@@ -61,11 +80,12 @@ const INERT: ScreenShareValue = {
   canWatch: false,
   screen: null,
   isBroadcaster: false,
-  host: { status: 'idle', error: null, notice: null, stats: null, preview: null },
+  host: { status: 'idle', error: null, notice: null, stats: null, preview: null, showPreview: true },
+  hasRoomMedia: false,
   viewers: [],
   volume: 1,
   muted: false,
-  viewer: { status: 'idle', error: null },
+  viewer: { status: 'idle', error: null, stats: null },
   covering: false,
   endedNotice: false,
   lastQuality: DEFAULT_SCREEN_QUALITY,
@@ -77,6 +97,8 @@ const INERT: ScreenShareValue = {
   setVolume: () => {},
   toggleMuted: () => {},
   switchScreen: async () => {},
+  changeQuality: async () => {},
+  togglePreview: () => {},
   attachCanvas: () => {},
 };
 
@@ -121,6 +143,9 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [hostStats, setHostStats] = useState<HostLiveStats | null>(null);
   const [preview, setPreview] = useState<MediaStream | null>(null);
   const [viewers, setViewers] = useState(() => syncManager.getScreenViewers());
+  const [viewerStats, setViewerStats] = useState<ViewerLiveStats | null>(null);
+  const [showPreview, setShowPreview] = useState(true);
+  const [hasRoomMedia, setHasRoomMedia] = useState(() => Boolean(syncManager.getRoomState()?.media));
   const [{ volume, muted }, setVol] = useState(readVolume);
   const [viewerStatus, setViewerStatus] = useState<ViewerScreenStatus>('idle');
   const [viewerError, setViewerError] = useState<string | null>(null);
@@ -141,6 +166,7 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
         setInRoom(Boolean(st.roomId));
         setIsHost(st.isHost);
         setScreen(syncManager.getScreen());
+        setHasRoomMedia(Boolean(syncManager.getRoomState()?.media));
       }),
     []
   );
@@ -205,6 +231,25 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return () => clearInterval(id);
   }, [hostStatus]);
 
+  // Números do que chega a quem assiste (fps desenhados e Mbps do último segundo)
+  useEffect(() => {
+    if (viewerStatus !== 'watching') {
+      setViewerStats(null);
+      return;
+    }
+    let lastBytes = viewerRef.current?.stats?.bytesIn ?? 0;
+    const tick = () => {
+      const s = viewerRef.current?.stats;
+      if (!s) return;
+      const mbps = Math.round((Math.max(0, s.bytesIn - lastBytes) * 8) / 1e5) / 10;
+      lastBytes = s.bytesIn;
+      setViewerStats((prev) => (prev && prev.fps === s.fps && prev.mbps === mbps ? prev : { fps: s.fps, mbps }));
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [viewerStatus]);
+
   // Aviso curto quando a transmissão acaba
   useEffect(() => {
     if (viewerStatus !== 'ended') {
@@ -249,6 +294,8 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     },
     [teardownHost, teardownViewer]
   );
+
+  const autoWatchedFor = useRef<string | null>(null);
 
   const startBroadcast = useCallback(async (q: ScreenQuality) => {
     if (hostRef.current) return;
@@ -307,6 +354,33 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const returnToVideo = useCallback(() => viewerRef.current?.returnToVideo(), []);
 
+  // Sala só com a transmissão (nenhum vídeo): a transmissão É o vídeo, então quem entra já a abre, sem clicar.
+  // Uma vez por transmissão: quem voltar ao vídeo (ou fechar) não é puxado de volta.
+  useEffect(() => {
+    if (!capabilities.viewer || isBroadcaster || !screen?.live || hasRoomMedia) return;
+    if (viewerStatus !== 'idle' && viewerStatus !== 'ended') return;
+    if (autoWatchedFor.current === screen.sessionId) return;
+    autoWatchedFor.current = screen.sessionId;
+    watch();
+  }, [capabilities.viewer, isBroadcaster, screen, hasRoomMedia, viewerStatus, watch]);
+
+  const changeQuality = useCallback(async (q: ScreenQuality) => {
+    const host = hostRef.current;
+    if (!host) return;
+    try {
+      localStorage.setItem(QUALITY_KEY, q.id);
+    } catch {}
+    setLastQuality(q.id);
+    setHostError(null);
+    try {
+      await host.changeQuality(q);
+    } catch (e) {
+      setHostError(e instanceof Error && e.message ? e.message : t('Não foi possível mudar a qualidade.'));
+    }
+  }, []);
+
+  const togglePreview = useCallback(() => setShowPreview((v) => !v), []);
+
   const dismissError = useCallback(() => {
     setHostError(null);
     setHostNotice(null);
@@ -348,11 +422,12 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
       canWatch: capabilities.viewer,
       screen,
       isBroadcaster,
-      host: { status: hostStatus, error: hostError, notice: hostNotice, stats: hostStats, preview },
+      host: { status: hostStatus, error: hostError, notice: hostNotice, stats: hostStats, preview, showPreview },
+      hasRoomMedia,
       viewers,
       volume,
       muted,
-      viewer: { status: viewerStatus, error: viewerError },
+      viewer: { status: viewerStatus, error: viewerError, stats: viewerStats },
       covering: viewerStatus === 'connecting' || viewerStatus === 'watching',
       endedNotice,
       lastQuality,
@@ -364,9 +439,11 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
       setVolume,
       toggleMuted,
       switchScreen,
+      changeQuality,
+      togglePreview,
       attachCanvas,
     }),
-    [canBroadcast, capabilities.viewer, screen, isBroadcaster, hostStatus, hostError, hostNotice, hostStats, preview, viewers, volume, muted, viewerStatus, viewerError, endedNotice, lastQuality, startBroadcast, stopBroadcast, watch, returnToVideo, dismissError, setVolume, toggleMuted, switchScreen, attachCanvas]
+    [canBroadcast, capabilities.viewer, screen, isBroadcaster, hostStatus, hostError, hostNotice, hostStats, preview, showPreview, hasRoomMedia, viewers, volume, muted, viewerStatus, viewerError, viewerStats, endedNotice, lastQuality, startBroadcast, stopBroadcast, watch, returnToVideo, dismissError, setVolume, toggleMuted, switchScreen, changeQuality, togglePreview, attachCanvas]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

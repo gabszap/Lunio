@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Eye, EyeOff, Film, MonitorUp, Repeat, TriangleAlert, Volume1, Volume2, VolumeX, X } from 'lucide-react';
+import { ChevronUp, Eye, EyeOff, Film, Maximize, Minimize, MonitorOff, MonitorUp, Repeat, TriangleAlert, Users, Volume1, Volume2, VolumeX, X } from 'lucide-react';
 import { SCREEN_QUALITIES, screenQuality, type ScreenQualityId } from '../../types/screen';
 import { qualityCost } from '../../lib/screen/quality';
 import { getLang, t } from '../../lib/i18n';
@@ -127,96 +127,151 @@ export const ScreenShareStandbyButton: React.FC = () => {
   return <ScreenShareControl variant="button" open={open} onOpenChange={setOpen} />;
 };
 
-/** Prévia do que o Host está transmitindo (a mesma imagem que vai ao relay). */
-const HostPreview: React.FC<{ stream: MediaStream }> = ({ stream }) => {
+/** "1080p · 60 fps" (ou "4K · 60 fps"): o rótulo curto da qualidade nas barras. */
+const shortQuality = (id: ScreenQualityId): string => {
+  const q = screenQuality(id)!;
+  return `${q.height >= 2160 ? '4K' : `${q.height}p`} · ${q.fps} fps`;
+};
+
+/** O que o Host está enviando, como imagem do player (no lugar do "Nenhum vídeo na sala"). */
+const HostPreviewBackdrop: React.FC<{ stream: MediaStream }> = ({ stream }) => {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     if (ref.current) ref.current.srcObject = stream;
   }, [stream]);
-  return <video ref={ref} autoPlay muted playsInline aria-hidden="true" className="w-full aspect-video rounded-[10px] bg-black object-contain" />;
+  return <video ref={ref} autoPlay muted playsInline aria-hidden="true" className="absolute inset-0 z-[5] w-full h-full bg-black object-contain pointer-events-none" />;
 };
 
-/** Faixa sobre o vídeo do Host enquanto ele transmite (ou quando deu erro). */
-export const ScreenHostPill: React.FC = () => {
-  const s = useScreenShare();
-  const [showPreview, setShowPreview] = useState(false);
-  const { status, error, stats, preview } = s.host;
-  if (status === 'idle' && !error) return null;
-  const quality = s.screen ? screenQuality(s.screen.quality) : null;
+// Barra flutuante embaixo, como a dos apps de compartilhar tela: pílula escura com botões de 40 px
+const barBase = 'absolute left-1/2 -translate-x-1/2 z-40 flex flex-wrap items-center justify-center gap-1 rounded-[20px] p-1.5 max-w-[calc(100%-24px)]';
+const barBtn = 'inline-flex items-center justify-center h-10 rounded-[12px] text-[13px] font-medium text-lu-text hover:bg-white/8 transition-colors flex-none';
+const barInfo = 'inline-flex items-center gap-1.5 h-10 px-3 rounded-[12px] bg-white/5 text-[13px] text-lu-muted tabular whitespace-nowrap flex-none';
 
-  if (error) {
-    return (
-      <div className={cx('absolute top-20 left-3 z-40 flex items-center gap-3 rounded-[14px] px-3.5 py-2 text-[13px]', floatingCard)} role="alert">
-        <TriangleAlert size={16} className="text-lu-error flex-none" />
-        <span className="max-w-[320px]">{error}</span>
-        <IconButton label={t('Fechar')} size={36} tone="muted" onClick={s.dismissError}>
-          <X size={16} />
-        </IconButton>
-      </div>
-    );
-  }
+const Divider: React.FC = () => <span className="w-px h-6 bg-lu-border mx-1 flex-none" aria-hidden="true" />;
 
-  if (status === 'starting') {
-    return (
-      <div className={cx('absolute top-20 left-3 z-40 flex items-center gap-3 rounded-[14px] px-3.5 py-2 text-[13px]', floatingCard)} role="status">
-        <Spinner size={16} />
-        <span>{t('Conectando à transmissão…')}</span>
-      </div>
-    );
-  }
-
-  const names = s.viewers.map((v) => v.username);
-  const shown = names.length > 3 ? `${names.slice(0, 3).join(', ')} +${names.length - 3}` : names.join(', ');
-
+/** Tela cheia do player (o contêiner do vídeo ou da tela de espera). */
+const FullscreenButton: React.FC = () => {
+  const ref = useRef<HTMLButtonElement>(null);
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    const sync = () => setOn(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', sync);
+    sync();
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, []);
+  const toggle = () => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+      return;
+    }
+    const target = ref.current?.closest<HTMLElement>('#video-player-root, #video-player-standby') ?? document.documentElement;
+    void target.requestFullscreen?.();
+  };
   return (
-    <div className={cx('absolute top-20 left-3 z-40 flex flex-col gap-2.5 rounded-[14px] px-3.5 py-3 text-[13px] w-[min(360px,calc(100%-24px))]', floatingCard)} role="status">
-      <div className="flex items-center gap-2 flex-wrap">
-        <Dot tone="error" pulse />
-        <span className="font-medium">{t('Transmitindo')}</span>
-        {quality && <span className="text-lu-muted">{quality.label}</span>}
-        {stats && <span className="text-lu-muted tabular">{t('{fps} fps · {mbps} Mbps', { fps: stats.fps, mbps: fmt(stats.mbps) })}</span>}
-      </div>
+    <button ref={ref} type="button" aria-label={on ? t('Sair da tela cheia (F)') : t('Tela cheia (F)')} title={on ? t('Sair da tela cheia (F)') : t('Tela cheia (F)')} onClick={toggle} className={cx(barBtn, 'w-10')}>
+      {on ? <Minimize size={18} /> : <Maximize size={18} />}
+    </button>
+  );
+};
 
-      <div className="flex items-center gap-2 text-lu-muted min-w-0">
-        <Eye size={14} className="flex-none" />
-        {names.length ? <span className="truncate">{t('Assistindo ({n}): {names}', { n: names.length, names: shown })}</span> : <span>{t('Ninguém assistindo ainda')}</span>}
-      </div>
-
-      {showPreview && preview && (
-        <div className="flex flex-col gap-1.5">
-          <HostPreview stream={preview} />
-          <p className="m-0 text-[11px] text-lu-muted">{t('Se você compartilha a tela inteira, a prévia aparece dentro dela (efeito espelho).')}</p>
-        </div>
+/** Seletor de qualidade com a transmissão no ar: abre para cima, a escolha vale já. */
+const QualityPicker: React.FC<{ current: ScreenQualityId; onPick: (id: ScreenQualityId) => void }> = ({ current, onPick }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const close = React.useCallback(() => setOpen(false), []);
+  useDismiss(open, close, ref);
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" aria-label={t('Qualidade da transmissão')} aria-expanded={open} onClick={() => setOpen((v) => !v)} className={cx(barBtn, 'gap-1.5 px-3 bg-white/5 whitespace-nowrap')}>
+        <span className="tabular">{shortQuality(current)}</span>
+        <ChevronUp size={14} className={cx('transition-transform', !open && 'rotate-180')} />
+      </button>
+      {open && (
+        <MenuPanel title={t('Qualidade da transmissão')} onClose={close} className="left-0 w-[240px]">
+          <div role="radiogroup" aria-label={t('Qualidade da transmissão')} className="flex flex-col gap-0.5 pb-1">
+            {SCREEN_QUALITIES.map((q) => (
+              <MenuItem
+                key={q.id}
+                selected={q.id === current}
+                onClick={() => {
+                  close();
+                  if (q.id !== current) onPick(q.id);
+                }}
+                label={q.label}
+                hint={`${fmt(qualityCost(q).mbps)} Mbps`}
+              />
+            ))}
+          </div>
+        </MenuPanel>
       )}
+    </div>
+  );
+};
 
-      <div className="flex items-center gap-2 flex-wrap">
-        {preview && (
-          <GhostButton onClick={() => setShowPreview((v) => !v)} className="!h-9 !px-3" aria-pressed={showPreview}>
-            {showPreview ? <EyeOff size={15} /> : <Eye size={15} />}
-            <span>{showPreview ? t('Esconder a prévia') : t('Ver a prévia')}</span>
-          </GhostButton>
-        )}
-        <GhostButton onClick={() => void s.switchScreen()} className="!h-9 !px-3">
-          <Repeat size={15} />
-          <span>{t('Trocar a tela')}</span>
-        </GhostButton>
-        <GhostButton onClick={s.stopBroadcast} className="!h-9 !px-3">
-          {t('Parar transmissão')}
-        </GhostButton>
+/** Quem está assistindo: o número na barra e os nomes ao passar o mouse. */
+const ViewersChip: React.FC<{ viewers: Array<{ id: string; username: string }> }> = ({ viewers }) => {
+  const names = viewers.map((v) => v.username);
+  const label = names.length ? t('Assistindo ({n}): {names}', { n: names.length, names: names.join(', ') }) : t('Ninguém assistindo ainda');
+  return (
+    <div className="relative group/v flex-none" tabIndex={0} aria-label={label} role="status">
+      <div className={cx(barInfo, names.length > 0 && 'text-lu-text')}>
+        <Users size={15} />
+        <span>{names.length}</span>
+      </div>
+      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover/v:block group-focus/v:block rounded-[10px] px-3 py-2 text-[12px] whitespace-nowrap bg-lu-elevated border border-lu-border shadow-[0_12px_28px_rgba(0,0,0,0.5)] text-lu-text pointer-events-none">
+        {names.length ? names.map((n) => <div key={n}>{n}</div>) : t('Ninguém assistindo ainda')}
       </div>
     </div>
   );
 };
 
-/** Controles de quem assiste: volume da transmissão e "Voltar ao vídeo". */
-const ScreenViewerBar: React.FC<{ s: ScreenShareValue }> = ({ s }) => {
+/** Barra do Host enquanto transmite: parar, trocar a tela, qualidade, números, quem assiste, prévia e tela cheia. */
+const HostBar: React.FC<{ s: ScreenShareValue; lift: boolean }> = ({ s, lift }) => {
+  const { stats, preview, showPreview } = s.host;
+  const quality = s.screen?.quality ?? s.lastQuality;
+  return (
+    <div className={cx(barBase, floatingCard, lift ? 'bottom-28' : 'bottom-6')}>
+      <button type="button" onClick={s.stopBroadcast} className={cx(barBtn, 'gap-2 px-3.5 bg-lu-error/15 text-lu-error hover:!bg-lu-error/25 border border-lu-error/30')}>
+        <MonitorOff size={17} />
+        <span>{t('Parar de compartilhar')}</span>
+      </button>
+      <button type="button" aria-label={t('Trocar a tela')} onClick={() => void s.switchScreen()} className={cx(barBtn, 'group/sw px-3')}>
+        <Repeat size={17} />
+        <span className="max-w-0 ml-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-200 group-hover/sw:max-w-[120px] group-hover/sw:ml-2 group-hover/sw:opacity-100 group-focus-visible/sw:max-w-[120px] group-focus-visible/sw:ml-2 group-focus-visible/sw:opacity-100">
+          {t('Trocar a tela')}
+        </span>
+      </button>
+      <Divider />
+      <QualityPicker current={quality} onPick={(id) => void s.changeQuality(screenQuality(id)!)} />
+      {stats && <span className={barInfo}>{t('{fps} fps · {mbps} Mbps', { fps: stats.fps, mbps: fmt(stats.mbps) })}</span>}
+      <ViewersChip viewers={s.viewers} />
+      {preview && (
+        <button
+          type="button"
+          aria-label={showPreview ? t('Esconder a prévia') : t('Ver a prévia')}
+          title={showPreview ? t('Esconder a prévia') : `${t('Ver a prévia')}. ${t('Se você compartilha a tela inteira, a prévia aparece dentro dela (efeito espelho).')}`}
+          aria-pressed={showPreview}
+          onClick={s.togglePreview}
+          className={cx(barBtn, 'w-10')}
+        >
+          {showPreview ? <Eye size={18} /> : <EyeOff size={18} />}
+        </button>
+      )}
+      <FullscreenButton />
+    </div>
+  );
+};
+
+/** Barra de quem assiste: volume da transmissão, qualidade e números, tela cheia e "Voltar ao vídeo" (se a sala tem vídeo). */
+const ViewerBar: React.FC<{ s: ScreenShareValue; lift: boolean }> = ({ s, lift }) => {
   const effective = s.muted ? 0 : s.volume;
   const Icon = effective === 0 ? VolumeX : effective < 0.5 ? Volume1 : Volume2;
+  const stats = s.viewer.stats;
   return (
-    <div className={cx('absolute top-20 right-3 z-40 flex items-center gap-1.5 rounded-[14px] pl-1.5 pr-2 py-1.5', floatingCard)}>
-      <IconButton label={s.muted ? t('Ativar o som da transmissão') : t('Silenciar a transmissão')} size={36} onClick={s.toggleMuted}>
+    <div className={cx(barBase, floatingCard, lift ? 'bottom-28' : 'bottom-6')}>
+      <button type="button" aria-label={s.muted ? t('Ativar o som da transmissão') : t('Silenciar a transmissão')} onClick={s.toggleMuted} className={cx(barBtn, 'w-10')}>
         <Icon size={18} />
-      </IconButton>
+      </button>
       <input
         type="range"
         min="0"
@@ -225,30 +280,42 @@ const ScreenViewerBar: React.FC<{ s: ScreenShareValue }> = ({ s }) => {
         aria-label={t('Volume da transmissão')}
         value={effective}
         onChange={(e) => s.setVolume(parseFloat(e.target.value))}
-        className="w-[88px] m-0 cursor-pointer max-sm:hidden"
+        className="w-[96px] m-0 mr-1 cursor-pointer max-sm:hidden"
       />
-      <span className="w-px h-5 bg-lu-border mx-1.5" aria-hidden="true" />
-      <GhostButton onClick={s.returnToVideo} className="!h-9 !px-3 text-[13px]">
-        <Film size={15} />
-        <span>{t('Voltar ao vídeo')}</span>
-      </GhostButton>
+      <Divider />
+      {s.screen && <span className={barInfo}>{shortQuality(s.screen.quality)}</span>}
+      {stats && <span className={cx(barInfo, 'max-sm:hidden')}>{t('{fps} fps · {mbps} Mbps', { fps: stats.fps, mbps: fmt(stats.mbps) })}</span>}
+      <FullscreenButton />
+      {s.hasRoomMedia && (
+        <>
+          <Divider />
+          <button type="button" onClick={s.returnToVideo} className={cx(barBtn, 'gap-2 px-3.5')}>
+            <Film size={16} />
+            <span>{t('Voltar ao vídeo')}</span>
+          </button>
+        </>
+      )}
     </div>
   );
 };
 
 /**
- * Palco do espectador, por cima do vídeo da sala: o cartão "Assistir transmissão", a imagem da transmissão (um canvas)
- * com os controles de volume e "Voltar ao vídeo", os estados de conexão, erro e fim. O vídeo da sala continua por baixo,
- * mudo e sincronizado.
+ * Palco da transmissão, por cima do vídeo da sala (ou da tela "Nenhum vídeo"): a imagem (o canvas de quem assiste, a
+ * prévia do Host), a barra de controles embaixo, o cartão "Assistir transmissão" e os avisos de conexão, erro e fim. O
+ * vídeo da sala continua por baixo, mudo e sincronizado. `lift`: a sala tem a barra do player embaixo, então a nossa sobe.
  */
-export const ScreenStage: React.FC = () => {
+export const ScreenStage: React.FC<{ lift?: boolean }> = ({ lift = false }) => {
   const s = useScreenShare();
   const { status, error } = s.viewer;
+  const hostLive = s.host.status === 'live';
   const available = s.canWatch && !s.isBroadcaster && Boolean(s.screen?.live);
+  const errorText = s.host.error ?? (status === 'error' ? error : null);
 
   return (
     <>
       <canvas ref={s.attachCanvas} aria-hidden="true" className={cx('absolute inset-0 z-[5] w-full h-full bg-black object-contain', !s.covering && 'hidden')} />
+
+      {hostLive && s.host.preview && s.host.showPreview && <HostPreviewBackdrop stream={s.host.preview} />}
 
       {s.covering && status === 'connecting' && (
         <div className="absolute inset-0 z-[6] flex items-center justify-center gap-3 text-[14px] pointer-events-none" role="status">
@@ -257,7 +324,14 @@ export const ScreenStage: React.FC = () => {
         </div>
       )}
 
-      {s.covering && <ScreenViewerBar s={s} />}
+      {s.host.status === 'starting' && (
+        <div className={cx(barBase, floatingCard, 'bottom-6 px-4 py-2.5 text-[13px] gap-3')} role="status">
+          <Spinner size={16} />
+          <span>{t('Conectando à transmissão…')}</span>
+        </div>
+      )}
+      {hostLive && <HostBar s={s} lift={lift} />}
+      {s.covering && <ViewerBar s={s} lift={lift} />}
 
       {available && !s.covering && status !== 'error' && (
         <div className={cx('absolute top-20 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 rounded-[16px] px-4 py-3 max-w-[calc(100%-32px)]', floatingCard)}>
@@ -267,11 +341,11 @@ export const ScreenStage: React.FC = () => {
         </div>
       )}
 
-      {status === 'error' && (
+      {errorText && (
         <div className={cx('absolute top-20 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 rounded-[16px] px-4 py-3 max-w-[calc(100%-32px)]', floatingCard)} role="alert">
           <TriangleAlert size={18} className="text-lu-error flex-none" />
-          <span className="text-[14px]">{error}</span>
-          {available && <GhostButton onClick={s.watch}>{t('Tentar de novo')}</GhostButton>}
+          <span className="text-[14px]">{errorText}</span>
+          {available && status === 'error' && <GhostButton onClick={s.watch}>{t('Tentar de novo')}</GhostButton>}
           <IconButton label={t('Fechar')} size={36} tone="muted" onClick={s.dismissError}>
             <X size={16} />
           </IconButton>
