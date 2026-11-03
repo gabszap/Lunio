@@ -68,7 +68,14 @@ interface RoomInternal {
    * Transmissão de tela do Host (só na memória, nunca vai ao Redis). A chave de criptografia é repassada, não
    * persistida, e nunca entra em `room:state` nem em log.
    */
-  screen?: { info: RoomScreen; key?: { epoch: number; key: string }; usageBytes: number; rotateTimer?: NodeJS.Timeout };
+  screen?: {
+    info: RoomScreen;
+    key?: { epoch: number; key: string };
+    usageBytes: number;
+    rotateTimer?: NodeJS.Timeout;
+    /** Quem está assistindo (id sem o sufixo de aba -> apelido). Só o Host da transmissão fica sabendo. */
+    viewers: Map<string, string>;
+  };
 }
 
 /** O servidor dá `<id>_tab####` à segunda aba aberta pela mesma pessoa; o ban vale para o ID de verdade (todas as abas). */
@@ -185,6 +192,20 @@ export class RoomManager {
   private setHost(room: RoomInternal, userId: string): void {
     if (room.screen && room.screen.info.hostId !== userId) this.endScreen(room, 'host_changed');
     room.hostId = userId;
+  }
+
+  /** Manda a lista de quem assiste ao Host da transmissão (e só a ele). */
+  private notifyScreenViewers(room: RoomInternal): void {
+    const screen = room.screen;
+    if (!screen) return;
+    const viewers = [...screen.viewers].map(([id, username]) => ({ id, username }));
+    for (const [ws, s] of room.clients) {
+      if (s.userId === screen.info.hostId) this.send(ws, { type: 'screen:viewers', viewers });
+    }
+  }
+
+  private dropScreenViewer(room: RoomInternal, userId: string): void {
+    if (room.screen?.viewers.delete(baseUserId(userId))) this.notifyScreenViewers(room);
   }
 
   /**
@@ -469,7 +490,10 @@ export class RoomManager {
 
               // Transmissão: sem o Host dela acaba; se foi outra pessoa, a chave precisa girar
               if (room.screen?.info.hostId === session.userId) this.endScreen(room, 'host_left');
-              else this.requestKeyRotation(room);
+              else {
+                this.requestKeyRotation(room);
+                this.dropScreenViewer(room, session.userId);
+              }
 
               // Se o Host saiu definitivamente, elege o próximo participante ativo como novo Host
               if (room.hostId === session.userId && room.clients.size > 0) {
@@ -1052,7 +1076,7 @@ export class RoomManager {
           this.send(ws, { type: 'error', message: 'Há transmissões demais no momento.', code: 'screen_busy' });
           return;
         }
-        currentRoom.screen = { info: newScreenSession(currentRoom.roomId, clientSession.userId, quality.id), usageBytes: 0 };
+        currentRoom.screen = { info: newScreenSession(currentRoom.roomId, clientSession.userId, quality.id), usageBytes: 0, viewers: new Map() };
         console.log(`[Screen] Transmissão iniciada na sala "${currentRoom.roomId}" (${quality.id}).`);
         this.broadcast(currentRoom, { type: 'screen:state', screen: currentRoom.screen.info });
         break;
@@ -1082,6 +1106,21 @@ export class RoomManager {
         // Só quem está na sala agora recebe; o Host da transmissão já tem a chave
         for (const [peerWs, peer] of currentRoom.clients) {
           if (peer.userId !== screen.info.hostId) this.send(peerWs, { type: 'screen:key', epoch: msg.epoch, key: msg.key });
+        }
+        break;
+      }
+
+      case 'screen:watching': {
+        const screen = currentRoom.screen;
+        if (!screen || !screen.info.live || typeof msg.watching !== 'boolean') return;
+        const id = baseUserId(clientSession.userId);
+        if (id === baseUserId(screen.info.hostId)) return; // o Host (ou outra aba dele) não "assiste" à própria transmissão
+        if (msg.watching) {
+          if (screen.viewers.get(id) === clientSession.username) return;
+          screen.viewers.set(id, clientSession.username);
+          this.notifyScreenViewers(currentRoom);
+        } else {
+          this.dropScreenViewer(currentRoom, id);
         }
         break;
       }
@@ -1130,6 +1169,7 @@ export class RoomManager {
             } catch {}
             this.handleLeave(targetWs);
             this.requestKeyRotation(currentRoom); // o expulso ainda tem a chave: gira já, sem esperar a saída de vez
+            this.dropScreenViewer(currentRoom, targetSession.userId);
           }
         }
         break;
@@ -1161,6 +1201,7 @@ export class RoomManager {
             } catch {}
             this.handleLeave(targetWs);
             this.requestKeyRotation(currentRoom); // o banido ainda tem a chave: gira já
+            this.dropScreenViewer(currentRoom, targetSession.userId);
           }
         }
 

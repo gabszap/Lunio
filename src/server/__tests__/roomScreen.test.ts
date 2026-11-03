@@ -379,3 +379,87 @@ describe('transmissão de tela: Host que perde a liderança na graça de 4 s', (
     expect(rm.getScreenStats().live).toBe(0);
   });
 });
+
+describe('transmissão de tela: quem está assistindo', () => {
+  function live(guests: number) {
+    const r = room(guests);
+    send(r.host, { type: 'screen:start', quality: '720p30' });
+    send(r.host, { type: 'screen:live' });
+    for (const s of r.all) s.clear();
+    return r;
+  }
+  const names = (m: any) => (m?.viewers ?? []).map((v: any) => v.username).sort();
+
+  it('o Host recebe a lista quando alguém começa e quando para de assistir; os outros não recebem nada', () => {
+    const { host, viewers: [a, b] } = live(2);
+    send(a, { type: 'screen:watching', watching: true });
+    expect(names(host.last('screen:viewers'))).toEqual(['g1']);
+    send(b, { type: 'screen:watching', watching: true });
+    expect(names(host.last('screen:viewers'))).toEqual(['g1', 'g2']);
+    send(a, { type: 'screen:watching', watching: false });
+    expect(names(host.last('screen:viewers'))).toEqual(['g2']);
+    expect(a.of('screen:viewers')).toHaveLength(0);
+    expect(b.of('screen:viewers')).toHaveLength(0);
+  });
+
+  it('repetir o mesmo estado não reenvia a lista', () => {
+    const { host, viewers: [a] } = live(1);
+    send(a, { type: 'screen:watching', watching: true });
+    send(a, { type: 'screen:watching', watching: true });
+    send(a, { type: 'screen:watching', watching: false });
+    send(a, { type: 'screen:watching', watching: false });
+    expect(host.of('screen:viewers')).toHaveLength(2);
+  });
+
+  it('a mesma pessoa em duas abas conta uma vez, e o Host (ou a aba dele) nunca conta', () => {
+    const { host, viewers: [a] } = live(1);
+    const tabOfA = connect('TELA', 'g1'); // segunda aba da mesma pessoa
+    const tabOfHost = connect('TELA', 'host');
+    send(a, { type: 'screen:watching', watching: true });
+    send(tabOfA, { type: 'screen:watching', watching: true });
+    send(tabOfHost, { type: 'screen:watching', watching: true });
+    send(host, { type: 'screen:watching', watching: true });
+    expect(names(host.last('screen:viewers'))).toEqual(['g1']);
+  });
+
+  it('expulsar, banir ou a pessoa sair de vez a tira da lista', () => {
+    const { host, viewers: [a, b, c] } = live(3);
+    for (const v of [a, b, c]) send(v, { type: 'screen:watching', watching: true });
+    send(host, { type: 'room:kick', targetUserId: 'g1' });
+    expect(names(host.last('screen:viewers'))).toEqual(['g2', 'g3']);
+    send(host, { type: 'room:ban', targetUserId: 'g2' });
+    expect(names(host.last('screen:viewers'))).toEqual(['g3']);
+    send(c, { type: 'room:leave' });
+    vi.advanceTimersByTime(4000);
+    expect(names(host.last('screen:viewers'))).toEqual([]);
+  });
+
+  it('ao acabar a transmissão a lista some, e uma nova começa vazia', () => {
+    const { host, viewers: [a] } = live(1);
+    send(a, { type: 'screen:watching', watching: true });
+    send(host, { type: 'screen:stop' });
+    host.clear();
+    send(host, { type: 'screen:start', quality: '720p30' });
+    send(host, { type: 'screen:live' });
+    const b = connect('TELA', 'late');
+    send(b, { type: 'screen:watching', watching: true });
+    expect(names(host.last('screen:viewers'))).toEqual(['late']);
+  });
+
+  it('entradas ruins e fora de hora são ignoradas', () => {
+    const { host, viewers: [a] } = live(1);
+    send(a, { type: 'screen:watching', watching: 'sim' });
+    send(a, { type: 'screen:watching' });
+    expect(host.of('screen:viewers')).toHaveLength(0);
+
+    // sem transmissão ao vivo (só iniciada): ninguém assiste ainda
+    const other = room(1, 'OUTRA');
+    send(other.host, { type: 'screen:start', quality: '720p30' });
+    send(other.viewers[0], { type: 'screen:watching', watching: true });
+    expect(other.host.of('screen:viewers')).toHaveLength(0);
+    // sem transmissão nenhuma
+    const none = room(1, 'NENHUMA');
+    send(none.viewers[0], { type: 'screen:watching', watching: true });
+    expect(none.host.of('screen:viewers')).toHaveLength(0);
+  });
+});

@@ -243,6 +243,11 @@ export type ClientMessage =
       /** Total de bytes de vídeo+áudio publicados até agora (medidor de uso). */
       type: 'screen:usage';
       bytes: number;
+    }
+  | {
+      /** Quem não é o Host avisa que começou ou parou de assistir à transmissão (o servidor repassa a lista só ao Host). */
+      type: 'screen:watching';
+      watching: boolean;
     };
 
 /** Votação em andamento para pular um capítulo: passa quando `votes` chega a `needed` (mais da metade da sala). */
@@ -330,6 +335,11 @@ export type ServerMessage =
   | {
       /** Alguém saiu ou foi expulso: o Host da transmissão deve girar a chave. */
       type: 'screen:rotate_key';
+    }
+  | {
+      /** Quem está assistindo à transmissão agora. Só o Host da transmissão recebe. */
+      type: 'screen:viewers';
+      viewers: Array<{ id: string; username: string }>;
     }
   | {
       type: 'error';
