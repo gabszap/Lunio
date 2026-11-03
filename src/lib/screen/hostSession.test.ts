@@ -56,7 +56,9 @@ function fakePublisher(opts: { startError?: Error; startGate?: Promise<void> } =
     }),
     rotateKey: vi.fn(async () => ({ epoch: ++pub.epoch, key: 'k' + pub.epoch })),
     stop: vi.fn(async () => {}),
-    stats: { hasSubscribers: true },
+    replaceSource: vi.fn(async () => 'switched' as const),
+    previewStream: { id: 'preview' } as unknown as MediaStream,
+    stats: { hasSubscribers: true, fps: 28, width: 1920, height: 1080, bytesOut: 1234 },
     epoch: 1,
     initialKey: null as ScreenKeyMaterial | null,
   };
@@ -257,5 +259,45 @@ describe('HostScreenSession.stop during start', () => {
     expect(t.sig.calls).not.toContain('live');
     expect(t.sig.calls.filter((c) => c === 'stop')).toHaveLength(1);
     expect(t.sig.listeners()).toBe(0);
+  });
+});
+
+describe('HostScreenSession: trocar a tela, prévia e números', () => {
+  async function liveSession() {
+    const t = setup();
+    await confirmed(t);
+    return t;
+  }
+
+  it('trocar a tela vai ao publicador e devolve o resultado dele', async () => {
+    const t = await liveSession();
+    expect(await t.session.switchSource()).toBe('switched');
+    expect(t.p.pub.replaceSource).toHaveBeenCalledTimes(1);
+    t.p.pub.replaceSource.mockResolvedValueOnce('cancelled');
+    expect(await t.session.switchSource()).toBe('cancelled');
+  });
+
+  it('um erro ao trocar é repassado e a transmissão segue de pé', async () => {
+    const t = await liveSession();
+    t.p.pub.replaceSource.mockRejectedValueOnce(new Error('falhou'));
+    await expect(t.session.switchSource()).rejects.toThrow('falhou');
+    expect(t.statuses.at(-1)![0]).toBe('live');
+  });
+
+  it('antes de a transmissão existir ou depois de parar, não troca nada', async () => {
+    const fresh = setup();
+    expect(await fresh.session.switchSource()).toBe('cancelled');
+    const t = await liveSession();
+    await t.session.stop();
+    expect(await t.session.switchSource()).toBe('cancelled');
+    expect(t.p.pub.replaceSource).not.toHaveBeenCalled();
+  });
+
+  it('expõe os números e a prévia do publicador', async () => {
+    const t = await liveSession();
+    expect(t.session.stats).toMatchObject({ fps: 28, width: 1920, bytesOut: 1234 });
+    expect((t.session.previewStream as unknown as { id: string }).id).toBe('preview');
+    expect(setup().session.stats).toBeNull();
+    expect(setup().session.previewStream).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import type { ScreenQuality } from '../../types/screen';
 import type { ScreenApi } from './api';
 import { isPickerCancel, screenErrorText, screenFailedText, screenTimeoutText } from './errors';
-import type { PublisherEvents, ScreenPublisher } from './publisher';
+import type { PublisherEvents, PublisherStats, ScreenPublisher } from './publisher';
 import type { ScreenSignals } from './signals';
 import { generateScreenKey } from './wire';
 
@@ -37,6 +37,22 @@ export class HostScreenSession {
 
   get hasSubscribers(): boolean {
     return this.publisher?.stats.hasSubscribers ?? false;
+  }
+
+  /** Números do que está saindo (fps, tamanho, bytes). `null` sem publicador. */
+  get stats(): PublisherStats | null {
+    return this.publisher?.stats ?? null;
+  }
+
+  /** A imagem capturada, para o Host se ver. */
+  get previewStream(): MediaStream | null {
+    return this.publisher?.previewStream ?? null;
+  }
+
+  /** "Trocar a tela" sem parar a transmissão (cancelar o seletor mantém a atual). */
+  async switchSource(): Promise<'switched' | 'cancelled'> {
+    if (!this.publisher || this.stopped) return 'cancelled';
+    return this.publisher.replaceSource();
   }
 
   async start(quality: ScreenQuality): Promise<'started' | 'cancelled'> {

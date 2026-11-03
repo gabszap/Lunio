@@ -406,3 +406,134 @@ describe('screenCapabilities', () => {
     expect(screenCapabilities()).toMatchObject({ host: false, viewer: true });
   });
 });
+
+/** Duas capturas, uma depois da outra: o que o Host faz ao "Trocar a tela". */
+function switchRig(opts: { firstAudio?: boolean; secondAudio?: boolean; secondError?: Error } = {}) {
+  const feeds = [
+    { video: new Feed<VideoFrameLike>(), audio: new Feed<AudioDataLike>(), stop: vi.fn(), ended: [] as Array<() => void>, preview: { id: 'preview-1' } as unknown as MediaStream },
+    { video: new Feed<VideoFrameLike>(), audio: new Feed<AudioDataLike>(), stop: vi.fn(), ended: [] as Array<() => void>, preview: { id: 'preview-2' } as unknown as MediaStream },
+  ];
+  const hasAudio = [opts.firstAudio ?? true, opts.secondAudio ?? true];
+  let calls = 0;
+  const venc = { configured: [] as any[], keys: [] as boolean[], encoded: 0 };
+  const aenc = { created: 0, encoded: 0 };
+  const browser: PublisherBrowser = {
+    async capture(): Promise<Capture> {
+      const i = calls++;
+      if (i === 1 && opts.secondError) throw opts.secondError;
+      const f = feeds[Math.min(i, 1)];
+      return { video: f.video.reader, audio: hasAudio[Math.min(i, 1)] ? f.audio.reader : null, onEnded: (cb) => f.ended.push(cb), stop: f.stop, preview: f.preview };
+    },
+    createVideoEncoder(h) {
+      return {
+        async configure(cfg) { venc.configured.push([cfg.width, cfg.height]); },
+        encode(f, o) {
+          venc.encoded++;
+          venc.keys.push(o.keyFrame);
+          h.output({ key: o.keyFrame, data: new Uint8Array([1, 2, 3]), timestampUs: f.timestamp });
+        },
+        encodeQueueSize: 0,
+        close() {},
+      };
+    },
+    createAudioEncoder(h) {
+      aenc.created++;
+      return {
+        async configure() {},
+        encode(d) { aenc.encoded++; h.output({ data: new Uint8Array([9]), timestampUs: d.timestamp }); },
+        close() {},
+      };
+    },
+  };
+  const transport = memoryTransport();
+  const events = { onEnded: vi.fn(), onUsage: vi.fn() };
+  const publisher = new ScreenPublisher({ transport, browser }, events);
+  return { feeds, venc, aenc, transport, events, publisher };
+}
+
+describe('ScreenPublisher.replaceSource (trocar a tela sem parar a transmissão)', () => {
+  const start = async (r: ReturnType<typeof switchRig>) => {
+    await r.publisher.start({ url: URL, path: PATH, quality: screenQuality('720p30')!, initialKey: await generateScreenKey(1) });
+  };
+
+  it('passa a codificar a nova captura, solta a antiga e não encerra a transmissão', async () => {
+    const r = switchRig();
+    await start(r);
+    r.feeds[0].video.push(vframe(0));
+    await tick();
+    expect(r.venc.encoded).toBe(1);
+
+    expect(await r.publisher.replaceSource()).toBe('switched');
+    expect(r.feeds[0].stop).toHaveBeenCalledTimes(1);
+    r.feeds[0].video.end(); // o leitor antigo termina: não pode derrubar a transmissão
+    r.feeds[0].ended.forEach((cb) => cb());
+    r.feeds[0].video.push(vframe(100)); // nada vindo da antiga deve entrar
+    r.feeds[1].video.push(vframe(5000, 1920, 1080));
+    await tick();
+    expect(r.events.onEnded).not.toHaveBeenCalled();
+    expect(r.venc.encoded).toBe(2);
+    // a nova captura reconfigura o codificador pelo tamanho real e recomeça num quadro-chave
+    expect(r.venc.configured.at(-1)).toEqual([1920, 1080]);
+    expect(r.venc.keys.at(-1)).toBe(true);
+    await r.publisher.stop();
+  });
+
+  it('cancelar o seletor mantém a captura antiga funcionando', async () => {
+    const r = switchRig({ secondError: Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }) });
+    await start(r);
+    expect(await r.publisher.replaceSource()).toBe('cancelled');
+    expect(r.feeds[0].stop).not.toHaveBeenCalled();
+    r.feeds[0].video.push(vframe(0));
+    await tick();
+    expect(r.venc.encoded).toBe(1);
+    expect(r.events.onEnded).not.toHaveBeenCalled();
+    await r.publisher.stop();
+  });
+
+  it('outro erro ao pedir a nova tela é repassado e a transmissão continua com a antiga', async () => {
+    const r = switchRig({ secondError: new Error('sem placa de vídeo') });
+    await start(r);
+    await expect(r.publisher.replaceSource()).rejects.toThrow('sem placa de vídeo');
+    r.feeds[0].video.push(vframe(0));
+    await tick();
+    expect(r.venc.encoded).toBe(1);
+    await r.publisher.stop();
+  });
+
+  it('parar a captura NOVA pelo botão do navegador encerra a transmissão uma vez', async () => {
+    const r = switchRig();
+    await start(r);
+    await r.publisher.replaceSource();
+    r.feeds[1].ended.forEach((cb) => cb());
+    await tick();
+    expect(r.events.onEnded).toHaveBeenCalledTimes(1);
+    expect(r.events.onEnded).toHaveBeenCalledWith('user', undefined);
+  });
+
+  it('a nova captura com áudio, quando a antiga não tinha, ganha o codificador de áudio', async () => {
+    const r = switchRig({ firstAudio: false, secondAudio: true });
+    await start(r);
+    expect(r.aenc.created).toBe(0);
+    await r.publisher.replaceSource();
+    expect(r.aenc.created).toBe(1);
+    r.feeds[1].audio.push(aframe(0));
+    await tick();
+    expect(r.aenc.encoded).toBe(1);
+    await r.publisher.stop();
+  });
+
+  it('expõe a prévia da captura atual (e a da nova depois da troca)', async () => {
+    const r = switchRig();
+    await start(r);
+    expect((r.publisher.previewStream as unknown as { id: string }).id).toBe('preview-1');
+    await r.publisher.replaceSource();
+    expect((r.publisher.previewStream as unknown as { id: string }).id).toBe('preview-2');
+    await r.publisher.stop();
+    expect(r.publisher.previewStream).toBeNull();
+  });
+
+  it('sem transmissão ativa não troca nada', async () => {
+    const r = switchRig();
+    await expect(r.publisher.replaceSource()).rejects.toThrow();
+  });
+});

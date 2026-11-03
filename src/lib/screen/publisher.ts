@@ -1,4 +1,5 @@
 import type { ScreenQuality } from '../../types/screen';
+import { isPickerCancel } from './errors';
 import { FrameMuxer } from './muxer';
 import { AUDIO_ENCODER_CONFIG, keyframeInterval, videoEncoderConfig } from './quality';
 import { CaptureClock, FrameDecimator } from './timing';
@@ -37,6 +38,8 @@ export interface Capture {
   audio: FrameReader<AudioDataLike> | null;
   /** O navegador (botão "parar de compartilhar") encerrou a captura. */
   onEnded(cb: () => void): void;
+  /** Imagem da captura para o Host se ver (a prévia); a mesma faixa que vai ao codificador. */
+  preview?: MediaStream;
   stop(): void;
 }
 
@@ -112,6 +115,8 @@ export class ScreenPublisher {
   private keyTimers = new Set<ReturnType<typeof setTimeout>>();
   private ticker: ReturnType<typeof setInterval> | null = null;
   private latestEpoch = 0;
+  /** Cada captura tem a sua geração: ao trocar de tela, os leitores da captura antiga terminam sem mexer em nada. */
+  private captureGen = 0;
   private counters = { read: 0, skipped: 0, queueDrops: 0, encodedFrames: 0, fps: 0, width: 0, height: 0 };
 
   constructor(
@@ -121,6 +126,11 @@ export class ScreenPublisher {
 
   private now(): number {
     return (this.deps.now ?? Date.now)();
+  }
+
+  /** O que está sendo capturado agora, para o Host se ver. `null` sem captura (ou sem suporte do navegador). */
+  get previewStream(): MediaStream | null {
+    return this.capture?.preview ?? null;
   }
 
   get stats(): PublisherStats {
@@ -159,18 +169,8 @@ export class ScreenPublisher {
         error: (e) => void this.finish('error', describe(e)),
       });
 
-      if (this.capture.audio) {
-        this.aenc = this.deps.browser.createAudioEncoder({
-          output: (c) => muxer.pushAudio(c, this.aclock.peek(c.timestampUs / 1000) ?? this.now() - 20),
-          error: (e) => void this.finish('error', describe(e)),
-        });
-        await this.aenc.configure(AUDIO_ENCODER_CONFIG);
-        this.assertRunning();
-      }
-
-      this.capture.onEnded(() => void this.finish('user'));
-      void this.runVideo(this.capture.video);
-      if (this.capture.audio) void this.runAudio(this.capture.audio);
+      if (this.capture.audio) await this.ensureAudioEncoder();
+      this.attachCapture(this.capture);
 
       let ticks = 0;
       let lastEncoded = 0;
@@ -183,6 +183,66 @@ export class ScreenPublisher {
       await this.teardown();
       throw e;
     }
+  }
+
+  /** Cria o codificador de áudio quando a captura traz áudio (na troca de tela, a nova pode ter áudio e a antiga não). */
+  private async ensureAudioEncoder(): Promise<void> {
+    const muxer = this.muxer;
+    if (this.aenc || !muxer) return;
+    const aenc = this.deps.browser.createAudioEncoder({
+      output: (c) => muxer.pushAudio(c, this.aclock.peek(c.timestampUs / 1000) ?? this.now() - 20),
+      error: (e) => void this.finish('error', describe(e)),
+    });
+    this.aenc = aenc;
+    await aenc.configure(AUDIO_ENCODER_CONFIG);
+    this.assertRunning();
+  }
+
+  /** Liga uma captura ao codificador: ela vira a captura atual e a anterior (se houver) fica para trás. */
+  private attachCapture(capture: Capture): void {
+    const gen = ++this.captureGen;
+    this.capture = capture;
+    capture.onEnded(() => {
+      if (gen === this.captureGen) void this.finish('user');
+    });
+    void this.runVideo(capture.video, gen);
+    if (capture.audio) void this.runAudio(capture.audio, gen);
+  }
+
+  /**
+   * "Trocar a tela": pede outra captura sem parar a transmissão (mesma sala, mesma chave, mesmo relay). Cancelar o
+   * seletor mantém a captura atual. O gesto do usuário (clique) precisa estar fresco, como no `start`.
+   */
+  async replaceSource(): Promise<'switched' | 'cancelled'> {
+    if (this.state !== 'running' || !this.quality) throw new Error('A transmissão não está ativa.');
+    let next: Capture;
+    try {
+      next = await this.deps.browser.capture(this.quality);
+    } catch (e) {
+      if (isPickerCancel(e)) return 'cancelled';
+      throw e;
+    }
+    if (this.state !== 'running') {
+      next.stop();
+      return 'cancelled';
+    }
+    try {
+      if (next.audio) await this.ensureAudioEncoder();
+    } catch (e) {
+      next.stop();
+      throw e;
+    }
+    const previous = this.capture;
+    // Outra captura, outro relógio: recomeça carimbos, decimação e o mapa de carimbos pendentes
+    this.vclock.reset();
+    this.aclock.reset();
+    this.decimator?.reset();
+    this.stamps.clear();
+    this.attachCapture(next);
+    try {
+      previous?.stop();
+    } catch {}
+    return 'switched';
   }
 
   /** `stop()` (ou um erro) chegou durante um `await` do `start()`: o `catch` do `start` solta o que já foi aberto. */
@@ -232,6 +292,7 @@ export class ScreenPublisher {
     try {
       this.capture?.stop();
     } catch {}
+    this.capture = null;
     for (const enc of [this.venc, this.aenc]) {
       try {
         enc?.close();
@@ -246,7 +307,7 @@ export class ScreenPublisher {
     this.stamps.clear();
   }
 
-  private async runVideo(reader: FrameReader<VideoFrameLike>): Promise<void> {
+  private async runVideo(reader: FrameReader<VideoFrameLike>, gen: number): Promise<void> {
     let sinceKey = 0;
     let width = 0;
     let height = 0;
@@ -256,7 +317,7 @@ export class ScreenPublisher {
         const frame = r.value;
         if (r.done || !frame) break;
         try {
-          if (this.state !== 'running' || !this.venc || !this.quality || !this.decimator) return;
+          if (this.state !== 'running' || gen !== this.captureGen || !this.venc || !this.quality || !this.decimator) return;
           this.counters.read++;
           if (frame.displayWidth !== width || frame.displayHeight !== height) {
             width = frame.displayWidth;
@@ -284,21 +345,21 @@ export class ScreenPublisher {
         }
       }
     } catch (e) {
-      void this.finish('error', describe(e));
+      if (gen === this.captureGen) void this.finish('error', describe(e));
       return;
     }
-    // O fluxo da captura acabou sem erro: é a captura que terminou
-    void this.finish('user');
+    // O fluxo da captura acabou sem erro: é a captura que terminou (a que foi trocada por outra não conta)
+    if (gen === this.captureGen) void this.finish('user');
   }
 
-  private async runAudio(reader: FrameReader<AudioDataLike>): Promise<void> {
+  private async runAudio(reader: FrameReader<AudioDataLike>, gen: number): Promise<void> {
     try {
       for (;;) {
         const r = await reader.read();
         const data = r.value;
         if (r.done || !data) return;
         try {
-          if (this.state !== 'running' || !this.aenc) return;
+          if (this.state !== 'running' || gen !== this.captureGen || !this.aenc) return;
           // O offset é medido no fim do bloco; o carimbo de cada bloco codificado usa o início dele
           this.aclock.stamp((data.timestamp + data.duration) / 1000, this.now());
           this.aenc.encode(data);
@@ -307,7 +368,7 @@ export class ScreenPublisher {
         }
       }
     } catch (e) {
-      void this.finish('error', describe(e));
+      if (gen === this.captureGen) void this.finish('error', describe(e));
     }
   }
 }

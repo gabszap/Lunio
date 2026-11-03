@@ -46,6 +46,8 @@ export function browserPublisher(): PublisherBrowser {
       return {
         video: readerOf<VideoFrameLike>(vtrack),
         audio,
+        // A mesma faixa de vídeo pode alimentar o codificador e uma prévia ao mesmo tempo
+        preview: new MediaStream([vtrack]),
         onEnded: (cb) => vtrack.addEventListener('ended', cb, { once: true }),
         stop() {
           stream.getTracks().forEach((t) => t.stop());
