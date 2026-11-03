@@ -29,6 +29,7 @@ export class HostScreenSession {
   private publisher: ScreenPublisher | null = null;
   private offs: Array<() => void> = [];
   private rotating: Promise<void> = Promise.resolve();
+  private live = false;
 
   constructor(
     private readonly deps: { signals: ScreenSignals; api: ScreenApi; createPublisher(events: PublisherEvents): Promise<ScreenPublisher> },
@@ -47,6 +48,13 @@ export class HostScreenSession {
   /** A imagem capturada, para o Host se ver. */
   get previewStream(): MediaStream | null {
     return this.publisher?.previewStream ?? null;
+  }
+
+  /** Muda a qualidade com a transmissão no ar e avisa a sala (todos veem a qualidade nova). */
+  async changeQuality(quality: ScreenQuality): Promise<void> {
+    if (!this.publisher || this.stopped || !this.live) return;
+    await this.publisher.setQuality(quality);
+    this.deps.signals.emitScreenQuality(quality.id);
   }
 
   /** "Trocar a tela" sem parar a transmissão (cancelar o seletor mantém a atual). */
@@ -104,6 +112,7 @@ export class HostScreenSession {
       signals.emitScreenKey(key);
       signals.emitScreenLive();
       this.attachLive();
+      this.live = true;
       this.events.onStatus('live');
       return 'started';
     } catch (e) {

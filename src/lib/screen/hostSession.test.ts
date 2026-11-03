@@ -31,6 +31,7 @@ function fakeSignals() {
     emitScreenKey: (k) => (calls.push('key'), emitted.push({ type: 'key', ...k })),
     emitScreenUsage: (b) => (calls.push('usage'), emitted.push({ type: 'usage', b })),
     emitScreenWatching: () => {},
+    emitScreenQuality: (id) => (calls.push('quality:' + id), emitted.push({ type: 'quality', id })),
   };
   return {
     signals,
@@ -57,6 +58,7 @@ function fakePublisher(opts: { startError?: Error; startGate?: Promise<void> } =
     rotateKey: vi.fn(async () => ({ epoch: ++pub.epoch, key: 'k' + pub.epoch })),
     stop: vi.fn(async () => {}),
     replaceSource: vi.fn(async (): Promise<'switched' | 'cancelled'> => 'switched'),
+    setQuality: vi.fn(async () => {}),
     previewStream: { id: 'preview' } as unknown as MediaStream,
     stats: { hasSubscribers: true, fps: 28, width: 1920, height: 1080, bytesOut: 1234 },
     epoch: 1,
@@ -299,5 +301,35 @@ describe('HostScreenSession: trocar a tela, prévia e números', () => {
     expect((t.session.previewStream as unknown as { id: string }).id).toBe('preview');
     expect(setup().session.stats).toBeNull();
     expect(setup().session.previewStream).toBeNull();
+  });
+});
+
+describe('HostScreenSession.changeQuality', () => {
+  it('muda no publicador e avisa a sala, nessa ordem', async () => {
+    const t = setup();
+    await confirmed(t);
+    t.sig.calls.length = 0;
+    await t.session.changeQuality(screenQuality('720p30')!);
+    expect(t.p.pub.setQuality).toHaveBeenCalledWith(expect.objectContaining({ id: '720p30' }));
+    expect(t.sig.calls).toEqual(['quality:720p30']);
+  });
+
+  it('não avisa a sala se o publicador não conseguiu mudar', async () => {
+    const t = setup();
+    await confirmed(t);
+    t.sig.calls.length = 0;
+    t.p.pub.setQuality.mockRejectedValueOnce(new Error('falhou'));
+    await expect(t.session.changeQuality(screenQuality('720p30')!)).rejects.toThrow('falhou');
+    expect(t.sig.calls).toEqual([]);
+  });
+
+  it('antes de ao vivo ou depois de parar não faz nada', async () => {
+    const t = setup();
+    await t.session.changeQuality(screenQuality('720p30')!);
+    expect(t.p.pub.setQuality).not.toHaveBeenCalled();
+    await confirmed(t);
+    await t.session.stop();
+    await t.session.changeQuality(screenQuality('720p30')!);
+    expect(t.p.pub.setQuality).not.toHaveBeenCalled();
   });
 });

@@ -21,4 +21,6 @@ export interface ScreenSignals {
   emitScreenUsage(bytes: number): void;
   /** Quem assiste avisa a sala que começou/parou (o Host vê a lista de quem está assistindo). */
   emitScreenWatching(watching: boolean): void;
+  /** O Host muda a qualidade da transmissão que já está no ar. */
+  emitScreenQuality(quality: ScreenQualityId): void;
 }

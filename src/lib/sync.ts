@@ -1038,6 +1038,10 @@ class SyncManager implements ScreenSignals {
     this.send({ type: 'screen:usage', bytes });
   }
 
+  public emitScreenQuality(quality: ScreenQualityId) {
+    this.send({ type: 'screen:quality', quality });
+  }
+
   public emitScreenWatching(watching: boolean) {
     this.send({ type: 'screen:watching', watching });
   }

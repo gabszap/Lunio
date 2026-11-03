@@ -239,3 +239,11 @@ describe('quem está assistindo (só o Host recebe)', () => {
     ]);
   });
 });
+
+describe('mudar a qualidade ao vivo', () => {
+  it('emitScreenQuality manda screen:quality', async () => {
+    const { syncManager, ws } = await connected(SCREEN);
+    syncManager.emitScreenQuality('720p30');
+    expect(ws.sentTypes().filter((m) => m.type === 'screen:quality')).toEqual([{ type: 'screen:quality', quality: '720p30' }]);
+  });
+});

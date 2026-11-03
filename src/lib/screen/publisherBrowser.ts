@@ -1,6 +1,6 @@
 import type { ScreenQuality } from '../../types/screen';
 import type { AudioDataLike, Capture, FrameReader, PublisherBrowser, VideoFrameLike } from './publisher';
-import { captureConstraints } from './quality';
+import { captureConstraints, captureFrameRate } from './quality';
 
 /** `MediaStreamTrackProcessor` ainda não está nos tipos do DOM. */
 type TrackProcessorCtor = new (init: { track: MediaStreamTrack }) => { readable: ReadableStream };
@@ -48,6 +48,14 @@ export function browserPublisher(): PublisherBrowser {
         audio,
         // A mesma faixa de vídeo pode alimentar o codificador e uma prévia ao mesmo tempo
         preview: new MediaStream([vtrack]),
+        applyQuality: async (quality) => {
+          const fps = captureFrameRate(quality);
+          await vtrack.applyConstraints({
+            width: { ideal: quality.width, max: quality.width },
+            height: { ideal: quality.height, max: quality.height },
+            frameRate: { ideal: fps, max: fps },
+          });
+        },
         onEnded: (cb) => vtrack.addEventListener('ended', cb, { once: true }),
         stop() {
           stream.getTracks().forEach((t) => t.stop());

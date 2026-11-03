@@ -410,8 +410,8 @@ describe('screenCapabilities', () => {
 /** Duas capturas, uma depois da outra: o que o Host faz ao "Trocar a tela". */
 function switchRig(opts: { firstAudio?: boolean; secondAudio?: boolean; secondError?: Error } = {}) {
   const feeds = [
-    { video: new Feed<VideoFrameLike>(), audio: new Feed<AudioDataLike>(), stop: vi.fn(), ended: [] as Array<() => void>, preview: { id: 'preview-1' } as unknown as MediaStream },
-    { video: new Feed<VideoFrameLike>(), audio: new Feed<AudioDataLike>(), stop: vi.fn(), ended: [] as Array<() => void>, preview: { id: 'preview-2' } as unknown as MediaStream },
+    { video: new Feed<VideoFrameLike>(), audio: new Feed<AudioDataLike>(), stop: vi.fn(), apply: vi.fn(async () => {}), ended: [] as Array<() => void>, preview: { id: 'preview-1' } as unknown as MediaStream },
+    { video: new Feed<VideoFrameLike>(), audio: new Feed<AudioDataLike>(), stop: vi.fn(), apply: vi.fn(async () => {}), ended: [] as Array<() => void>, preview: { id: 'preview-2' } as unknown as MediaStream },
   ];
   const hasAudio = [opts.firstAudio ?? true, opts.secondAudio ?? true];
   let calls = 0;
@@ -422,7 +422,7 @@ function switchRig(opts: { firstAudio?: boolean; secondAudio?: boolean; secondEr
       const i = calls++;
       if (i === 1 && opts.secondError) throw opts.secondError;
       const f = feeds[Math.min(i, 1)];
-      return { video: f.video.reader, audio: hasAudio[Math.min(i, 1)] ? f.audio.reader : null, onEnded: (cb) => f.ended.push(cb), stop: f.stop, preview: f.preview };
+      return { video: f.video.reader, audio: hasAudio[Math.min(i, 1)] ? f.audio.reader : null, onEnded: (cb) => f.ended.push(cb), stop: f.stop, preview: f.preview, applyQuality: f.apply };
     },
     createVideoEncoder(h) {
       return {
@@ -535,5 +535,52 @@ describe('ScreenPublisher.replaceSource (trocar a tela sem parar a transmissão)
   it('sem transmissão ativa não troca nada', async () => {
     const r = switchRig();
     await expect(r.publisher.replaceSource()).rejects.toThrow();
+  });
+});
+
+describe('ScreenPublisher.setQuality (mudar a qualidade com a transmissão no ar)', () => {
+  const startAt = async (r: ReturnType<typeof switchRig>, id: string) => {
+    await r.publisher.start({ url: URL, path: PATH, quality: screenQuality(id)!, initialKey: await generateScreenKey(1) });
+  };
+
+  it('pede à captura o novo tamanho e fps, reconfigura o codificador com o bitrate novo e recomeça num quadro-chave', async () => {
+    const r = switchRig();
+    await startAt(r, '1080p60');
+    r.feeds[0].video.push(vframe(0, 1920, 1080));
+    await tick();
+    expect(r.venc.configured).toHaveLength(1);
+
+    await r.publisher.setQuality(screenQuality('720p30')!);
+    expect(r.feeds[0].apply).toHaveBeenCalledWith(expect.objectContaining({ id: '720p30' }));
+    r.feeds[0].video.push(vframe(100, 1280, 720));
+    await tick();
+    expect(r.venc.configured).toHaveLength(2);
+    expect(r.venc.configured.at(-1)).toEqual([1280, 720]);
+    expect(r.venc.keys.at(-1)).toBe(true);
+    await r.publisher.stop();
+  });
+
+  it('com o fps menor a decimação passa a deixar passar menos quadros', async () => {
+    const r = switchRig();
+    await startAt(r, '1080p60');
+    await r.publisher.setQuality(screenQuality('720p30')!);
+    for (let i = 0; i < 20; i++) r.feeds[0].video.push(vframe(i * (1000 / 60), 1280, 720));
+    await tick();
+    expect(r.venc.encoded).toBe(10); // 60 fps de entrada, 30 de saída
+    await r.publisher.stop();
+  });
+
+  it('o novo bitrate vem da tabela e a captura que não sabe ajustar não quebra', async () => {
+    const r = switchRig();
+    await startAt(r, '720p30');
+    r.feeds[0].apply.mockRejectedValueOnce(new Error('não suporta'));
+    await expect(r.publisher.setQuality(screenQuality('1080p60')!)).resolves.toBeUndefined();
+    expect(r.publisher.qualityId).toBe('1080p60');
+    await r.publisher.stop();
+  });
+
+  it('sem transmissão ativa não muda nada', async () => {
+    const r = switchRig();
+    await expect(r.publisher.setQuality(screenQuality('720p30')!)).rejects.toThrow();
   });
 });

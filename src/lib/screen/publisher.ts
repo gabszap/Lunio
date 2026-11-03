@@ -40,6 +40,8 @@ export interface Capture {
   onEnded(cb: () => void): void;
   /** Imagem da captura para o Host se ver (a prévia); a mesma faixa que vai ao codificador. */
   preview?: MediaStream;
+  /** Pede à própria captura o tamanho e o fps da nova qualidade (sem abrir o seletor de novo). Pode não ser suportado. */
+  applyQuality?(q: ScreenQuality): Promise<void>;
   stop(): void;
 }
 
@@ -117,6 +119,8 @@ export class ScreenPublisher {
   private latestEpoch = 0;
   /** Cada captura tem a sua geração: ao trocar de tela, os leitores da captura antiga terminam sem mexer em nada. */
   private captureGen = 0;
+  /** A qualidade mudou: o próximo quadro reconfigura o codificador (bitrate, nível) e recomeça num quadro-chave. */
+  private forceConfigure = false;
   private counters = { read: 0, skipped: 0, queueDrops: 0, encodedFrames: 0, fps: 0, width: 0, height: 0 };
 
   constructor(
@@ -131,6 +135,10 @@ export class ScreenPublisher {
   /** O que está sendo capturado agora, para o Host se ver. `null` sem captura (ou sem suporte do navegador). */
   get previewStream(): MediaStream | null {
     return this.capture?.preview ?? null;
+  }
+
+  get qualityId(): ScreenQuality['id'] | null {
+    return this.quality?.id ?? null;
   }
 
   get stats(): PublisherStats {
@@ -182,6 +190,22 @@ export class ScreenPublisher {
     } catch (e) {
       await this.teardown();
       throw e;
+    }
+  }
+
+  /**
+   * Muda a qualidade com a transmissão no ar: a captura recebe o novo tamanho/fps (se o navegador deixar), o fps de
+   * saída muda e o codificador é reconfigurado no próximo quadro (bitrate novo, quadro-chave).
+   */
+  async setQuality(q: ScreenQuality): Promise<void> {
+    if (this.state !== 'running') throw new Error('A transmissão não está ativa.');
+    this.quality = q;
+    this.decimator = new FrameDecimator(q.fps);
+    this.forceConfigure = true;
+    try {
+      await this.capture?.applyQuality?.(q);
+    } catch {
+      // O navegador não ajustou a captura: o codificador ainda reduz para o tamanho e o bitrate novos
     }
   }
 
@@ -319,7 +343,8 @@ export class ScreenPublisher {
         try {
           if (this.state !== 'running' || gen !== this.captureGen || !this.venc || !this.quality || !this.decimator) return;
           this.counters.read++;
-          if (frame.displayWidth !== width || frame.displayHeight !== height) {
+          if (frame.displayWidth !== width || frame.displayHeight !== height || this.forceConfigure) {
+            this.forceConfigure = false;
             width = frame.displayWidth;
             height = frame.displayHeight;
             await this.venc.configure(videoEncoderConfig(this.quality, width, height));
