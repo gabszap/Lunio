@@ -9,6 +9,7 @@ import { getYouTubeId } from '../../lib/media';
 import { sessionManager } from '../../lib/session';
 import { subtitleManager } from '../../lib/subtitles';
 import { getVideoElement } from './dom';
+import { isRemoteSource } from '../../lib/linkId';
 
 /**
  * Áudio alternativo e URL do stream. Trocar de dublagem refaz o stream por remux fMP4 no servidor, a partir do ponto atual;
@@ -46,7 +47,7 @@ export function useAlternateAudio(args: {
     if (!s.trim()) return '';
     const ytId = getYouTubeId(s);
     if (ytId) return `youtube/${ytId}`;
-    const isRemote = s.startsWith('http://') || s.startsWith('https://');
+    const isRemote = isRemoteSource(s);
     if (isRemote && !s.startsWith('/api/proxy')) {
       return `/api/proxy?url=${encodeURIComponent(s)}#.mp4`;
     }

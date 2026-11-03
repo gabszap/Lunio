@@ -5,6 +5,7 @@ import { formatTime } from '../../lib/chapters';
 import { apiFetch } from '../../lib/access';
 import { logger } from '../../lib/logger';
 import { describeSourceForLog } from '../../lib/mediaLog';
+import { isRemoteSource } from '../../lib/linkId';
 import { sessionManager } from '../../lib/session';
 import { getVideoElement } from './dom';
 import { t } from '../../lib/i18n';
@@ -208,7 +209,7 @@ export function usePlayerEventHandlers(args: {
     logger.error(`[Player] Erro de reprodução: ${errMsg} (código ${errCode}) ${describeSourceForLog(source.src)}`);
 
     // Link remoto: o provedor pode ter limitado os pedidos (429). O <video> só vê um erro de rede; o servidor sabe o motivo
-    if (/^https?:\/\//i.test(source.src)) {
+    if (isRemoteSource(source.src)) {
       void apiFetch(`/api/upstream?url=${encodeURIComponent(source.src)}`)
         .then((res) => (res.ok ? res.json() : null))
         .then((info: { limited?: boolean; host?: string } | null) => {

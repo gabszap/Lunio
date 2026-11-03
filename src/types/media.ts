@@ -1,6 +1,8 @@
 export type MediaSource = {
   src: string;
   type?: string;
+  /** Identidade do vídeo vinda de quem enviou o link (`ih:`/`vh:`): quem só recebe o id opaco a usa no cache. */
+  fingerprint?: string;
 };
 
 export type Chapter = {
@@ -170,6 +172,7 @@ export type MediaPayload = {
   chapters?: Chapter[];
   audioTracks?: AudioTrackOption[];
   isMkv?: boolean;
+  fingerprint?: string;
 };
 
 export type PlayerPreset = {

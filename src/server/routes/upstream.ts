@@ -1,3 +1,4 @@
+import { urlParam } from './linkParam';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { sendApiError, sendJson } from '../http';
 import { resolvedUrlCache } from '../media/resolver';
@@ -9,7 +10,9 @@ import { cooldownRemainingMs, hostOf } from '../media/upstreamGate';
  * provedor (já está limitando): só olha o que o servidor anotou do host de origem e do CDN já resolvido.
  */
 export function handleUpstreamStatus(req: IncomingMessage, res: ServerResponse) {
-  const target = new URL(req.url || '', 'http://localhost').searchParams.get('url') ?? '';
+  const expanded = urlParam(req, res, new URL(req.url || '', 'http://localhost'));
+  if (expanded === false) return;
+  const target = expanded ?? '';
   if (!/^https?:\/\//i.test(target)) {
     sendApiError(res, 400, 'bad_request', 'Parâmetro url ausente ou inválido.');
     return;

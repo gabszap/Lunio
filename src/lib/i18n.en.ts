@@ -421,6 +421,7 @@ export const EN: Record<string, string> = {
   "Sem buffer": "No buffer",
   "Série": "Series",
   "Sessão ausente ou expirada. Recarregue a página.": "Session missing or expired. Reload the page.",
+  "Esse vídeo já saiu da sala. Peça para o Host tocar de novo.": "That video is no longer in the room. Ask the Host to play it again.",
   "Seu apelido na sala": "Your nickname in the room",
   "Silenciar (M)": "Mute (M)",
   "Sincronia": "Sync",
