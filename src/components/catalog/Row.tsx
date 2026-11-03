@@ -16,7 +16,9 @@ export const Row: React.FC<{
   items?: CatalogItem[];
   /** Só pede os itens quando a fileira chega perto da tela (uma fonte pode ter dezenas de fileiras). */
   lazy?: boolean;
-}> = ({ title, load, onOpen, items: fixedItems, lazy = false }) => {
+  /** Como desenhar cada item (o padrão é o cartaz simples). */
+  renderItem?: (item: CatalogItem) => React.ReactNode;
+}> = ({ title, load, onOpen, items: fixedItems, lazy = false, renderItem }) => {
   const [items, setItems] = useState<CatalogItem[] | null>(fixedItems ?? null);
   const [error, setError] = useState(false);
   const [visible, setVisible] = useState(!lazy);
@@ -89,7 +91,7 @@ export const Row: React.FC<{
           {items
             ? items.map((item) => (
                 <div key={item.id} className="snap-start">
-                  <PosterCard item={item} onOpen={onOpen} />
+                  {renderItem ? renderItem(item) : <PosterCard item={item} onOpen={onOpen} />}
                 </div>
               ))
             : Array.from({ length: 8 }, (_, i) => (

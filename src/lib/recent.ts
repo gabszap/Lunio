@@ -8,11 +8,13 @@ export interface RecentStream {
   date: string;
 }
 
-const RECENT_KEY = 'streamplayer_recent_streams';
+const RECENT_KEY = 'lunio_recent_streams';
+/** O nome antigo da chave (antes do nome do produto): lido uma vez e trocado pela nova. */
+const LEGACY_RECENT_KEY = 'streamplayer_recent_streams';
 
 export function loadRecentStreams(): RecentStream[] {
   try {
-    const saved = localStorage.getItem(RECENT_KEY);
+    const saved = localStorage.getItem(RECENT_KEY) ?? localStorage.getItem(LEGACY_RECENT_KEY);
     return saved ? JSON.parse(saved) : [];
   } catch {
     return [];
@@ -23,6 +25,7 @@ export function saveRecentStreams(list: RecentStream[]) {
   try {
     if (list.length === 0) localStorage.removeItem(RECENT_KEY);
     else localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+    localStorage.removeItem(LEGACY_RECENT_KEY); // a migração termina na primeira gravação
   } catch {
     // armazenamento indisponível
   }

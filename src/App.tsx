@@ -27,6 +27,7 @@ import { CatalogEpisode, episodeTag, loadActiveSeriesContext, saveActiveSeriesCo
 import type { PlaylistItem } from './types/sync';
 import { PlaylistPanel } from './components/PlaylistPanel';
 import { logger } from './lib/logger';
+import { refFromSeriesContext, startPlayback, type CatalogRef } from './lib/continueWatching';
 import { describeSourceForLog } from './lib/mediaLog';
 import { shareableFingerprint } from './lib/media';
 import { discordManager, DiscordContextState } from './lib/discord';
@@ -155,6 +156,7 @@ export default function App() {
   }, []);
 
   const joinRoom = useCallback((code: string) => {
+    startPlayback(null); // quem entra numa sala só assiste: o que ele tocou antes não é dele aqui
     setRoomInUrl(code);
     wasInRoomRef.current = false;
     syncManager.connect(code);
@@ -272,6 +274,7 @@ export default function App() {
 
     const unsubMedia = syncManager.subscribeMedia((media, _generation, _triggeredBy, username) => {
       if (media && !syncManager.isRoomHost()) {
+        startPlayback(null);
         setCurrentPayload({
           url: media.url,
           title: media.title,
@@ -379,6 +382,7 @@ export default function App() {
     setWatchIntent(null);
     // O menu de episódios só vale para o vídeo que veio de um episódio do catálogo; qualquer outro (link colado, filme, envio) o zera
     updateSeriesContext(options.seriesContext ?? null);
+    startPlayback(options.continueRef ?? null); // só o que veio do catálogo vira "continuar assistindo" (e abre de onde parou)
     if (options.recent) setRecentStreams((prev) => pushRecentStream(prev, merged.url, merged.title || ''));
     logger.info(`[Mídia] Abrindo "${merged.title}" (${describeSourceForLog(merged.url)})`);
 
@@ -398,7 +402,7 @@ export default function App() {
   };
 
   /** Um stream escolhido no detalhe do catálogo ("Onde assistir"): cria a sala e abre o player. */
-  const playStream = (stream: StreamOption, title: string, context?: CatalogSeriesContext) => {
+  const playStream = (stream: StreamOption, title: string, context?: CatalogSeriesContext, movie?: CatalogRef) => {
     const { mimeType, isMkv } = streamMediaInfo(stream.url, stream.filename);
     commitMedia(
       {
@@ -411,7 +415,7 @@ export default function App() {
         isMkv,
       },
       'room',
-      { seriesContext: context }
+      { seriesContext: context, continueRef: context ? refFromSeriesContext(context) : movie }
     );
   };
 
@@ -450,6 +454,7 @@ export default function App() {
     setPendingSubtitles([]);
     setAutoPlayNext(true);
     updateSeriesContext(null); // item da fila não vem do catálogo: sem menu de episódios
+    startPlayback(null);
     setCurrentPayload(payload);
     emitCurrentMedia(payload);
   };

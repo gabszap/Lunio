@@ -336,7 +336,8 @@ export function parseSeriesContext(value: unknown): CatalogSeriesContext | null 
       released: text(e.released) ?? undefined,
     });
   }
-  return { seriesId, seriesTitle, seriesType, currentEpisodeId, season, episode, episodes };
+  const seriesPoster = typeof v.seriesPoster === 'string' && /^https?:\/\//i.test(v.seriesPoster) ? v.seriesPoster.slice(0, 600) : undefined;
+  return { seriesId, seriesTitle, seriesType, seriesPoster, currentEpisodeId, season, episode, episodes };
 }
 
 export function loadActiveSeriesContext(): CatalogSeriesContext | null {
