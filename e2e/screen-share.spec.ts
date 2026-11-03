@@ -212,7 +212,7 @@ test.describe('transmissão de tela (motor falso)', () => {
     await host.page.getByRole('button', { name: 'Qualidade da transmissão' }).click();
     await host.page.getByRole('menuitemradio', { name: /720p 30 fps/ }).click();
     await expect.poll(async () => (await log(host.page)).pub.filter((e) => e.type === 'quality').map((e) => e.quality)).toEqual(['720p30']);
-    await expect(guest.page.getByText('720p', { exact: true })).toBeVisible();
+    await expect(guest.page.getByText('720p30', { exact: true })).toBeVisible();
     await host.page.getByRole('button', { name: 'Trocar a tela' }).click();
     await expect.poll(async () => (await log(host.page)).pub.map((e) => e.type)).toContain('switch');
     await expect(stopBtn(host.page)).toBeVisible();

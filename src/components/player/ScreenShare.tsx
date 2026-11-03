@@ -133,10 +133,10 @@ const shortQuality = (id: ScreenQualityId): string => {
   return `${q.height >= 2160 ? '4K' : `${q.height}p`} · ${q.fps} fps`;
 };
 
-/** "1080p" (ou "4K"): quem assiste vê só a resolução da transmissão. */
+/** "1080p60" (ou "4K60"): a qualidade da transmissão para quem assiste, sem os números ao vivo. */
 const resolutionLabel = (id: ScreenQualityId): string => {
   const q = screenQuality(id)!;
-  return q.height >= 2160 ? '4K' : `${q.height}p`;
+  return `${q.height >= 2160 ? '4K' : `${q.height}p`}${q.fps}`;
 };
 
 /** O que o Host está enviando, como imagem do player (no lugar do "Nenhum vídeo na sala"). */
@@ -150,7 +150,7 @@ const HostPreviewBackdrop: React.FC<{ stream: MediaStream }> = ({ stream }) => {
 
 // Barra flutuante embaixo, como a dos apps de compartilhar tela: pílula escura com botões de 40 px
 // Vidro: fundo translúcido com desfoque forte e borda clara, para a imagem aparecer por trás (como nos apps de chamada)
-const glass = 'bg-white/[0.07] backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.14] shadow-[0_12px_40px_rgba(0,0,0,0.35)]';
+const glass = 'bg-[#15151c]/70 backdrop-blur-2xl backdrop-saturate-150 border border-white/[0.12] shadow-[0_12px_40px_rgba(0,0,0,0.35)]';
 const barBase = 'absolute left-1/2 -translate-x-1/2 z-40 w-max flex flex-nowrap items-center justify-center gap-1 rounded-full p-1.5 max-w-[calc(100%-24px)]';
 const barBtn = 'inline-flex items-center justify-center h-10 rounded-full text-[13px] font-medium text-lu-text hover:bg-white/10 transition-colors flex-none';
 const barInfo = 'inline-flex items-center gap-1.5 h-10 px-3.5 rounded-full bg-white/[0.08] text-[13px] text-lu-text/80 tabular whitespace-nowrap flex-none';
