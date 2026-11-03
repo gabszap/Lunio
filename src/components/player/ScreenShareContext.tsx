@@ -5,12 +5,22 @@ import { syncManager } from '../../lib/sync';
 import { screenApi } from '../../lib/screen/api';
 import { isOwnOrphan, screenAvailability } from '../../lib/screen/availability';
 import { screenCancelledText } from '../../lib/screen/errors';
+import { t } from '../../lib/i18n';
 import { HostScreenSession, type HostScreenStatus } from '../../lib/screen/hostSession';
 import { createScreenPublisher, createScreenViewer, preloadScreenEngine, screenCapabilities } from '../../lib/screen';
 import { ViewerScreenSession, type ViewerScreenStatus } from '../../lib/screen/viewerSession';
 
 const QUALITY_KEY = 'lunio_screen_quality';
+const VOLUME_KEY = 'lunio_screen_volume';
 const ENDED_NOTICE_MS = 4000;
+
+/** O que o Host vê do que está saindo: fps codificados, Mbps do último segundo e o tamanho real da captura. */
+export interface HostLiveStats {
+  fps: number;
+  mbps: number;
+  width: number;
+  height: number;
+}
 
 export interface ScreenShareValue {
   /** O botão "Transmitir a tela" deve aparecer (Host, sala, navegador capaz, servidor com a flag ligada). */
@@ -19,7 +29,12 @@ export interface ScreenShareValue {
   canWatch: boolean;
   screen: RoomScreen | null;
   isBroadcaster: boolean;
-  host: { status: HostScreenStatus; error: string | null; notice: string | null; hasSubscribers: boolean };
+  host: { status: HostScreenStatus; error: string | null; notice: string | null; stats: HostLiveStats | null; preview: MediaStream | null };
+  /** Quem está assistindo agora (o servidor só informa o Host que transmite). */
+  viewers: Array<{ id: string; username: string }>;
+  /** Volume (0 a 1) e mudo da transmissão para quem assiste: independentes do vídeo da sala. */
+  volume: number;
+  muted: boolean;
   viewer: { status: ViewerScreenStatus; error: string | null };
   /** O palco da transmissão cobre o vídeo da sala (conectando ou assistindo): o vídeo fica mudo e escondido por baixo. */
   covering: boolean;
@@ -32,8 +47,11 @@ export interface ScreenShareValue {
   returnToVideo(): void;
   /** Fecha o aviso de erro da transmissão (do Host e do espectador). */
   dismissError(): void;
-  /** Volume efetivo do player (0 se mudo): a transmissão segue o controle de volume do player. */
+  /** Ajusta o volume da transmissão (mexer no controle tira do mudo). */
   setVolume(v: number): void;
+  toggleMuted(): void;
+  /** "Trocar a tela" sem parar a transmissão. */
+  switchScreen(): Promise<void>;
   /** O `<canvas>` do palco registra-se aqui; sobrevive à troca do `VideoPlayer` (que é remontado a cada vídeo). */
   attachCanvas(el: HTMLCanvasElement | null): void;
 }
@@ -43,7 +61,10 @@ const INERT: ScreenShareValue = {
   canWatch: false,
   screen: null,
   isBroadcaster: false,
-  host: { status: 'idle', error: null, notice: null, hasSubscribers: false },
+  host: { status: 'idle', error: null, notice: null, stats: null, preview: null },
+  viewers: [],
+  volume: 1,
+  muted: false,
   viewer: { status: 'idle', error: null },
   covering: false,
   endedNotice: false,
@@ -54,6 +75,8 @@ const INERT: ScreenShareValue = {
   returnToVideo: () => {},
   dismissError: () => {},
   setVolume: () => {},
+  toggleMuted: () => {},
+  switchScreen: async () => {},
   attachCanvas: () => {},
 };
 
@@ -68,6 +91,14 @@ function readLastQuality(): ScreenQualityId {
     if (saved) return saved.id;
   } catch {}
   return DEFAULT_SCREEN_QUALITY;
+}
+
+function readVolume(): { volume: number; muted: boolean } {
+  try {
+    const saved = JSON.parse(localStorage.getItem(VOLUME_KEY) ?? 'null');
+    if (saved && typeof saved.v === 'number' && saved.v >= 0 && saved.v <= 1) return { volume: saved.v, muted: saved.m === true };
+  } catch {}
+  return { volume: 1, muted: false };
 }
 
 /**
@@ -87,7 +118,10 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [hostStatus, setHostStatus] = useState<HostScreenStatus>('idle');
   const [hostError, setHostError] = useState<string | null>(null);
   const [hostNotice, setHostNotice] = useState<string | null>(null);
-  const [hasSubscribers, setHasSubscribers] = useState(false);
+  const [hostStats, setHostStats] = useState<HostLiveStats | null>(null);
+  const [preview, setPreview] = useState<MediaStream | null>(null);
+  const [viewers, setViewers] = useState(() => syncManager.getScreenViewers());
+  const [{ volume, muted }, setVol] = useState(readVolume);
   const [viewerStatus, setViewerStatus] = useState<ViewerScreenStatus>('idle');
   const [viewerError, setViewerError] = useState<string | null>(null);
   const [endedNotice, setEndedNotice] = useState(false);
@@ -96,7 +130,7 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const hostRef = useRef<HostScreenSession | null>(null);
   const viewerRef = useRef<ViewerScreenSession | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const volumeRef = useRef(1);
+  const volumeRef = useRef(readVolume());
   const orphanStoppedFor = useRef<string | null>(null);
 
   useEffect(
@@ -110,6 +144,8 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
       }),
     []
   );
+
+  useEffect(() => syncManager.subscribeScreenViewers(setViewers), []);
 
   const me = syncManager.getUserId();
   const isBroadcaster = Boolean(screen && screen.hostId === me);
@@ -142,13 +178,30 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     syncManager.emitScreenStop();
   }, [screen, me]);
 
-  // "Alguém assistindo" muda sem aviso: consulta de tempos em tempos enquanto transmite
+  // Números do que está saindo (fps, Mbps) e a prévia: lidos do publicador uma vez por segundo enquanto transmite
   useEffect(() => {
     if (hostStatus !== 'live') {
-      setHasSubscribers(false);
+      setHostStats(null);
+      setPreview(null);
       return;
     }
-    const id = setInterval(() => setHasSubscribers(hostRef.current?.hasSubscribers ?? false), 2000);
+    let lastBytes = hostRef.current?.stats?.bytesOut ?? 0;
+    const tick = () => {
+      const host = hostRef.current;
+      const s = host?.stats;
+      if (!host || !s) return;
+      const mbps = Math.round((Math.max(0, s.bytesOut - lastBytes) * 8) / 1e5) / 10;
+      lastBytes = s.bytesOut;
+      setHostStats((prev) =>
+        prev && prev.fps === s.fps && prev.mbps === mbps && prev.width === s.width && prev.height === s.height
+          ? prev
+          : { fps: s.fps, mbps, width: s.width, height: s.height }
+      );
+      const pv = host.previewStream;
+      setPreview((prev) => (prev === pv ? prev : pv));
+    };
+    tick();
+    const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [hostStatus]);
 
@@ -169,6 +222,8 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setHostStatus('idle');
     setHostError(null);
     setHostNotice(null);
+    setHostStats(null);
+    setPreview(null);
   }, []);
 
   const teardownViewer = useCallback(() => {
@@ -238,7 +293,7 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
           },
         }
       );
-      session.setVolume(volumeRef.current);
+      session.setVolume(volumeRef.current.muted ? 0 : volumeRef.current.volume);
       viewerRef.current = session;
     }
     return viewerRef.current;
@@ -259,9 +314,27 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setViewerStatus((s) => (s === 'error' ? 'idle' : s));
   }, []);
 
-  const setVolume = useCallback((v: number) => {
-    volumeRef.current = v;
-    viewerRef.current?.setVolume(v);
+  const applyVolume = useCallback((next: { volume: number; muted: boolean }) => {
+    volumeRef.current = next;
+    setVol(next);
+    viewerRef.current?.setVolume(next.muted ? 0 : next.volume);
+    try {
+      localStorage.setItem(VOLUME_KEY, JSON.stringify({ v: next.volume, m: next.muted }));
+    } catch {}
+  }, []);
+
+  const setVolume = useCallback((v: number) => applyVolume({ volume: Math.min(1, Math.max(0, v)), muted: v <= 0 }), [applyVolume]);
+  const toggleMuted = useCallback(() => applyVolume({ volume: volumeRef.current.volume || 1, muted: !volumeRef.current.muted }), [applyVolume]);
+
+  const switchScreen = useCallback(async () => {
+    const host = hostRef.current;
+    if (!host) return;
+    setHostError(null);
+    try {
+      await host.switchSource();
+    } catch (e) {
+      setHostError(e instanceof Error && e.message ? e.message : t('Não foi possível trocar a tela.'));
+    }
   }, []);
 
   const attachCanvas = useCallback((el: HTMLCanvasElement | null) => {
@@ -275,7 +348,10 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
       canWatch: capabilities.viewer,
       screen,
       isBroadcaster,
-      host: { status: hostStatus, error: hostError, notice: hostNotice, hasSubscribers },
+      host: { status: hostStatus, error: hostError, notice: hostNotice, stats: hostStats, preview },
+      viewers,
+      volume,
+      muted,
       viewer: { status: viewerStatus, error: viewerError },
       covering: viewerStatus === 'connecting' || viewerStatus === 'watching',
       endedNotice,
@@ -286,9 +362,11 @@ export const ScreenShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
       returnToVideo,
       dismissError,
       setVolume,
+      toggleMuted,
+      switchScreen,
       attachCanvas,
     }),
-    [canBroadcast, capabilities.viewer, screen, isBroadcaster, hostStatus, hostError, hostNotice, hasSubscribers, viewerStatus, viewerError, endedNotice, lastQuality, startBroadcast, stopBroadcast, watch, returnToVideo, dismissError, setVolume, attachCanvas]
+    [canBroadcast, capabilities.viewer, screen, isBroadcaster, hostStatus, hostError, hostNotice, hostStats, preview, viewers, volume, muted, viewerStatus, viewerError, endedNotice, lastQuality, startBroadcast, stopBroadcast, watch, returnToVideo, dismissError, setVolume, toggleMuted, switchScreen, attachCanvas]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

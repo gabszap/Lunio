@@ -22,8 +22,28 @@ function installFakeEngine() {
   (globalThis as unknown as { __LUNIO_SCREEN_ENGINE__: unknown }).__LUNIO_SCREEN_ENGINE__ = {
     async createPublisher() {
       let epoch = 1;
+      let bytes = 0;
+      // prévia falsa: um canvas animado vira um MediaStream de verdade
+      const pc = document.createElement('canvas');
+      pc.width = 160;
+      pc.height = 90;
+      const pg = pc.getContext('2d')!;
+      let n = 0;
+      setInterval(() => {
+        pg.fillStyle = `hsl(${(n += 7) % 360} 60% 40%)`;
+        pg.fillRect(0, 0, 160, 90);
+      }, 100);
+      const previewStream = pc.captureStream(10);
       return {
-        stats: { hasSubscribers: true },
+        previewStream,
+        get stats() {
+          bytes += 125_000; // ~1 Mbps por segundo de leitura
+          return { hasSubscribers: true, fps: 30, width: 1920, height: 1080, bytesOut: bytes };
+        },
+        async replaceSource() {
+          log.pub.push({ type: 'switch' });
+          return 'switched';
+        },
         async start(opts: { quality: { id: string }; initialKey: { epoch: number }; url: string }) {
           log.pub.push({ type: 'start', quality: opts.quality.id, epoch: opts.initialKey.epoch, hasUrl: Boolean(opts.url) });
           if (w.__cancelPicker) throw Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' });
@@ -163,12 +183,29 @@ test.describe('transmissão de tela (motor falso)', () => {
     await expect(guest.page.getByText('O Host está transmitindo a tela')).toBeVisible();
     await watch(guest.page);
     expect((await log(guest.page)).keys).toEqual([1]);
+
+    // o Host vê os números e quem está assistindo; quem assiste tem volume e "Voltar ao vídeo" na mesma barra
+    await expect(host.page.getByText(/Assistindo \(1\): Bia/)).toBeVisible();
+    await expect(host.page.getByText(/\d+ fps · [\d.,]+ Mbps/)).toBeVisible();
+    await expect(guest.page.getByLabel('Volume da transmissão')).toBeVisible();
+    await guest.page.getByRole('button', { name: 'Silenciar a transmissão' }).click();
+    await guest.page.getByRole('button', { name: 'Ativar o som da transmissão' }).click();
+    await expect(guest.page.getByRole('button', { name: 'Silenciar a transmissão' })).toBeVisible();
+
+    // prévia e "Trocar a tela" (sem parar a transmissão)
+    await host.page.getByRole('button', { name: 'Ver a prévia' }).click();
+    await expect(host.page.getByRole('status').locator('video')).toBeVisible();
+    await host.page.getByRole('button', { name: 'Esconder a prévia' }).click();
+    await host.page.getByRole('button', { name: 'Trocar a tela' }).click();
+    await expect.poll(async () => (await log(host.page)).pub.map((e) => e.type)).toContain('switch');
+    await expect(host.page.getByText('Transmitindo').first()).toBeVisible();
     expect(await video(guest.page).evaluate((v: HTMLVideoElement) => v.muted)).toBe(true);
     await expect(guest.page.getByText(/Vídeo pausado por/)).toHaveCount(0);
 
     // voltar ao vídeo e assistir de novo (sem novo espectador: retoma)
     await guest.page.getByRole('button', { name: 'Voltar ao vídeo' }).click();
     await expect(canvas(guest.page)).toBeHidden();
+    await expect(host.page.getByText('Ninguém assistindo ainda')).toBeVisible();
     expect(await video(guest.page).evaluate((v: HTMLVideoElement) => v.muted)).toBe(false);
     await guest.page.getByRole('button', { name: 'Assistir transmissão' }).click();
     await expect(canvas(guest.page)).toBeVisible();
@@ -243,6 +280,15 @@ test.describe('transmissão de tela (motor falso)', () => {
     // sem vídeo, o Host transmite pelo botão da própria tela de espera
     await expect(shareBtn(host.page)).toBeVisible();
     await shareBtn(host.page).click();
+    // o menu da tela de espera abre numa janela centralizada: tem de caber inteiro na tela
+    const dialog = host.page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    const box = (await dialog.boundingBox())!;
+    const viewport = host.page.viewportSize()!;
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
     await host.page.getByRole('menuitemradio', { name: /1080p 30 fps/ }).click();
     await host.page.getByRole('button', { name: 'Transmitir', exact: true }).click();
     await expect(host.page.getByText('Transmitindo').first()).toBeVisible();

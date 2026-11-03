@@ -156,9 +156,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Preferências locais, tela cheia e legendas
   const prefs = usePlayerPrefs();
   const screenShare = useScreenShare();
-  // O volume e o mudo do player valem também para a transmissão de tela
-  const { setVolume: setScreenVolume } = screenShare;
-  useEffect(() => setScreenVolume(muted ? 0 : volume), [muted, volume, setScreenVolume]);
   // Enquanto a transmissão cobre o vídeo, o vídeo da sala fica mudo MESMO que a pessoa mexa no mudo do player (o botão e a
   // tecla M gravam direto no player): sem isto ligar o som tiraria o mudo e as duas trilhas tocariam juntas
   const { covering: screenCovering } = screenShare;
