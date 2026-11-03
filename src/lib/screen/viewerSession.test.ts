@@ -304,3 +304,15 @@ describe('avisar a sala que está assistindo (o Host vê a lista)', () => {
     expect(t.sig.watching).toEqual([]);
   });
 });
+
+describe('números de quem assiste', () => {
+  it('expõe os números do espectador enquanto ele existe e null fora disso', async () => {
+    const t = setup();
+    expect(t.session.stats).toBeNull();
+    (t.fv.v as any).stats = { fps: 28, bytesIn: 1000 };
+    await t.session.watch();
+    expect(t.session.stats).toEqual({ fps: 28, bytesIn: 1000 });
+    t.session.dispose();
+    expect(t.session.stats).toBeNull();
+  });
+});

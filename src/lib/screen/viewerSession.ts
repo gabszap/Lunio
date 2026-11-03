@@ -1,7 +1,7 @@
 import type { ScreenApi } from './api';
 import { screenFailedText } from './errors';
 import type { ScreenSignals } from './signals';
-import type { ScreenViewer, ViewerEvents } from './viewer';
+import type { ScreenViewer, ViewerEvents, ViewerStats } from './viewer';
 import type { ScreenKeyMaterial } from './wire';
 
 export type ViewerScreenStatus = 'idle' | 'connecting' | 'watching' | 'paused' | 'ended' | 'error';
@@ -39,6 +39,11 @@ export class ViewerScreenSession {
     private readonly deps: { signals: ScreenSignals; api: ScreenApi; createViewer(events: ViewerEvents): Promise<ScreenViewer> },
     private readonly events: ViewerScreenEvents,
   ) {}
+
+  /** Números do que está chegando (fps desenhados, bytes recebidos). `null` sem espectador. */
+  get stats(): ViewerStats | null {
+    return this.viewer?.stats ?? null;
+  }
 
   attach(canvas: HTMLCanvasElement): void {
     this.canvas = canvas;

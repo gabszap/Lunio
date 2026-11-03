@@ -57,6 +57,8 @@ export interface ViewerStats {
   bufferMs: number;
   targetMs: number;
   underruns: number;
+  /** Bytes (já decifrados) de vídeo e áudio recebidos desde o início. */
+  bytesIn: number;
   ok: number;
   noKey: number;
   badTag: number;
@@ -105,7 +107,7 @@ export class ScreenViewer {
   private sinkId = '';
   private lastUnderruns = 0;
   private drawn = 0;
-  private counters = { fps: 0, decoded: 0, droppedVideo: 0, skippedVideo: 0, netVideoMs: 0, netAudioMs: 0 };
+  private counters = { fps: 0, decoded: 0, droppedVideo: 0, skippedVideo: 0, netVideoMs: 0, netAudioMs: 0, bytesIn: 0 };
 
   constructor(
     private readonly deps: { transport: ScreenTransport; audioContext?: AudioContext },
@@ -138,10 +140,12 @@ export class ScreenViewer {
     this.events.onStatus('connecting');
     this.abort = new AbortController();
     try {
-      // Criado aqui porque o "Assistir" do usuário é o gesto que libera o áudio
+      // Com o clique em "Assistir" o áudio já nasce liberado. Quando a imagem abre sozinha (sala só com transmissão) pode
+      // não haver gesto ainda: o `resume()` não é esperado (ficaria pendente e a imagem não abriria) e o primeiro clique
+      // ou tecla da página libera o som.
       const ac = (this.ac = this.deps.audioContext ?? new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' }));
-      await ac.resume();
-      if (this.state !== 'running') return; // stop() chegou enquanto o áudio era liberado
+      void ac.resume().catch(() => {});
+      if (ac.state !== 'running') this.unlockAudioOnGesture(ac);
       this.buildAudioGraph(ac);
       this.vdec = this.makeVideoDecoder();
       this.adec = this.makeAudioDecoder();
@@ -317,6 +321,7 @@ export class ScreenViewer {
   }
 
   private onAudio(o: OpenedFrame): void {
+    this.counters.bytesIn += o.data.length;
     this.counters.netAudioMs = ema(this.counters.netAudioMs, Date.now() - o.stamp);
     this.adec?.decode(new EncodedAudioChunk({ type: 'key', timestamp: Math.round(o.stamp * 1000), data: o.data }));
     // Só depois de aceito: um decode() que lança não pode deixar um carimbo sobrando na fila (o áudio defasaria)
@@ -324,6 +329,7 @@ export class ScreenViewer {
   }
 
   private onVideo(o: OpenedFrame): void {
+    this.counters.bytesIn += o.data.length;
     this.videoClock.note(o.stamp, performance.now());
     this.counters.netVideoMs = ema(this.counters.netVideoMs, Date.now() - o.stamp);
     this.videoPlayout.enqueue({ t: o.stamp, key: o.key, data: o.data });
@@ -398,7 +404,25 @@ export class ScreenViewer {
     ctx.drawImage(frame, 0, 0, w, h);
   }
 
+  private unlockOff: (() => void) | null = null;
+
+  private unlockAudioOnGesture(ac: AudioContext): void {
+    if (typeof window === 'undefined') return;
+    const events = ['pointerdown', 'keydown'] as const;
+    const off = () => {
+      for (const e of events) window.removeEventListener(e, unlock);
+      this.unlockOff = null;
+    };
+    const unlock = () => {
+      void ac.resume().catch(() => {});
+      if (ac.state === 'running') off();
+    };
+    for (const e of events) window.addEventListener(e, unlock);
+    this.unlockOff = off;
+  }
+
   private teardown(): void {
+    this.unlockOff?.();
     this.state = 'stopped';
     this.gen++;
     this.abort?.abort();
