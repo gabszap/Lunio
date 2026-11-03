@@ -36,6 +36,7 @@ import { syncManager } from './lib/sync';
 import { generateRoomCode, roomCodeFrom } from './lib/roomCode';
 import { RecentStream, loadRecentStreams, pushRecentStream, saveRecentStreams } from './lib/recent';
 import { t, useLang } from './lib/i18n';
+import { ScreenShareProvider } from './components/player/ScreenShareContext';
 import { streamMediaInfo } from './lib/streamMime';
 
 type HomeStep = 'menu' | 'join' | SourceStep;
@@ -60,7 +61,8 @@ function setRoomInUrl(code: string | null) {
   const url = new URL(window.location.href);
   if (code) url.searchParams.set('room', code);
   else url.searchParams.delete('room');
-  window.history.replaceState(null, '', url.pathname + url.search);
+  // A sala vive na raiz: o link não carrega a aba de onde foi criada (/home, /catalog...)
+  window.history.replaceState(null, '', (code ? '/' : url.pathname) + url.search);
 }
 
 export default function App() {
@@ -509,6 +511,23 @@ export default function App() {
     setWatchIntent(null);
   };
 
+  /** "Compartilhar sua tela": cria a sala sem vídeo e abre o player; é lá que o Host escolhe a qualidade e transmite. */
+  const startScreenRoom = () => {
+    // Já é Host de uma sala (voltou à Home sem sair): volta a ela em vez de esvaziar o vídeo só neste navegador
+    if (isHostingRoom()) {
+      setView('player');
+      return;
+    }
+    withName(() => {
+      setPendingSubtitles([]);
+      setAutoPlayNext(false);
+      setCurrentPayload(EMPTY_PAYLOAD);
+      setWatchIntent(null);
+      ensureRoom();
+      setView('player');
+    }, t('Criar sala'));
+  };
+
   const renderRoomTab = () => {
     switch (homeStep) {
       case 'join':
@@ -555,6 +574,10 @@ export default function App() {
           <RoomMenu
             onPick={(step) => {
               setWatchIntent(null);
+              if (step === 'screen') {
+                startScreenRoom();
+                return;
+              }
               setHomeStep(step);
             }}
             onJoin={() => {
@@ -569,6 +592,7 @@ export default function App() {
   };
 
   return (
+    <ScreenShareProvider>
     <React.Fragment key={lang}>
       {view === 'home' ? (
         <HomeLayout
@@ -689,5 +713,6 @@ export default function App() {
         </PrimaryButton>
       </Modal>
     </React.Fragment>
+    </ScreenShareProvider>
   );
 }

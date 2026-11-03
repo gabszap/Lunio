@@ -1,3 +1,4 @@
+import type React from 'react';
 import { TriangleAlert, RefreshCw, RotateCcw, X, FastForward, Film, Users, MessageSquare, Pause, Crown, Plus, ChevronLeft } from 'lucide-react';
 import type { SubtitleTrack } from '../../types/media';
 import { formatTime } from '../../lib/chapters';
@@ -21,8 +22,12 @@ export function StandbyScreen(props: {
   onCloseWatchParty: () => void;
   onOpenRoomLobby?: () => void;
   onLeaveRoom?: () => void;
+  /** Palco da transmissão de tela (cartão "Assistir", imagem, avisos) por cima do aviso de sala vazia. */
+  stage?: React.ReactNode;
+  /** Botão extra do Host ao lado de "Escolher um vídeo" (transmitir a tela). */
+  hostAction?: React.ReactNode;
 }) {
-  const { canChoose, isConnected, reconnecting, membersCount, isWatchPartyOpen, onChooseVideo, onToggleWatchParty, onCloseWatchParty, onOpenRoomLobby, onLeaveRoom } = props;
+  const { canChoose, isConnected, reconnecting, membersCount, isWatchPartyOpen, onChooseVideo, onToggleWatchParty, onCloseWatchParty, onOpenRoomLobby, onLeaveRoom, stage, hostAction } = props;
   return (
     <div
       id="video-player-standby"
@@ -47,6 +52,7 @@ export function StandbyScreen(props: {
               <span>{t('Escolher um vídeo')}</span>
             </PrimaryButton>
           )}
+          {hostAction}
           <GhostButton onClick={onToggleWatchParty}>
             <Users size={18} />
             <span>{t('Watch Party · {n} online', { n: Math.max(1, membersCount) })}</span>
@@ -54,6 +60,7 @@ export function StandbyScreen(props: {
         </div>
       </div>
 
+      {stage}
       {reconnecting && <ReconnectingBanner />}
       <WatchPartyPanel isOpen={isWatchPartyOpen} onClose={onCloseWatchParty} onOpenRoomLobby={onOpenRoomLobby} onLeaveRoom={onLeaveRoom} />
     </div>

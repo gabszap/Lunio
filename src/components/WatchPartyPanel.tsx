@@ -38,6 +38,9 @@ interface WatchPartyPanelProps {
   onLeaveRoom?: () => void;
 }
 
+/** O Host que está com a transmissão de tela ao vivo. */
+const memberTransmitting = (member: { id: string }, room: RoomState | null) => Boolean(room?.screen?.live && room.screen.hostId === member.id);
+
 export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClose, onOpenRoomLobby, onLeaveRoom }) => {
   const [roomState, setRoomState] = useState<RoomState | null>(() => syncManager.getRoomState());
   const [currentUser, setCurrentUser] = useState(() => syncManager.getUser());
@@ -178,7 +181,8 @@ export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClos
 
   /** Copia o link da sala; com `atSeconds`, ele abre o vídeo naquele instante (`?t=`: vale para o Host ou quem assiste sozinho). */
   const copyRoomLink = (atSeconds?: number) => {
-    const url = new URL(window.location.href);
+    // Só a raiz + ?room= (e ?t=): sem /home, /catalog ou outros parâmetros da página atual
+    const url = new URL('/', window.location.origin);
     url.searchParams.set('room', currentRoomId);
     if (atSeconds === undefined) url.searchParams.delete('t'); // o link da sala não carrega o instante de quem copiou
     else url.searchParams.set('t', String(Math.floor(atSeconds)));
@@ -486,8 +490,15 @@ export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClos
                           )}
                           <span aria-hidden="true">·</span>
                           <span className="inline-flex items-center gap-1.5">
-                            <Dot tone={member.ready ? 'success' : 'warning'} />
-                            {member.ready ? 'Sincronizado' : 'Aguardando'}
+                            {/* Com transmissão de tela: o Host "Transmitindo", quem assiste "Assistindo" (sem vídeo o status virava "Aguardando") */}
+                            <Dot tone={memberTransmitting(member, roomState) || member.watchingScreen || member.ready ? 'success' : 'warning'} />
+                            {memberTransmitting(member, roomState)
+                              ? t('Transmitindo')
+                              : member.watchingScreen
+                                ? t('Assistindo')
+                                : member.ready
+                                  ? 'Sincronizado'
+                                  : 'Aguardando'}
                           </span>
                           <span aria-hidden="true">·</span>
                           <span>{member.platform === 'discord' ? 'Discord' : 'Navegador'}</span>

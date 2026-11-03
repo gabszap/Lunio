@@ -85,4 +85,21 @@ export const config = {
   },
   /** FFmpeg/Python simultâneos no servidor inteiro. */
   maxFfmpegProcs: Math.max(1, Math.floor(num('MAX_FFMPEG_PROCS', 8))),
+  /**
+   * Transmissão de tela via relay MoQ. Só liga com a flag, um relay `https://` e os dois tokens (publicar e só assistir).
+   * Os tokens são segredos: nunca vão para log nem para quem não precisa deles.
+   */
+  screenShare: (() => {
+    const relayUrl = (process.env.MOQ_RELAY_URL || '').trim().replace(/\/+$/, '');
+    const publishToken = (process.env.MOQ_TOKEN_PUBLISH || '').trim();
+    const subscribeToken = (process.env.MOQ_TOKEN_SUBSCRIBE || '').trim();
+    return {
+      enabled: flag('SCREEN_SHARE_ENABLED') && /^https:\/\/./i.test(relayUrl) && !!publishToken && !!subscribeToken,
+      relayUrl,
+      publishToken,
+      subscribeToken,
+      /** Quantas salas podem transmitir ao mesmo tempo (a Cloudflare ainda não mede nem cobra: o limite é nosso). */
+      maxLive: num('SCREEN_SHARE_MAX_LIVE', 10),
+    };
+  })(),
 };

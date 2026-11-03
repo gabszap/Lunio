@@ -21,6 +21,8 @@ export const redisKeys = {
   roomState: (roomId: string) => `${PREFIX}roomstate:${roomId}`,
   // Respostas do catálogo; o `hash` é do endereço pedido (que tem a configuração da pessoa), nunca o endereço
   catalog: (hash: string) => `${PREFIX}catalog:${hash}`,
+  // Saída estimada da transmissão de tela no dia (`YYYY-MM-DD`, UTC), em bytes
+  screenEgress: (day: string) => `${PREFIX}screen:egress:${day}`,
 };
 
 const TTL_MS = 48 * 60 * 60 * 1000;

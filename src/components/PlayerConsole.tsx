@@ -99,7 +99,7 @@ export const PlayerConsole: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `streamplayer-log-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.txt`;
+    link.download = `lunio-log-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.txt`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

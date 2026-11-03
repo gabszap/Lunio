@@ -22,6 +22,7 @@ O Lunio é um player de vídeo web feito para assistir junto. Cole um link de st
 - **Player** — timeline dividida por capítulos, "Pular abertura/encerramento" nos capítulos detectados, velocidade, atraso do áudio, volume boost, modos de ajuste de tela, picture-in-picture, continuar de onde parou, atalhos de teclado e um link que abre num instante (`?room=CODIGO&t=90`, `t=1m30s` ou `t=1:30`; vale para o Host ou para quem assiste sozinho). O menu Compartilhar do painel da sala tem a opção "Link neste instante", que copia um para o ponto em que o vídeo está.
 - **Catálogo** *(experimental)* — navegue e busque filmes e séries (metadados de um addon do Stremio: o Cinemeta por padrão, ou o seu AIOMetadata via `CATALOG_URL`), com temporadas, episódios e uma lista pessoal. A busca tem dois modos, por grupos (uma fileira por catálogo de busca da fonte, como no Stremio) ou unificada (tudo junto, sem repetidos, com filtro), e a busca e o título aberto vão para o endereço (`/catalog?search=re%3A+zero`, `/detail/series/mal%3A31240?season=2`, como no Stremio), então dá para compartilhar e recarregar. O catálogo só fornece metadados: para assistir, você ainda escolhe uma fonte de vídeo.
 - **Addons** *(experimental)* — cada pessoa adiciona os próprios addons de vídeo do Stremio (o AIOStreams, por exemplo) pelo botão *Addons* do catálogo: cole a URL do `manifest.json` do addon. Abra um filme ou um episódio (`/detail/series/<id>/<videoId>`) e *Onde assistir* lista os streams do addon, com um selo dizendo se cada um provavelmente toca no seu navegador (HEVC, Dolby Vision ou áudio DTS podem não tocar). Clicar num stream cria a sala e abre o player. A URL do addon (ela leva a sua configuração e chaves) fica só no seu navegador: o servidor do Lunio nunca a vê. Colar um link continua disponível.
+- **Transmissão de tela** *(desligada por padrão)* — o Host transmite a tela (e o áudio do sistema) para a sala, em 720p, 1080p ou 4K a 30 ou 60 fps, escolhidos antes de começar. Os demais veem o cartão "Assistir transmissão"; assistir troca o vídeo da sala na tela (ele continua sincronizando, mudo, por baixo) e "Voltar ao vídeo" para o tráfego. Quem assiste tem volume próprio da transmissão, e numa sala em que a única imagem é a transmissão ela abre sozinha ao entrar. O Host ganha uma barra embaixo do player com o fps e os Mbps ao vivo, quem está assistindo, um seletor de qualidade que funciona com a transmissão no ar, trocar a tela compartilhada sem parar, tela cheia e a prévia do que está sendo enviado como imagem do player (dá para esconder). O Host precisa de Chromium no computador (Chrome, Edge, Brave); quem assiste pode usar Chromium ou Firefox. Veja [Transmissão de tela](#transmissão-de-tela).
 - **Página de status** — saúde do servidor (FFmpeg, Python, Redis), salas e pessoas online, ping e velocidade até o servidor, tempo no ar, versão, cache, envios e disco.
 - **Idiomas** — português e inglês; segue o idioma do navegador e dá para trocar na tela inicial.
 
@@ -75,6 +76,9 @@ Copie `.env.example` para `.env`. Localmente nada é obrigatório (só a Ativida
 | `MAX_CACHE_GB` | Limite de `.cache/` (padrão 10, inclui os segmentos HLS); apaga primeiro o menos usado |
 | `MAX_FFMPEG_PROCS` | Processos FFmpeg/Python ao mesmo tempo (padrão 8) |
 | `FFMPEG_THROUGHPUT_MBPS` | Palpite inicial (padrão 40) de quão rápido o FFmpeg lê um CDN, usado para escolher entre o extrator de legendas e ler o arquivo todo. Depois de leituras reais, o servidor usa a média medida por host do CDN |
+| `SCREEN_SHARE_ENABLED` | *(opcional)* `1` liga a transmissão de tela. Precisa também das três variáveis abaixo; sem elas continua desligada. Veja [Transmissão de tela](#transmissão-de-tela) |
+| `MOQ_RELAY_URL` / `MOQ_TOKEN_PUBLISH` / `MOQ_TOKEN_SUBSCRIBE` | O relay MoQ (`https://…`, sem o token na URL) e seus dois tokens: um que publica (só entregue ao Host que está transmitindo) e outro que só assiste. **Segredos**: deixe só no `.env` do servidor |
+| `SCREEN_SHARE_MAX_LIVE` | Quantas salas podem transmitir ao mesmo tempo (padrão 10). O relay está em beta e ainda não mede nem cobra, então o teto é nosso |
 | `ALLOW_PRIVATE_URLS` | Só para testes locais: deixa o proxy alcançar endereços de rede privada. Mantenha vazio em produção |
 | `DISABLE_HMR` | *(opcional)* `true` desliga o hot reload do Vite |
 
@@ -128,9 +132,10 @@ ou plugado no servidor de dev/preview do Vite (vite.config.ts)
 | `GET /api/uploads/<id>/<nome>` | Serve um arquivo enviado com suporte a Range |
 | `GET /api/drive?url=` | Resolve um link de compartilhamento do Google Drive para uma URL reproduzível |
 | `POST /api/session` | Token de sessão de quem assiste sozinho (quem está em sala recebe o seu pelo WebSocket). As rotas de mídia exigem o token |
-| `GET /api/status` | Se o FFmpeg e o Python foram encontrados (só versões) |
+| `POST /api/screen/token` | Endereço do relay com o token certo para quem pede: de publicar para o Host que está transmitindo, só de assistir para os demais (e só quando a transmissão está ao vivo). Só membros da sala, com limite de pedidos, nunca em cache |
+| `GET /api/status` | Se o FFmpeg e o Python foram encontrados (só versões), e os números da transmissão de tela (ligada, transmissões ao vivo, bytes enviados pelos Hosts, saída estimada do relay) |
 | `POST /api/token` | Troca do código OAuth2 do Discord |
-| `WS /api/ws` | Salas: participantes, sincronia de reprodução, chat, moderação |
+| `WS /api/ws` | Salas: participantes, sincronia de reprodução, chat, moderação e as mensagens `screen:*` da transmissão de tela (a chave de criptografia viaja por aqui, só para quem está na sala) |
 
 Salas vazias são encerradas cerca de 30 segundos depois que a última pessoa sai (`EMPTY_ROOM_TTL_MS` em `src/server/roomServer.ts`). Uma sala restaurada do Redis a que ninguém volta encerra depois dos 60 s de prioridade do Host mais esses 30 segundos.
 
@@ -221,6 +226,25 @@ Abra `https://lunio.exemplo.com` e vá em **Status**: Servidor, FFmpeg e Python 
 
 **Atualizar:** `cd /opt/lunio/app && sudo -u lunio git pull && sudo -u lunio npm ci && sudo -u lunio npm run build && sudo systemctl restart lunio`. Sem `REDIS_URL`, reiniciar encerra as salas abertas; com ele, elas voltam.
 
+### Transmissão de tela
+
+Desligada por padrão. Usa **MoQ sobre WebTransport** por um relay: o navegador do Host captura a tela (`getDisplayMedia`), codifica com WebCodecs (vídeo H.264, áudio Opus) e publica no relay; quem assiste se inscreve, decodifica e desenha, com o áudio como relógio. O servidor só coordena (quem está transmitindo, a qualidade, as chaves) e nunca toca no vídeo.
+
+Para ligar é preciso um relay. O padrão é o [relay MoQ gerenciado da Cloudflare](https://developers.cloudflare.com/) (beta): crie um relay, ponha a URL e os dois tokens padrão dele no `.env` e ligue a flag:
+
+```bash
+SCREEN_SHARE_ENABLED=1
+MOQ_RELAY_URL=https://<seu relay>
+MOQ_TOKEN_PUBLISH=…
+MOQ_TOKEN_SUBSCRIBE=…
+```
+
+- **Quem faz o quê.** Só o Host da sala inicia a transmissão (Chromium no computador; a página pede a tela e, se o navegador oferecer, o áudio do sistema). A qualidade escolhida pelo Host vale para aquela transmissão: não há troca automática. O token de publicar do relay só é entregue ao Host que está transmitindo.
+- **Privacidade.** Todo quadro é criptografado (AES-GCM) com uma chave que o navegador do Host gera, e o servidor entrega essa chave só a quem está na sala naquele momento, pelo WebSocket da sala. Um token do relay não pode ser limitado a uma transmissão e revogá-lo não derruba uma conexão já aberta, então a criptografia é o que deixa os de fora de fora. Quando alguém é expulso, banido ou sai, o Host gira a chave e quem fica recebe a nova; quem saiu continua recebendo bytes que não consegue mais decodificar. As chaves nunca são guardadas, registradas em log nem postas no estado da sala.
+- **Navegadores.** Host: Chrome, Edge ou Brave no computador (versão recente: as antigas ignoram a opção que deixa o som do próprio vídeo da sala fora do áudio do sistema compartilhado, e quem assiste pode ouvir o vídeo do Host em dobro; compartilhar uma janela em vez da tela inteira evita isso). Quem assiste: navegadores Chromium e Firefox. Safari e iOS não são suportados, e a transmissão fica desligada dentro da Activity do Discord.
+- **Custo.** O relay está em beta, sem preço nem medidor. O servidor conta o que os Hosts enviam e estima a saída (bytes × espectadores): a aba **Status** mostra, e os números do dia ficam no Redis quando ele está ligado. Para ter ideia: 1080p60 é até 10 Mbps, cerca de 4,5 GB por hora *por espectador*. `SCREEN_SHARE_MAX_LIVE` limita as transmissões simultâneas. Se o relay gerenciado virar problema, o transporte fica atrás de uma interface, então um `moq-relay` próprio (ou outro provedor) pode entrar no lugar sem mexer no resto.
+- **Limites.** A transmissão acaba com o Host (troca de Host, saída, fechar a página ou reiniciar o servidor). Ela fica só na memória e nunca vai ao Redis. O 60 fps depende da máquina do Host: alguns computadores só capturam ~30 fps mesmo pedindo 60.
+
 ### Opcional: Redis
 
 O Lunio funciona sem Redis. Com ele, **as salas sobrevivem a um restart ou deploy**: Host, bans, fila, vídeo atual e posição são salvos e restaurados antes de o servidor aceitar conexões, e o Host anterior tem 60 s para voltar (quem reconecta antes entra como espectador). Sem ele, um restart encerra todas as salas abertas. O chat e quem está conectado nunca são salvos. O Redis também guarda o índice dos envios (último uso, salas, marcas de sala fechada), reconstruído do disco a cada subida, e as respostas do catálogo (para um restart não esfriar a fonte do catálogo).
@@ -281,6 +305,7 @@ DESIGN.md                 Notas do design system
 
 - O **Catálogo** é experimental: funciona, mas é uma implementação inicial e vai mudar.
 - Os **Addons** só listam streams com `url` direta (sem magnet/infoHash, YouTube ou arquivos compactados), e não os que exigem cabeçalhos de pedido especiais. Não ficam disponíveis dentro do Discord. O servidor guarda o link do stream no estado da sala (Redis, até 24 h), mas só quem o enviou o vê inteiro: os outros recebem um id opaco (`lk_…`) nas mensagens da sala e nos pedidos `?url=`, e o servidor o troca de volta. Arquivos enviados ao próprio site e links do YouTube não são trocados.
-- Links de torrent e compartilhamento de tela aparecem no menu como "Em breve". Torrent precisa de um motor de torrent no servidor. O compartilhamento de tela está planejado sobre **MoQ/WebTransport** (não WebRTC): `getDisplayMedia()` → WebCodecs → MoQ/WebTransport → relay → espectadores, o que exige HTTP/3 e um relay no servidor.
+- Links de torrent aparecem no menu como "Em breve": precisam de um motor de torrent no servidor.
+- A **transmissão de tela** depende de um relay (veja [Transmissão de tela](#transmissão-de-tela)), o Host precisa de Chromium no computador, e quem assiste num celular fraco pode não acompanhar 1080p60 ou 4K (não há troca automática de qualidade).
 - Arquivos enviados ficam em `.uploads/` até a limpeza removê-los: `UPLOAD_TTL_HOURS` depois que a sala fecha, ou `UPLOAD_IDLE_HOURS` (24) sem leitura, e os mais antigos saem primeiro se a cota de disco for atingida.
 - O ban vale para a identidade do navegador (guardada no `localStorage`): uma aba nova mantém a identidade, mas outro navegador, janela anônima ou dados do site apagados geram uma identidade nova. Não há contas, então é até aí que vai.

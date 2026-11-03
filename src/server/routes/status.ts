@@ -6,6 +6,13 @@ import { roomManager } from '../roomServer';
 import { getTools } from '../tools';
 import { getRedisStatus } from '../media/redis';
 import { catalogStatus } from '../catalog';
+import { config } from '../config';
+import { getScreenUsage } from '../screenUsage';
+
+function pickUsage() {
+  const { hostBytes, estimatedEgressBytes } = getScreenUsage();
+  return { hostBytes, estimatedEgressBytes };
+}
 
 /** GET /api/status — FFmpeg e Python foram encontrados? Só versões: o caminho no disco não sai do servidor. Mais: salas, pessoas e tempo no ar. */
 export async function handleStatus(_req: IncomingMessage, res: ServerResponse) {
@@ -19,6 +26,7 @@ export async function handleStatus(_req: IncomingMessage, res: ServerResponse) {
     python: { found: python.found, version: python.version, tooOld: python.tooOld === true },
     redis: await getRedisStatus(),
     catalog: await catalogStatus(),
+    screen: { enabled: config.screenShare.enabled, live: roomManager.getScreenStats().live, ...pickUsage() },
   });
 }
 

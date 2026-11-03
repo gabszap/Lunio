@@ -40,6 +40,11 @@ export default defineConfig({
         SESSION_SECRET: 'segredo-e2e',
         UPLOAD_CHUNK_MB: '0.0625', // pedaços de 64 KiB: o envio de teste passa por vários pedidos
         MIN_FREE_DISK_GB: '0', // o teste não depende do espaço livre da máquina do dev (mesma regra do routes.security.test)
+        // Transmissão de tela ligada com valores de mentira: o E2E troca o motor por falsos (nunca fala com relay nenhum)
+        SCREEN_SHARE_ENABLED: '1',
+        MOQ_RELAY_URL: 'https://relay.invalid',
+        MOQ_TOKEN_PUBLISH: 'pub-e2e',
+        MOQ_TOKEN_SUBSCRIBE: 'sub-e2e',
       },
     },
   ],

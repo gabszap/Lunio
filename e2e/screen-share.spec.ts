@@ -1,0 +1,380 @@
+import { test, expect, type BrowserContext, type Page } from '@playwright/test';
+import { createRoom, joinRoom, newUser, openParticipants, submitName, video, waitReady } from './helpers';
+
+/**
+ * Transmissão de tela, de ponta a ponta com o motor FALSO: servidor, WebSocket, token, chaves, interface e ciclo de
+ * vida são os de verdade; só a captura/codec/relay são trocados (o Chromium do CI não codifica H.264 e não há relay).
+ * O motor real é coberto pelo Vitest e por roteiros manuais contra o relay da Cloudflare.
+ */
+
+interface FakeLog {
+  pub: Array<{ type: string; quality?: string; epoch?: number; hasUrl?: boolean }>;
+  view: string[];
+  keys: number[];
+}
+
+/** Roda na página antes de o app carregar. */
+function installFakeEngine() {
+  const w = window as unknown as { __screenLog: FakeLog; __cancelPicker?: boolean };
+  w.__screenLog = { pub: [], view: [], keys: [] };
+  const log = w.__screenLog;
+  const keyFor = (epoch: number) => btoa(String.fromCharCode(...new Uint8Array(32).fill(epoch)));
+  (globalThis as unknown as { __LUNIO_SCREEN_ENGINE__: unknown }).__LUNIO_SCREEN_ENGINE__ = {
+    async createPublisher() {
+      let epoch = 1;
+      let bytes = 0;
+      // prévia falsa: um canvas animado vira um MediaStream de verdade
+      const pc = document.createElement('canvas');
+      pc.width = 160;
+      pc.height = 90;
+      const pg = pc.getContext('2d')!;
+      let n = 0;
+      setInterval(() => {
+        pg.fillStyle = `hsl(${(n += 7) % 360} 60% 40%)`;
+        pg.fillRect(0, 0, 160, 90);
+      }, 100);
+      const previewStream = pc.captureStream(10);
+      return {
+        previewStream,
+        get stats() {
+          bytes += 125_000; // ~1 Mbps por segundo de leitura
+          return { hasSubscribers: true, fps: 30, width: 1920, height: 1080, bytesOut: bytes };
+        },
+        async replaceSource() {
+          log.pub.push({ type: 'switch' });
+          return 'switched';
+        },
+        async setQuality(q: { id: string }) {
+          log.pub.push({ type: 'quality', quality: q.id });
+        },
+        async start(opts: { quality: { id: string }; initialKey: { epoch: number }; url: string }) {
+          log.pub.push({ type: 'start', quality: opts.quality.id, epoch: opts.initialKey.epoch, hasUrl: Boolean(opts.url) });
+          if (w.__cancelPicker) throw Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' });
+        },
+        async rotateKey() {
+          epoch += 1;
+          log.pub.push({ type: 'rotate', epoch });
+          return { epoch, key: keyFor(epoch) };
+        },
+        async stop() {
+          log.pub.push({ type: 'stop' });
+        },
+        async flush() {},
+      };
+    },
+    async createViewer(events: { onStatus(s: string, d?: string): void }) {
+      let canvas: HTMLCanvasElement | null = null;
+      const draw = () => {
+        if (!canvas) return;
+        canvas.width = 320;
+        canvas.height = 180;
+        const g = canvas.getContext('2d')!;
+        g.fillStyle = '#2a6';
+        g.fillRect(0, 0, 320, 180);
+      };
+      return {
+        attach(c: HTMLCanvasElement) {
+          canvas = c;
+        },
+        async addKey(k: { epoch: number }) {
+          log.keys.push(k.epoch);
+        },
+        async watch() {
+          log.view.push('watch');
+          events.onStatus('waiting');
+          draw();
+          events.onStatus('watching');
+        },
+        pause() {
+          log.view.push('pause');
+          events.onStatus('paused');
+        },
+        resume() {
+          log.view.push('resume');
+          draw();
+          events.onStatus('watching');
+        },
+        setVolume() {},
+        async setSinkId() {},
+        stop() {
+          log.view.push('stop');
+        },
+        stats: {},
+      };
+    },
+  };
+}
+
+const opened: BrowserContext[] = [];
+
+async function user(browser: import('@playwright/test').Browser) {
+  const u = await newUser(browser);
+  opened.push(u.context);
+  await u.page.addInitScript(installFakeEngine);
+  return u;
+}
+
+// Teste que falha no meio não pode deixar a sala ao vivo para o teste seguinte
+test.afterEach(async () => {
+  for (const c of opened.splice(0)) await c.close().catch(() => {});
+});
+
+const shareBtn = (p: Page) => p.locator('#btn-screen-share');
+const stopBtn = (p: Page) => p.getByRole('button', { name: 'Parar de compartilhar' });
+const backdrop = (p: Page) => p.locator('video.pointer-events-none');
+const canvas = (p: Page) => p.locator('canvas[aria-hidden="true"]');
+const log = (p: Page) => p.evaluate(() => (window as unknown as { __screenLog: FakeLog }).__screenLog);
+// /api/status tem limite de pedidos por minuto (por IP): uma resposta recusada vale -1 (nunca é o valor esperado) e o poll espera
+const live = async (p: Page) => {
+  const res = await p.request.get('/api/status');
+  if (!res.ok()) return -1;
+  return ((await res.json()).screen?.live ?? -1) as number;
+};
+
+/**
+ * `screen.live` é o contador do servidor inteiro: a sala do teste anterior ainda pode estar encerrando (o servidor dá 4 s de
+ * graça a quem cai). Espera ficar em 0 antes de medir, para a linha de base ser a deste teste.
+ */
+async function idle(p: Page): Promise<number> {
+  await expect.poll(() => live(p), { timeout: 25_000, intervals: [1500] }).toBe(0);
+  return 0;
+}
+
+async function reveal(p: Page) {
+  await p.mouse.move(640, 500);
+  await p.mouse.move(660, 520);
+}
+
+async function startSharing(host: Page, quality = /720p 60 fps/) {
+  await reveal(host);
+  await shareBtn(host).click();
+  await host.getByRole('menuitemradio', { name: quality }).click();
+  await host.getByRole('button', { name: 'Transmitir', exact: true }).click();
+  await expect(stopBtn(host)).toBeVisible();
+}
+
+async function watch(p: Page) {
+  await p.getByRole('button', { name: 'Assistir transmissão' }).click();
+  await expect(canvas(p)).toBeVisible();
+  // o palco aparece ao conectar; o espectador (falso) só conclui depois do token
+  await expect.poll(async () => (await log(p)).view).toContain('watch');
+}
+
+const closeAll = async (...ctxs: BrowserContext[]) => {
+  for (const c of ctxs) await c.close().catch(() => {});
+};
+
+test.describe('transmissão de tela (motor falso)', () => {
+  test('roteiro: só o Host vê o botão, transmitir, assistir, voltar ao vídeo e parar', async ({ browser }) => {
+    const host = await user(browser);
+    const guest = await user(browser);
+    const code = await createRoom(host.page, 'Ana');
+    await joinRoom(guest.page, code, 'Bia');
+    await waitReady(host.page);
+    await waitReady(guest.page);
+
+    await reveal(host.page);
+    await expect(shareBtn(host.page)).toBeVisible();
+    await reveal(guest.page);
+    await expect(shareBtn(guest.page)).toHaveCount(0);
+
+    const base = await idle(host.page);
+    await startSharing(host.page, /720p 60 fps/);
+    const pubLog = await log(host.page);
+    expect(pubLog.pub[0]).toEqual({ type: 'start', quality: '720p60', epoch: 1, hasUrl: true });
+    await expect.poll(() => live(host.page), { intervals: [1500] }).toBe(base + 1);
+
+    // o espectador vê o cartão, assiste e recebe a chave
+    await expect(guest.page.getByText('O Host está transmitindo a tela')).toBeVisible();
+    await watch(guest.page);
+    expect((await log(guest.page)).keys).toEqual([1]);
+
+    // o Host vê os números e quem está assistindo; quem assiste tem volume e "Voltar ao vídeo" na mesma barra
+    await expect(host.page.getByLabel(/Assistindo \(1\): Bia/)).toBeVisible();
+    await expect(host.page.getByText(/\d+ fps · [\d.,]+ Mbps/)).toBeVisible();
+    // o volume é vertical e abre ao passar o mouse no botão de som, com a porcentagem
+    await guest.page.getByRole('button', { name: 'Silenciar a transmissão' }).hover();
+    await expect(guest.page.getByLabel('Volume da transmissão')).toBeVisible();
+    await expect(guest.page.getByText('100%')).toBeVisible();
+    await guest.page.getByRole('button', { name: 'Silenciar a transmissão' }).click();
+    await guest.page.getByRole('button', { name: 'Ativar o som da transmissão' }).click();
+    await expect(guest.page.getByRole('button', { name: 'Silenciar a transmissão' })).toBeVisible();
+
+    // prévia e "Trocar a tela" (sem parar a transmissão)
+    // a prévia é a imagem do player por trás (e dá para esconder)
+    await expect(backdrop(host.page)).toBeVisible();
+    await host.page.getByRole('button', { name: 'Esconder a prévia' }).click();
+    await expect(backdrop(host.page)).toHaveCount(0);
+    await host.page.getByRole('button', { name: 'Ver a prévia' }).click();
+    await expect(backdrop(host.page)).toBeVisible();
+
+    // qualidade ao vivo: o Host escolhe 720p30 na barra e a sala inteira passa a ver a qualidade nova
+    await host.page.getByRole('button', { name: 'Qualidade da transmissão' }).click();
+    await host.page.getByRole('menuitemradio', { name: /720p 30 fps/ }).click();
+    await expect.poll(async () => (await log(host.page)).pub.filter((e) => e.type === 'quality').map((e) => e.quality)).toEqual(['720p30']);
+    await expect(guest.page.getByText('720p30', { exact: true })).toBeVisible();
+    await host.page.getByRole('button', { name: 'Trocar a tela' }).click();
+    await expect.poll(async () => (await log(host.page)).pub.map((e) => e.type)).toContain('switch');
+    await expect(stopBtn(host.page)).toBeVisible();
+    expect(await video(guest.page).evaluate((v: HTMLVideoElement) => v.muted)).toBe(true);
+    await expect(guest.page.getByText(/Vídeo pausado por/)).toHaveCount(0);
+
+    // voltar ao vídeo e assistir de novo (sem novo espectador: retoma)
+    await guest.page.getByRole('button', { name: 'Voltar ao vídeo' }).click();
+    await expect(canvas(guest.page)).toBeHidden();
+    await expect(host.page.getByLabel('Ninguém assistindo ainda')).toBeVisible();
+    expect(await video(guest.page).evaluate((v: HTMLVideoElement) => v.muted)).toBe(false);
+    await guest.page.getByRole('button', { name: 'Assistir transmissão' }).click();
+    await expect(canvas(guest.page)).toBeVisible();
+    await expect.poll(async () => (await log(guest.page)).view).toContain('resume');
+    const viewLog = (await log(guest.page)).view;
+    expect(viewLog.filter((e) => e === 'watch')).toHaveLength(1);
+    expect(viewLog).toContain('pause');
+
+    // parar: o servidor zera e o espectador é avisado
+    const notice = expect(guest.page.getByText('A transmissão acabou')).toBeVisible();
+    await stopBtn(host.page).click();
+    await expect.poll(() => live(host.page), { intervals: [1500] }).toBe(base);
+    await notice;
+    expect((await log(host.page)).pub.at(-1)!.type).toBe('stop');
+
+    await closeAll(host.context, guest.context);
+  });
+
+  test('a chave gira quando alguém é expulso, banido ou sai, e quem fica recebe a nova', async ({ browser }) => {
+    const host = await user(browser);
+    const stays = await user(browser);
+    const code = await createRoom(host.page, 'Ana');
+    await joinRoom(stays.page, code, 'Bia');
+    await waitReady(host.page);
+    await startSharing(host.page);
+    await watch(stays.page);
+    expect((await log(stays.page)).keys).toEqual([1]);
+
+    // expulsar
+    const kicked = await user(browser);
+    await joinRoom(kicked.page, code, 'Cris');
+    await watch(kicked.page);
+    await openParticipants(host.page);
+    await host.page.getByRole('button', { name: 'Expulsar da sala' }).last().click();
+    await expect(kicked.page).not.toHaveURL(/room=/, { timeout: 15_000 });
+    await expect.poll(async () => (await log(host.page)).pub.filter((e) => e.type === 'rotate').length, { timeout: 15_000 }).toBe(1);
+    await expect.poll(async () => (await log(stays.page)).keys, { timeout: 15_000 }).toEqual([1, 2]);
+
+    // banir
+    const banned = await user(browser);
+    await joinRoom(banned.page, code, 'Duda');
+    await watch(banned.page);
+    await openParticipants(host.page);
+    await host.page.getByRole('button', { name: 'Banir da sala' }).last().click();
+    await expect(banned.page).not.toHaveURL(/room=/, { timeout: 15_000 });
+    await expect.poll(async () => (await log(stays.page)).keys, { timeout: 15_000 }).toEqual([1, 2, 3]);
+
+    // sair (fecha a aba: o servidor espera a graça de 4 s antes de contar a saída)
+    const leaves = await user(browser);
+    await joinRoom(leaves.page, code, 'Edu');
+    await watch(leaves.page);
+    await leaves.context.close();
+    await expect.poll(async () => (await log(stays.page)).keys, { timeout: 20_000 }).toEqual([1, 2, 3, 4]);
+
+    expect((await log(host.page)).pub.filter((e) => e.type === 'rotate').map((e) => e.epoch)).toEqual([2, 3, 4]);
+    await closeAll(host.context, stays.context, kicked.context, banned.context);
+  });
+
+  test('"Compartilhar sua tela" na Home cria a sala sem vídeo e o Host transmite dali', async ({ browser }) => {
+    const host = await user(browser);
+    const guest = await user(browser);
+    await host.page.goto('/');
+    const option = host.page.getByRole('button', { name: /Compartilhar sua tela/ });
+    await expect(option).toBeEnabled();
+    await expect(option).not.toContainText('Em breve');
+    await expect(option).toContainText('Beta');
+    await option.click();
+    await submitName(host.page, 'Ana');
+    await expect(host.page).toHaveURL(/\?room=[A-Z0-9]+/);
+    const code = new URL(host.page.url()).searchParams.get('room')!;
+    await expect(host.page.getByText('Nenhum vídeo na sala')).toBeVisible();
+
+    // sem vídeo, o Host transmite pelo botão da própria tela de espera
+    await expect(shareBtn(host.page)).toBeVisible();
+    await shareBtn(host.page).click();
+    // o menu da tela de espera abre numa janela centralizada: tem de caber inteiro na tela
+    const dialog = host.page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    const box = (await dialog.boundingBox())!;
+    const viewport = host.page.viewportSize()!;
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+    await host.page.getByRole('menuitemradio', { name: /1080p 30 fps/ }).click();
+    await host.page.getByRole('button', { name: 'Transmitir', exact: true }).click();
+    await expect(stopBtn(host.page)).toBeVisible();
+    expect((await log(host.page)).pub[0]).toMatchObject({ type: 'start', quality: '1080p30' });
+
+    // sala só com a transmissão: quem entra já abre a transmissão, sem clicar em nada (a transmissão É o vídeo)
+    await guest.page.goto(`/?room=${code}`);
+    await submitName(guest.page, 'Bia');
+    await expect(canvas(guest.page)).toBeVisible();
+    await expect.poll(async () => (await log(guest.page)).view).toContain('watch');
+    await expect(guest.page.getByRole('button', { name: 'Assistir transmissão' })).toHaveCount(0);
+    // sem vídeo na sala não há "Voltar ao vídeo"
+    await expect(guest.page.getByRole('button', { name: 'Voltar ao vídeo' })).toHaveCount(0);
+    await closeAll(host.context, guest.context);
+  });
+
+  test('cancelar o seletor de tela não deixa transmissão no servidor nem alerta', async ({ browser }) => {
+    const host = await user(browser);
+    await host.page.addInitScript(() => {
+      (window as unknown as { __cancelPicker: boolean }).__cancelPicker = true;
+    });
+    await createRoom(host.page, 'Ana');
+    await waitReady(host.page);
+    const base = await idle(host.page);
+    await reveal(host.page);
+    await shareBtn(host.page).click();
+    await host.page.getByRole('button', { name: 'Transmitir', exact: true }).click();
+    await expect.poll(async () => (await log(host.page)).pub.map((e) => e.type)).toContain('start');
+    await expect.poll(async () => (await log(host.page)).pub.map((e) => e.type)).toContain('stop');
+    expect(await live(host.page)).toBe(base);
+    await expect(stopBtn(host.page)).toHaveCount(0);
+    await expect(host.page.getByRole('alert')).toHaveCount(0);
+    await reveal(host.page);
+    await shareBtn(host.page).click();
+    await expect(host.page.getByText('Você cancelou a seleção da tela.')).toBeVisible();
+    await host.context.close();
+  });
+
+  test('o Host recarrega a página: a transmissão órfã é encerrada para todos', async ({ browser }) => {
+    const host = await user(browser);
+    const guest = await user(browser);
+    const code = await createRoom(host.page, 'Ana');
+    await joinRoom(guest.page, code, 'Bia');
+    await waitReady(host.page);
+    const base = await idle(host.page);
+    await startSharing(host.page);
+    await watch(guest.page);
+    const notice = expect(guest.page.getByText('A transmissão acabou')).toBeVisible({ timeout: 25_000 });
+    await host.page.reload();
+    await expect.poll(() => live(host.page), { timeout: 25_000, intervals: [1500] }).toBe(base);
+    await notice;
+    await closeAll(host.context, guest.context);
+  });
+
+  test('trocar o Host encerra a transmissão para todos', async ({ browser }) => {
+    const host = await user(browser);
+    const guest = await user(browser);
+    const code = await createRoom(host.page, 'Ana');
+    await joinRoom(guest.page, code, 'Bia');
+    await waitReady(host.page);
+    const base = await idle(host.page);
+    await startSharing(host.page);
+    await watch(guest.page);
+    const notice = expect(guest.page.getByText('A transmissão acabou')).toBeVisible({ timeout: 25_000 });
+    await openParticipants(host.page);
+    await host.page.getByRole('button', { name: 'Passar Host' }).first().click();
+    await expect.poll(() => live(host.page), { timeout: 25_000, intervals: [1500] }).toBe(base);
+    await notice;
+    await closeAll(host.context, guest.context);
+  });
+});
