@@ -72,9 +72,23 @@ export interface SearchGroup {
   metas: CatalogItem[];
 }
 
+/** Um catálogo da tela Explorar (o Descobrir do Stremio). */
+export interface DiscoverEntry {
+  type: CatalogType;
+  id: string;
+  name: string;
+  genres: string[];
+  /** Só responde com um gênero escolhido (sem "nenhum"). */
+  genreRequired: boolean;
+  /** Aceita `skip`: dá para carregar mais ao rolar. */
+  paged: boolean;
+}
+
 export interface CatalogManifest {
   name: string;
   rows: CatalogRow[];
+  /** Catálogos navegáveis no Explorar (falta em respostas de servidor antigo). */
+  discover?: DiscoverEntry[];
   isDefault: boolean;
   /** A fonte está fora do ar e o servidor devolveu a última resposta guardada. */
   stale: boolean;
@@ -100,10 +114,11 @@ export function fetchManifest(): Promise<CatalogManifest> {
   return getJson<CatalogManifest>('manifest');
 }
 
-export async function fetchRow(row: Pick<CatalogRow, 'type' | 'id'> & { fixedGenre?: string }, genre?: string): Promise<CatalogItem[]> {
+export async function fetchRow(row: Pick<CatalogRow, 'type' | 'id'> & { fixedGenre?: string }, genre?: string, skip = 0): Promise<CatalogItem[]> {
   const q = new URLSearchParams({ type: row.type, id: row.id });
   const g = genre ?? (row as CatalogRow).fixedGenre;
   if (g) q.set('genre', g);
+  if (skip > 0) q.set('skip', String(skip));
   const data = await getJson<{ metas: CatalogItem[] }>(`row?${q}`);
   return data.metas || [];
 }

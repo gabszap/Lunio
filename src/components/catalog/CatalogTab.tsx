@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { CalendarDays, Puzzle, Search, SearchX, Users, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { CalendarDays, Compass, Puzzle, Search, SearchX, Users, X } from 'lucide-react';
 import {
   CatalogItem,
   CatalogManifest,
@@ -13,9 +13,10 @@ import {
 } from '../../lib/catalog';
 import { GhostButton, IconButton, PillTabs, PrimaryButton, Spinner } from '../ui';
 import { t } from '../../lib/i18n';
-import { DetailRef, writeDetailToUrl, writeSearchToUrl } from '../../lib/searchUrl';
+import { DetailRef, DiscoverRef, discoverFromUrl, writeDetailToUrl, writeDiscoverToUrl, writeSearchToUrl } from '../../lib/searchUrl';
 import { AddonsPanel } from './AddonsPanel';
 import { Detail } from './Detail';
+import { Discover } from './Discover';
 import { HomeRows } from './HomeRows';
 import { PosterCard } from './Poster';
 import { Row } from './Row';
@@ -71,7 +72,14 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   const [addons, setAddons] = useState<VideoAddon[]>(() => loadAddons());
   /** Episódio aberto (`/detail/<tipo>/<id>/<videoId>`); trocar de título o zera. */
   const [episodeId, setEpisodeId] = useState<string | null>(initialDetail?.videoId ?? null);
+  // Explorar (o Descobrir do Stremio): aberto pelo botão ou por um link `/discover/<tipo>/<catálogo>`; continua montado por baixo do detalhe
+  // para voltar à mesma grade e à mesma posição
+  const initialDiscover = useMemo(() => discoverFromUrl(), []);
+  const [discoverOpen, setDiscoverOpen] = useState(initialDiscover !== null);
+  const [discoverSel, setDiscoverSel] = useState<DiscoverRef | null>(initialDiscover);
+  const discoverScroll = useRef(0);
   const openItem = (item: CatalogItem) => {
+    if (discoverOpen) discoverScroll.current = window.scrollY;
     setEpisodeId(null);
     setSelected(item);
   };
@@ -103,6 +111,14 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
     writeDetailToUrl(selected ? { type: selected.type, id: selected.id, videoId: episodeId ?? undefined } : null);
   }, [selected, episodeId]);
   useEffect(() => () => writeDetailToUrl(null), []);
+  // O Explorar também (depois do título: ao fechar o título, o endereço volta para o Explorar). Sem escolha ainda (a fonte está carregando),
+  // o endereço do link fica como veio
+  useEffect(() => {
+    if (selected) return;
+    if (!discoverOpen) writeDiscoverToUrl(null);
+    else if (discoverSel) writeDiscoverToUrl(discoverSel);
+  }, [selected, discoverOpen, discoverSel]);
+  useEffect(() => () => writeDiscoverToUrl(null), []);
 
   useEffect(() => {
     if (!debounced) {
@@ -123,29 +139,47 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
 
   useEffect(() => {
     if (!selected) setMyList(getMyList());
-    window.scrollTo({ top: 0 });
+    window.scrollTo({ top: !selected && discoverOpen ? discoverScroll.current : 0 });
+    // só ao abrir ou fechar um título
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
-  if (selected) {
-    const fromUrl = initialDetail && initialDetail.id === selected.id && initialDetail.type === selected.type;
+  if (selected || discoverOpen) {
+    const fromUrl = selected && initialDetail && initialDetail.id === selected.id && initialDetail.type === selected.type;
+    // O Explorar fica no mesmo lugar da árvore com ou sem título aberto (escondido por baixo dele), então não perde a grade nem a posição
     return (
       <>
-        <Detail
-          key={`${selected.type}/${selected.id}`}
-          item={selected}
-          initialSeason={fromUrl ? initialSeason : null}
-          episodeId={episodeId}
-          onEpisodeChange={setEpisodeId}
-          addons={addons}
-          onOpenAddons={() => setAddonsOpen(true)}
-          onBack={() => {
-            setEpisodeId(null);
-            setSelected(null);
-          }}
-          onWatch={onWatch}
-          onPlayStream={onPlayStream}
-        />
-        <AddonsPanel open={addonsOpen} onClose={() => setAddonsOpen(false)} onChange={setAddons} />
+        {selected && (
+          <Detail
+            key={`${selected.type}/${selected.id}`}
+            item={selected}
+            initialSeason={fromUrl ? initialSeason : null}
+            episodeId={episodeId}
+            onEpisodeChange={setEpisodeId}
+            addons={addons}
+            onOpenAddons={() => setAddonsOpen(true)}
+            onBack={() => {
+              setEpisodeId(null);
+              setSelected(null);
+            }}
+            onWatch={onWatch}
+            onPlayStream={onPlayStream}
+          />
+        )}
+        {selected && <AddonsPanel open={addonsOpen} onClose={() => setAddonsOpen(false)} onChange={setAddons} />}
+        {discoverOpen && (
+          <div hidden={Boolean(selected)}>
+            <Discover
+              manifest={manifest}
+              initial={initialDiscover}
+              onChange={setDiscoverSel}
+              onOpen={openItem}
+              onBack={() => setDiscoverOpen(false)}
+              onRetry={() => setManifestTry((n) => n + 1)}
+              onCreateRoom={onCreateRoom}
+            />
+          </div>
+        )}
       </>
     );
   }
@@ -187,6 +221,15 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
             </IconButton>
           )}
         </div>
+        <GhostButton
+          onClick={() => {
+            setDiscoverSel(null);
+            setDiscoverOpen(true);
+          }}
+        >
+          <Compass size={16} />
+          <span>{t('Explorar')}</span>
+        </GhostButton>
         <GhostButton onClick={() => setAddonsOpen(true)}>
           <Puzzle size={16} />
           <span>{t('Addons')}</span>

@@ -92,6 +92,57 @@ export function writeDetailToUrl(ref: DetailRef | null) {
   if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.replaceState(null, '', next);
 }
 
+// ───────────── Explorar (Descobrir) ─────────────
+
+export interface DiscoverRef {
+  type: string;
+  id: string;
+  genre?: string;
+}
+
+/** `/discover/series/streaming.cru_series?genre=A%C3%A7%C3%A3o`, como o Descobrir do Stremio. */
+export function discoverPath(ref: DiscoverRef): string {
+  return `/discover/${encodeURIComponent(ref.type)}/${encodeURIComponent(ref.id)}`;
+}
+
+/** Tipo, catálogo e gênero do endereço `/discover/<tipo>/<catálogo>[?genre=]`; qualquer outra coisa é null. */
+export function discoverFromUrl(
+  pathname = typeof window === 'undefined' ? '' : window.location.pathname,
+  search = typeof window === 'undefined' ? '' : window.location.search
+): DiscoverRef | null {
+  const m = /^\/discover\/([^/]+)\/([^/]+)\/?$/.exec(pathname);
+  if (!m) return null;
+  try {
+    const type = decodeURIComponent(m[1]);
+    const id = decodeURIComponent(m[2]);
+    if (!DETAIL_TYPE.test(type) || !DETAIL_ID.test(id)) return null;
+    const genre = (new URLSearchParams(search).get(GENRE) ?? '').trim().slice(0, 60);
+    return genre ? { type, id, genre } : { type, id };
+  } catch {
+    return null;
+  }
+}
+
+const GENRE = 'genre';
+
+/** Grava o Explorar no endereço (ou, nulo, volta a `/catalog`) sem criar entrada no histórico. */
+export function writeDiscoverToUrl(ref: DiscoverRef | null) {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  if (ref) {
+    url.pathname = discoverPath(ref);
+    url.searchParams.delete(PARAM);
+    url.searchParams.delete(DETAIL);
+    if (ref.genre) url.searchParams.set(GENRE, ref.genre.slice(0, 60));
+    else url.searchParams.delete(GENRE);
+  } else if (/^\/discover\//.test(url.pathname)) {
+    url.pathname = '/catalog';
+    url.searchParams.delete(GENRE);
+  }
+  const next = url.pathname + url.search + url.hash;
+  if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.replaceState(null, '', next);
+}
+
 // ───────────── temporada aberta ─────────────
 
 const SEASON = 'season';

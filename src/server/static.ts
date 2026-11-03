@@ -65,8 +65,8 @@ export function mountStatic(app: express.Express, dist: string) {
 
   // SPA: rota sem extensão abre o app; pedido de arquivo que o static não achou é 404
   app.get('*', (req, res) => {
-    // `/detail/<tipo>/<id>` é uma rota do app mesmo que o id tenha ponto (nunca é arquivo)
-    if (!req.path.startsWith('/detail/') && looksLikeFileRequest(req.path)) return notFound(res);
+    // `/detail/<tipo>/<id>` e `/discover/<tipo>/<catálogo>` são rotas do app mesmo que o id tenha ponto (nunca é arquivo)
+    if (!req.path.startsWith('/detail/') && !req.path.startsWith('/discover/') && looksLikeFileRequest(req.path)) return notFound(res);
     res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(indexHtml);
   });
