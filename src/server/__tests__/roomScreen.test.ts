@@ -463,3 +463,43 @@ describe('transmissão de tela: quem está assistindo', () => {
     expect(none.host.of('screen:viewers')).toHaveLength(0);
   });
 });
+
+describe('transmissão de tela: mudar a qualidade com a transmissão no ar', () => {
+  function live() {
+    const r = room(2);
+    send(r.host, { type: 'screen:start', quality: '1080p60' });
+    send(r.host, { type: 'screen:live' });
+    for (const s of r.all) s.clear();
+    return r;
+  }
+
+  it('o Host muda a qualidade e todos recebem o estado novo, sem perder o resto da transmissão', () => {
+    const { host, all } = live();
+    const before = rm.getScreen('TELA')!;
+    send(host, { type: 'screen:quality', quality: '720p30' });
+    const now = rm.getScreen('TELA')!;
+    expect(now.quality).toBe('720p30');
+    expect(now).toMatchObject({ sessionId: before.sessionId, path: before.path, live: true });
+    for (const s of all) expect(s.last('screen:state').screen).toMatchObject({ quality: '720p30', live: true });
+  });
+
+  it('qualidade fora da tabela, ausente ou igual à atual não muda nem avisa ninguém', () => {
+    const { host, all } = live();
+    send(host, { type: 'screen:quality', quality: '1440p60' });
+    send(host, { type: 'screen:quality' });
+    send(host, { type: 'screen:quality', quality: '1080p60' });
+    expect(rm.getScreen('TELA')!.quality).toBe('1080p60');
+    for (const s of all) expect(s.of('screen:state')).toHaveLength(0);
+  });
+
+  it('quem não é o Host da transmissão não muda a qualidade, e sem transmissão nada acontece', () => {
+    const { viewers: [a], all } = live();
+    send(a, { type: 'screen:quality', quality: '720p30' });
+    expect(rm.getScreen('TELA')!.quality).toBe('1080p60');
+    for (const s of all) expect(s.of('screen:state')).toHaveLength(0);
+
+    const none = room(1, 'SEMTELA');
+    send(none.host, { type: 'screen:quality', quality: '720p30' });
+    expect(none.host.of('screen:state')).toHaveLength(0);
+  });
+});

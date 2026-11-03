@@ -245,6 +245,11 @@ export type ClientMessage =
       bytes: number;
     }
   | {
+      /** O Host muda a qualidade da transmissão que já está no ar. */
+      type: 'screen:quality';
+      quality: ScreenQualityId;
+    }
+  | {
       /** Quem não é o Host avisa que começou ou parou de assistir à transmissão (o servidor repassa a lista só ao Host). */
       type: 'screen:watching';
       watching: boolean;

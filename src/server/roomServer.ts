@@ -1110,6 +1110,16 @@ export class RoomManager {
         break;
       }
 
+      case 'screen:quality': {
+        const screen = currentRoom.screen;
+        if (!isHost || !screen || screen.info.hostId !== clientSession.userId) return;
+        const quality = screenQuality(msg.quality);
+        if (!quality || quality.id === screen.info.quality) return;
+        screen.info = { ...screen.info, quality: quality.id };
+        this.broadcast(currentRoom, { type: 'screen:state', screen: screen.info });
+        break;
+      }
+
       case 'screen:watching': {
         const screen = currentRoom.screen;
         if (!screen || !screen.info.live || typeof msg.watching !== 'boolean') return;
