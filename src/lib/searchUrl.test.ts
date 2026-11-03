@@ -58,9 +58,27 @@ describe('título aberto (/detail/<tipo>/<id>)', () => {
   });
 
   it('caminho inválido não vira título', () => {
-    for (const bad of ['/detail', '/detail/series', '/detail/series/', '/detail/Series/tt1', '/detail/series/a%20b', '/detail/series/a/b', '/detail/../x/tt1', '/detail/series/%E0%A4%A', '/catalog', '/']) {
+    for (const bad of ['/detail', '/detail/series', '/detail/series/', '/detail/Series/tt1', '/detail/series/a%20b', '/detail/series/a/b/c', '/detail/series/a/a%20b', '/detail/../x/tt1', '/detail/series/%E0%A4%A', '/detail/series/a/%E0%A4%A', '/catalog', '/']) {
       expect(detailFromPath(bad), bad).toBeNull();
     }
+  });
+
+  it('o episódio é o terceiro segmento (/detail/<tipo>/<id>/<videoId>), com ida e volta', () => {
+    expect(detailFromPath('/detail/series/a/b')).toEqual({ type: 'series', id: 'a', videoId: 'b' });
+    const ref = { type: 'series', id: 'mal:61469', videoId: 'tt2359704:6:1' };
+    expect(detailPath(ref)).toBe('/detail/series/mal%3A61469/tt2359704%3A6%3A1');
+    expect(detailFromPath(detailPath(ref))).toEqual(ref);
+    expect(detailFromPath('/detail/series/mal%3A61469/tt2359704%3A6%3A1/')).toEqual(ref);
+    expect(readDetailFromUrl('?season=6', '/detail/series/mal%3A61469/tt2359704%3A6%3A1')).toEqual(ref);
+  });
+
+  it('o id do episódio aceita mais que o do título (+, ids compostos), mas não espaço nem /', () => {
+    for (const videoId of ['kitsu:123:1:2', 'ep+1', 'a@b~c']) {
+      const ref = { type: 'series', id: 'tt1', videoId };
+      expect(detailFromPath(detailPath(ref)), videoId).toEqual(ref);
+    }
+    expect(detailFromPath('/detail/series/tt1/a%20b')).toBeNull();
+    expect(detailFromPath('/detail/series/tt1/a%2Fb')).toBeNull();
   });
 
   it('o link antigo (?detail=) continua sendo lido, inclusive id composto e codificado', () => {
@@ -97,6 +115,16 @@ describe('título aberto (/detail/<tipo>/<id>)', () => {
       expect(current).toBe('/detail/series/tt5607616');
       writeDetailToUrl(null);
       expect(current).toBe('/catalog');
+    });
+
+    it('grava o episódio no caminho, mantém ?season= e volta ao título (sem o episódio) ou ao catálogo', () => {
+      current = '/detail/series/mal%3A61469?season=6';
+      writeDetailToUrl({ type: 'series', id: 'mal:61469', videoId: 'tt2359704:6:1' });
+      expect(current).toBe('/detail/series/mal%3A61469/tt2359704%3A6%3A1?season=6');
+      writeDetailToUrl({ type: 'series', id: 'mal:61469' });
+      expect(current).toBe('/detail/series/mal%3A61469?season=6');
+      writeDetailToUrl(null);
+      expect(current).toBe('/catalog?season=6');
     });
 
     it('troca o link antigo (?detail=) pelo caminho e não mexe numa rota que não é de título', () => {

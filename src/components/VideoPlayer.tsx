@@ -11,7 +11,9 @@ import {
 import '@vidstack/react/player/styles/base.css';
 
 import { getVideoElement } from './player/dom';
-import { MediaSource, Chapter, SubtitleTrack, AudioTrackOption, VideoInfo } from '../types/media';
+import { MediaSource, Chapter, SubtitleTrack, AudioTrackOption, VideoInfo, CatalogSeriesContext } from '../types/media';
+import type { CatalogEpisode } from '../lib/catalog';
+import type { StreamOption } from '../lib/streams';
 import { PlayerControls } from './PlayerControls';
 import { WatchPartyPanel } from './WatchPartyPanel';
 import type { PlaylistItem } from '../types/sync';
@@ -75,6 +77,8 @@ interface VideoPlayerProps {
   onLeaveRoom?: () => void;
   /** Host: toca um item da fila (tira da fila e carrega o vídeo). Também é chamado sozinho quando o vídeo acaba. */
   onPlayPlaylistItem?: (item: PlaylistItem) => void;
+  seriesContext?: CatalogSeriesContext | null;
+  onSelectEpisodeStream?: (episode: CatalogEpisode, stream: StreamOption) => void;
 }
 
 /**
@@ -101,6 +105,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onChooseVideo,
   onLeaveRoom,
   onPlayPlaylistItem,
+  seriesContext,
+  onSelectEpisodeStream,
 }) => {
   const playerRef = useRef<MediaPlayerInstance>(null);
   const mediaProviderRef = useRef<MediaProviderInstance>(null);
@@ -646,6 +652,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           unreadChatCount={room.unreadChatCount}
           onBack={isFullscreen ? undefined : onBack}
           onAddSubtitle={onAddSubtitle}
+          seriesContext={seriesContext}
+          onSelectEpisodeStream={onSelectEpisodeStream}
           onNext={syncStatus.isConnected && syncStatus.isHost ? playNextInQueue : undefined}
           hasNext={queueSize > 0}
           onMenuOpenChange={handleMenuOpenChange}

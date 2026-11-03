@@ -179,3 +179,22 @@ export type PlayerPreset = {
   badge: string;
   payload: MediaPayload;
 };
+
+/** Contexto da série quando a sala ou player inicia a partir de um episódio do catálogo. */
+export interface CatalogSeriesContext {
+  seriesId: string;
+  seriesTitle: string;
+  seriesType: string;
+  currentEpisodeId: string;
+  season: number;
+  episode: number;
+  episodes: Array<{
+    id: string;
+    season: number;
+    episode: number;
+    title: string;
+    overview?: string;
+    thumbnail?: string;
+    released?: string;
+  }>;
+}

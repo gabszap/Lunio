@@ -20,16 +20,20 @@ import { DriveStep, YouTubeStep } from './components/home/LinkSourceSteps';
 import { JoinError, JoinStep, checkRoom } from './components/home/RoomSteps';
 import { StatusTab } from './components/home/StatusTab';
 import type { WatchIntent } from './components/catalog/CatalogTab';
+import type { StreamOption } from './lib/streams';
 import type { CommitMode, CommitOptions } from './components/home/types';
-import { MediaPayload, SubtitleTrack } from './types/media';
+import { MediaPayload, SubtitleTrack, CatalogSeriesContext } from './types/media';
+import { CatalogEpisode, episodeTag, loadActiveSeriesContext, saveActiveSeriesContext } from './lib/catalog';
 import type { PlaylistItem } from './types/sync';
 import { PlaylistPanel } from './components/PlaylistPanel';
 import { logger } from './lib/logger';
+import { describeSourceForLog } from './lib/mediaLog';
 import { discordManager, DiscordContextState } from './lib/discord';
 import { syncManager } from './lib/sync';
 import { generateRoomCode, roomCodeFrom } from './lib/roomCode';
 import { RecentStream, loadRecentStreams, pushRecentStream, saveRecentStreams } from './lib/recent';
 import { t, useLang } from './lib/i18n';
+import { streamMediaInfo } from './lib/streamMime';
 
 type HomeStep = 'menu' | 'join' | SourceStep;
 
@@ -92,6 +96,7 @@ export default function App() {
   const [isWatchPartyOpen, setIsWatchPartyOpen] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [kickBanAlert, setKickBanAlert] = useState<{ title: string; message: string; type: 'kicked' | 'banned' } | null>(null);
+  const [seriesContext, setSeriesContext] = useState<CatalogSeriesContext | null>(() => loadActiveSeriesContext());
 
   // Com a Home aberta e a rede livre, já baixa o player: entrar numa sala fica instantâneo
   useEffect(() => {
@@ -168,15 +173,22 @@ export default function App() {
     }
   }, []);
 
+  /** Série do vídeo em reprodução (menu de episódios): o estado e o `sessionStorage` andam juntos. */
+  const updateSeriesContext = useCallback((ctx: CatalogSeriesContext | null) => {
+    setSeriesContext(ctx);
+    saveActiveSeriesContext(ctx);
+  }, []);
+
   /** Sai da sala de verdade: desconecta, limpa ?room=, descarrega o vídeo e volta para a tela inicial. */
   const leaveToHome = useCallback(() => {
     if (!discordManager.isDiscordActivity()) syncManager.leaveRoom();
     setRoomInUrl(null);
     setCurrentPayload(EMPTY_PAYLOAD);
+    updateSeriesContext(null);
     setPendingSubtitles([]);
     setUnreadChatCount(0);
     goHome('room');
-  }, [goHome]);
+  }, [goHome, updateSeriesContext]);
 
   /** Entra numa sala, pedindo o apelido antes se for preciso. */
   const requestJoin = useCallback(
@@ -360,8 +372,10 @@ export default function App() {
     setAutoPlayNext(false);
     setCurrentPayload(merged);
     setWatchIntent(null);
+    // O menu de episódios só vale para o vídeo que veio de um episódio do catálogo; qualquer outro (link colado, filme, envio) o zera
+    updateSeriesContext(options.seriesContext ?? null);
     if (options.recent) setRecentStreams((prev) => pushRecentStream(prev, merged.url, merged.title || ''));
-    logger.info(`[Mídia] Abrindo "${merged.title}"`, { url: merged.url });
+    logger.info(`[Mídia] Abrindo "${merged.title}" (${describeSourceForLog(merged.url)})`);
 
     if (mode === 'room') {
       // Cria a sala e já abre o player; o código fica no cabeçalho do player para compartilhar
@@ -375,6 +389,40 @@ export default function App() {
         setRoomInUrl(null);
       }
       setView('player');
+    }
+  };
+
+  /** Um stream escolhido no detalhe do catálogo ("Onde assistir"): cria a sala e abre o player. */
+  const playStream = (stream: StreamOption, title: string, context?: CatalogSeriesContext) => {
+    const { mimeType, isMkv } = streamMediaInfo(stream.url, stream.filename);
+    commitMedia(
+      {
+        url: stream.url,
+        title,
+        mimeType,
+        chapters: [],
+        subtitles: [],
+        audioTracks: [],
+        isMkv,
+      },
+      'room',
+      { seriesContext: context }
+    );
+  };
+
+  /** Seleciona outro episódio a partir do menu de episódios no player. */
+  const playEpisodeStream = (episode: CatalogEpisode, stream: StreamOption) => {
+    if (seriesContext) {
+      const updated: CatalogSeriesContext = {
+        ...seriesContext,
+        currentEpisodeId: episode.id,
+        season: episode.season,
+        episode: episode.episode,
+      };
+      const title = `${updated.seriesTitle} · ${episodeTag(episode.season, episode.episode)}`;
+      playStream(stream, title, updated);
+    } else {
+      playStream(stream, stream.title || '');
     }
   };
 
@@ -394,6 +442,7 @@ export default function App() {
     logger.info(`[Fila] Tocando "${item.title}"`);
     setPendingSubtitles([]);
     setAutoPlayNext(true);
+    updateSeriesContext(null); // item da fila não vem do catálogo: sem menu de episódios
     setCurrentPayload(payload);
     emitCurrentMedia(payload);
   };
@@ -522,6 +571,7 @@ export default function App() {
                   setHomeTab('room');
                   setHomeStep('stream');
                 }}
+                onPlayStream={playStream}
                 onCreateRoom={() => goHome('room')}
               />
             </Suspense>
@@ -557,6 +607,8 @@ export default function App() {
               onBack={leaveToHome}
               onLeaveRoom={leaveToHome}
               autoPlay={autoPlayNext}
+              seriesContext={seriesContext}
+              onSelectEpisodeStream={playEpisodeStream}
               onPlayPlaylistItem={playPlaylistItem}
               onAddSubtitle={() => setSubtitleModal('current')}
               onChooseVideo={() => goHome('room')}
