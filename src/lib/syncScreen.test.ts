@@ -195,3 +195,47 @@ describe('screen emitters', () => {
     expect(errors).toEqual([['cheio', 'screen_busy']]);
   });
 });
+
+describe('quem está assistindo (só o Host recebe)', () => {
+  const viewers = [{ id: 'usr_a', username: 'Bia' }, { id: 'usr_b', username: 'Cris' }];
+
+  it('guarda a lista, avisa os assinantes e a entrega a quem se inscreve depois', async () => {
+    const { syncManager, ws } = await connected(SCREEN);
+    const seen: unknown[] = [];
+    syncManager.subscribeScreenViewers((v) => seen.push(v));
+    ws.deliver({ type: 'screen:viewers', viewers });
+    expect(syncManager.getScreenViewers()).toEqual(viewers);
+    expect(seen).toEqual([viewers]);
+    const late: unknown[] = [];
+    syncManager.subscribeScreenViewers((v) => late.push(v));
+    expect(late).toEqual([viewers]);
+  });
+
+  it('ignora lista mal formada', async () => {
+    const { syncManager, ws } = await connected(SCREEN);
+    ws.deliver({ type: 'screen:viewers', viewers: 'x' });
+    ws.deliver({ type: 'screen:viewers', viewers: [{ id: 1 }, null, { id: 'ok', username: 'Ok' }] });
+    expect(syncManager.getScreenViewers()).toEqual([{ id: 'ok', username: 'Ok' }]);
+  });
+
+  it('some quando a transmissão acaba e ao sair da sala', async () => {
+    const { syncManager, ws } = await connected(SCREEN);
+    ws.deliver({ type: 'screen:viewers', viewers });
+    ws.deliver({ type: 'screen:state', screen: null });
+    expect(syncManager.getScreenViewers()).toEqual([]);
+    ws.deliver({ type: 'screen:state', screen: SCREEN });
+    ws.deliver({ type: 'screen:viewers', viewers });
+    syncManager.leaveRoom();
+    expect(syncManager.getScreenViewers()).toEqual([]);
+  });
+
+  it('emitScreenWatching manda screen:watching', async () => {
+    const { syncManager, ws } = await connected(SCREEN);
+    syncManager.emitScreenWatching(true);
+    syncManager.emitScreenWatching(false);
+    expect(ws.sentTypes().filter((m) => m.type === 'screen:watching')).toEqual([
+      { type: 'screen:watching', watching: true },
+      { type: 'screen:watching', watching: false },
+    ]);
+  });
+});

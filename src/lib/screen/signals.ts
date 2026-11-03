@@ -19,4 +19,6 @@ export interface ScreenSignals {
   emitScreenStop(): void;
   emitScreenKey(key: ScreenKeyMaterial): void;
   emitScreenUsage(bytes: number): void;
+  /** Quem assiste avisa a sala que começou/parou (o Host vê a lista de quem está assistindo). */
+  emitScreenWatching(watching: boolean): void;
 }

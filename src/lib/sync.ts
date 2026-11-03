@@ -52,6 +52,9 @@ class SyncManager implements ScreenSignals {
   private screenListeners = new Set<(screen: RoomScreen | null) => void>();
   private screenKeyListeners = new Set<(key: ScreenKeyMaterial) => void>();
   private screenRotateListeners = new Set<() => void>();
+  /** Quem está assistindo à transmissão (só o Host da transmissão recebe do servidor). */
+  private screenViewers: Array<{ id: string; username: string }> = [];
+  private screenViewersListeners = new Set<(viewers: Array<{ id: string; username: string }>) => void>();
   private currentRoomId: string = '';
   private roomState: RoomState | null = null;
   /** Votação para pular o capítulo atual (null = nenhuma). Vem do servidor. */
@@ -435,6 +438,7 @@ class SyncManager implements ScreenSignals {
     const hadScreen = Boolean(this.roomState?.screen);
     this.roomState = null;
     this.screenKeys = [];
+    this.screenViewers = [];
     if (hadScreen) this.notifyScreen(null);
     this.setSkipVote(null);
     this.chatHistory = [];
@@ -597,6 +601,14 @@ class SyncManager implements ScreenSignals {
 
       case 'screen:rotate_key': {
         for (const listener of [...this.screenRotateListeners]) listener();
+        break;
+      }
+
+      case 'screen:viewers': {
+        if (!Array.isArray(msg.viewers)) return;
+        this.setScreenViewers(
+          msg.viewers.filter((v): v is { id: string; username: string } => Boolean(v) && typeof v.id === 'string' && typeof v.username === 'string'),
+        );
         break;
       }
 
@@ -1026,9 +1038,33 @@ class SyncManager implements ScreenSignals {
     this.send({ type: 'screen:usage', bytes });
   }
 
+  public emitScreenWatching(watching: boolean) {
+    this.send({ type: 'screen:watching', watching });
+  }
+
+  public getScreenViewers(): Array<{ id: string; username: string }> {
+    return this.screenViewers;
+  }
+
+  public subscribeScreenViewers(listener: (viewers: Array<{ id: string; username: string }>) => void): () => void {
+    if (this.screenViewers.length) listener(this.screenViewers);
+    this.screenViewersListeners.add(listener);
+    return () => {
+      this.screenViewersListeners.delete(listener);
+    };
+  }
+
+  private setScreenViewers(viewers: Array<{ id: string; username: string }>) {
+    this.screenViewers = viewers;
+    for (const listener of [...this.screenViewersListeners]) listener(viewers);
+  }
+
   /** A transmissão mudou (ou acabou): chaves de uma transmissão que não existe mais não servem para nada. */
   private afterScreenChange(prev: RoomScreen | null, next: RoomScreen | null) {
-    if (!next || (prev && prev.sessionId !== next.sessionId)) this.screenKeys = [];
+    if (!next || (prev && prev.sessionId !== next.sessionId)) {
+      this.screenKeys = [];
+      if (this.screenViewers.length) this.setScreenViewers([]);
+    }
     if (prev?.sessionId === next?.sessionId && prev?.live === next?.live) return;
     this.notifyScreen(next);
   }

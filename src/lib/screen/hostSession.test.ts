@@ -30,6 +30,7 @@ function fakeSignals() {
     emitScreenStop: () => (calls.push('stop'), emitted.push({ type: 'stop' })),
     emitScreenKey: (k) => (calls.push('key'), emitted.push({ type: 'key', ...k })),
     emitScreenUsage: (b) => (calls.push('usage'), emitted.push({ type: 'usage', b })),
+    emitScreenWatching: () => {},
   };
   return {
     signals,

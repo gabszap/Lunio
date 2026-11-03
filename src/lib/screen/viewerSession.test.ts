@@ -10,6 +10,7 @@ const LIVE: RoomScreen = { sessionId: 's1', hostId: 'host', path: 'lunio/R/abc',
 const key = (n: number): ScreenKeyMaterial => ({ epoch: n, key: 'k' + n });
 
 function fakeSignals(stored: ScreenKeyMaterial[] = []) {
+  const watching: boolean[] = [];
   const keyL = new Set<(k: ScreenKeyMaterial) => void>();
   const screenL = new Set<(s: RoomScreen | null) => void>();
   const signals = {
@@ -23,9 +24,11 @@ function fakeSignals(stored: ScreenKeyMaterial[] = []) {
     },
     subscribeScreenRotate: () => () => {},
     subscribeError: () => () => {},
+    emitScreenWatching: (w: boolean) => void watching.push(w),
   } as unknown as ScreenSignals;
   return {
     signals,
+    watching,
     pushKey: (k: ScreenKeyMaterial) => [...keyL].forEach((l) => l(k)),
     serverSets: (s: RoomScreen | null) => [...screenL].forEach((l) => l(s)),
     listeners: () => keyL.size + screenL.size,
@@ -256,5 +259,48 @@ describe('errors', () => {
     t.fv.events().onStatus('error', 'A conexão com a transmissão caiu.');
     expect(t.statuses.at(-1)).toEqual(['error', 'A conexão com a transmissão caiu.']);
     expect(t.fv.v.stop).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('avisar a sala que está assistindo (o Host vê a lista)', () => {
+  it('manda true ao começar a assistir e false ao voltar ao vídeo, ao retomar de novo true', async () => {
+    const t = setup();
+    await t.session.watch();
+    t.fv.events().onStatus('watching');
+    expect(t.sig.watching).toEqual([true]);
+    t.session.returnToVideo();
+    t.fv.events().onStatus('paused');
+    expect(t.sig.watching).toEqual([true, false]);
+    await t.session.watch();
+    t.fv.events().onStatus('watching');
+    expect(t.sig.watching).toEqual([true, false, true]);
+  });
+
+  it('manda false quando a transmissão acaba, quando a conexão cai e ao descartar a sessão, sem repetir', async () => {
+    const a = setup();
+    await a.session.watch();
+    a.fv.events().onStatus('watching');
+    a.sig.serverSets(null);
+    expect(a.sig.watching).toEqual([true, false]);
+
+    const b = setup();
+    await b.session.watch();
+    b.fv.events().onStatus('watching');
+    b.fv.events().onStatus('error', 'caiu');
+    expect(b.sig.watching).toEqual([true, false]);
+
+    const c = setup();
+    await c.session.watch();
+    c.fv.events().onStatus('watching');
+    c.session.dispose();
+    c.session.dispose();
+    expect(c.sig.watching).toEqual([true, false]);
+  });
+
+  it('quem nunca chegou a assistir não manda nada', async () => {
+    const t = setup([], new Error('A transmissão ainda não começou.'));
+    await t.session.watch();
+    t.session.dispose();
+    expect(t.sig.watching).toEqual([]);
   });
 });

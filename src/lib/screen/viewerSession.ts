@@ -27,6 +27,8 @@ export class ViewerScreenSession {
   private lastStatus: ViewerScreenStatus = 'idle';
   /** Inscrições do espectador atual (chaves). */
   private offs: Array<() => void> = [];
+  /** O que a sala sabe: estou assistindo? (o Host vê a lista). Só manda quando muda. */
+  private announced = false;
   /**
    * Vigia do fim da transmissão. Vive mais que o espectador: quando o Host fecha a página o relay cai (erro de
    * transporte) antes do aviso do servidor chegar, e o que a pessoa precisa ler é "acabou", não um erro solto.
@@ -169,6 +171,11 @@ export class ViewerScreenSession {
 
   private emit(status: ViewerScreenStatus, detail?: string): void {
     this.lastStatus = status;
+    const watching = status === 'watching';
+    if (watching !== this.announced) {
+      this.announced = watching;
+      this.deps.signals.emitScreenWatching(watching);
+    }
     this.events.onStatus(status, detail);
   }
 }
