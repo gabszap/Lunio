@@ -6,283 +6,62 @@
 
 [English](README.md) · **Português**
 
-O Lunio é um player de vídeo web feito para assistir junto. Cole um link de stream, envie um arquivo ou abra um vídeo do YouTube/Google Drive, crie uma sala e todo mundo nela assiste sincronizado — com chat, legendas ASS renderizadas como num player de desktop, faixas de áudio alternativas e capítulos. Também roda como Atividade do Discord (em desenvolvimento).
+O Lunio é um player de vídeo web feito para assistir junto. Crie uma sala, escolha um vídeo, compartilhe o link e todo mundo assiste sincronizado — com chat, legendas com qualidade de player de desktop e a faixa de áudio que você quiser. Também roda como Discord Activity (em desenvolvimento).
 
 ## Recursos
 
-- **Salas (Watch Party)** — crie uma sala a partir de qualquer fonte e compartilhe um código de 8 caracteres ou o link. O Host controla play, pause, seek e velocidade; os demais acompanham com correção contínua de atraso. Chat, lista de participantes, passar o Host, expulsar e banir. Pular abertura/encerramento: o Host pula direto e os demais votam (a sala pula quando mais da metade vota); uma opção pula abertura e encerramento sozinha depois de 5 s (qualquer tecla cancela; vale para o Host ou quem assiste sozinho, espectador sempre vota na hora).
-- **Fila (playlist)** — dentro da sala, qualquer pessoa adiciona links à fila; o Host reordena, toca um item na hora, e o próximo começa sozinho quando o vídeo acaba.
-- **Fontes de vídeo**
-  - Links diretos de stream: Stremio, TorBox, e outros debrids, `.mkv`/`.mp4`/`.webm`/HLS, passando pelo proxy do servidor local (HTTP Range, contorna CORS).
-  - Envio de arquivo (até 50 GB) — a sala já existe enquanto o arquivo sobe. Assistindo sozinho, o arquivo toca direto do computador, sem enviar.
-  - Vídeos e lives do YouTube.
-  - Arquivos do Google Drive compartilhados como "Qualquer pessoa com o link".
-- **Suporte a MKV** — as faixas de áudio e legenda são detectadas com o FFmpeg. Trocar de faixa de áudio toca por um **HLS compartilhado**: o vídeo é copiado (sem recodificar) e o áudio escolhido vira AAC em segmentos de ~6 s guardados no servidor. Quem está na sala e escolhe o mesmo áudio divide um único FFmpeg, e o seek leva uma fração de segundo. Arquivos sem índice Matroska ou sem vídeo H.264 caem no remux fMP4 na hora.
-- **Legendas** — ASS/SSA embutidas renderizadas com libass (JASSUB, WebAssembly), incluindo fontes embutidas; `.ass`, `.srt` (convertida para WebVTT) e `.vtt` externas por arquivo ou URL; ajuste de sincronia e tamanho da fonte.
-- **Player** — timeline dividida por capítulos, "Pular abertura/encerramento" nos capítulos detectados, velocidade, atraso do áudio, volume boost, modos de ajuste de tela, picture-in-picture, continuar de onde parou, atalhos de teclado e um link que abre num instante (`?room=CODIGO&t=90`, `t=1m30s` ou `t=1:30`; vale para o Host ou para quem assiste sozinho). O menu Compartilhar do painel da sala tem a opção "Link neste instante", que copia um para o ponto em que o vídeo está.
-- **Catálogo** *(experimental)* — navegue e busque filmes e séries (metadados de um addon do Stremio: o Cinemeta por padrão, ou o seu AIOMetadata via `CATALOG_URL`), com temporadas, episódios e uma lista pessoal. A busca tem dois modos, por grupos (uma fileira por catálogo de busca da fonte, como no Stremio) ou unificada (tudo junto, sem repetidos, com filtro), e a busca e o título aberto vão para o endereço (`/catalog?search=re%3A+zero`, `/detail/series/mal%3A31240?season=2`, como no Stremio), então dá para compartilhar e recarregar. O catálogo só fornece metadados: para assistir, você ainda escolhe uma fonte de vídeo.
-- **Addons** *(experimental)* — cada pessoa adiciona os próprios addons de vídeo do Stremio (o AIOStreams, por exemplo) pelo botão *Addons* do catálogo: cole a URL do `manifest.json` do addon. Abra um filme ou um episódio (`/detail/series/<id>/<videoId>`) e *Onde assistir* lista os streams do addon, com um selo dizendo se cada um provavelmente toca no seu navegador (HEVC, Dolby Vision ou áudio DTS podem não tocar). Clicar num stream cria a sala e abre o player. A URL do addon (ela leva a sua configuração e chaves) fica só no seu navegador: o servidor do Lunio nunca a vê. Colar um link continua disponível.
-- **Transmissão de tela** *(desligada por padrão)* — o Host transmite a tela (e o áudio do sistema) para a sala, em 720p, 1080p ou 4K a 30 ou 60 fps, escolhidos antes de começar. Os demais veem o cartão "Assistir transmissão"; assistir troca o vídeo da sala na tela (ele continua sincronizando, mudo, por baixo) e "Voltar ao vídeo" para o tráfego. Quem assiste tem volume próprio da transmissão, e numa sala em que a única imagem é a transmissão ela abre sozinha ao entrar. O Host ganha uma barra embaixo do player com o fps e os Mbps ao vivo, quem está assistindo, um seletor de qualidade que funciona com a transmissão no ar, trocar a tela compartilhada sem parar, tela cheia e a prévia do que está sendo enviado como imagem do player (dá para esconder). O Host precisa de Chromium no computador (Chrome, Edge, Brave); quem assiste pode usar Chromium ou Firefox. Veja [Transmissão de tela](#transmissão-de-tela).
-- **Página de status** — saúde do servidor (FFmpeg, Python, Redis), salas e pessoas online, ping e velocidade até o servidor, tempo no ar, versão, cache, envios e disco.
-- **Idiomas** — português e inglês; segue o idioma do navegador e dá para trocar na tela inicial.
+- **Assistir junto** — crie uma sala a partir de qualquer fonte e compartilhe o código ou o link. O Host controla play, pause e seek; os outros acompanham sozinhos, em sincronia. Chat, lista de pessoas, troca de Host, expulsar e banir.
+- **Fila** — qualquer pessoa da sala adiciona vídeos; o Host reordena, e o próximo começa sozinho.
+- **Traga seu vídeo** — cole um link de stream (Stremio, serviços debrid, `.mkv`, `.mp4`, HLS), envie um arquivo (até 50 GB) ou abra um vídeo do YouTube ou do Google Drive.
+- **Catálogo** *(beta)* — navegue e busque filmes e séries, explore por gênero, abra temporadas e episódios, tenha uma lista pessoal e continue de onde parou. Os metadados vêm de um addon do Stremio.
+- **Addons** — adicione seus próprios addons de vídeo do Stremio e veja *Onde assistir* em cada título, com um aviso de quais streams devem tocar no seu navegador. O link dos seus addons nunca sai do seu navegador.
+- **Transmissão de tela** *(beta experimental)* — o Host transmite a tela e o áudio do sistema para a sala, em até 4K a 60 fps. Quem assiste tem volume próprio, e o Host troca a qualidade com a transmissão no ar.
+- **Legendas e áudio** — legendas ASS com as fontes e o estilo originais, além de `.srt` e `.vtt`; troque entre as faixas de áudio de um MKV sem esperar.
+- **Um player de verdade** — timeline com capítulos, pular abertura e encerramento (a sala vota), velocidade, continuar de onde parou, picture-in-picture, atalhos de teclado e links que abrem num instante do vídeo.
+- **Idiomas** — português e inglês.
+
+Como cada um funciona por dentro está em [docs/features.pt-BR.md](docs/features.pt-BR.md).
 
 ## Capturas de tela
 
-| Home | Player |
+| Home | Catálogo |
 |---|---|
-| ![Home: crie uma sala a partir de um arquivo, YouTube, Google Drive ou link de stream](assets/readme/home.webp) | ![Player com timeline de capítulos e controles](assets/readme/player.webp) |
+| ![Home: crie uma sala a partir de um arquivo, YouTube, Google Drive ou link de stream](assets/readme/home-pt.webp) | ![Catálogo com fileiras de filmes e séries, busca e Explorar](assets/readme/catalog-pt.webp) |
 
-<sub>Vídeo nas capturas: *Sintel* © Blender Foundation, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).</sub>
+| Página do título | Sala com chat |
+|---|---|
+| ![Página do título com sinopse, nota e o botão Assistir com amigos](assets/readme/title-pt.webp) | ![Uma sala tocando um vídeo, com o chat aberto](assets/readme/room-pt.webp) |
 
-## Requisitos
+| Transmissão de tela: quem assiste | Transmissão de tela: Host |
+|---|---|
+| ![Uma pessoa assistindo à tela compartilhada, com volume e qualidade](assets/readme/screen-share-pt.webp) | ![Barra do Host: parar, trocar a tela, qualidade, números ao vivo e quem assiste](assets/readme/screen-share-host-pt.webp) |
 
-| Ferramenta | Usada para | Observações |
-|---|---|---|
-| Node.js 20+ | Tudo | |
-| FFmpeg | Detecção de faixas, troca de faixa de áudio, extração de legendas (fallback) | `FFMPEG_PATH`, depois `ffmpeg` no `PATH`, depois caminhos conhecidos do Windows (mpv, `C:\ffmpeg`) |
-| Python 3.10+ | Extração rápida de legendas embutidas (`mkv_extractor`) | Só biblioteca padrão. Procurado como `PYTHON_PATH`, `python3`, `python` ou `py -3`. Sem ele, as legendas usam o FFmpeg (mais lento) |
+<sub>Vídeo das capturas: *Sintel* © Blender Foundation, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).</sub>
 
 ## Como rodar
 
+Você precisa do [Node.js](https://nodejs.org) 20+, do [FFmpeg](https://ffmpeg.org) e do Python 3.10+ (FFmpeg e Python servem para ler faixas de áudio e legendas; os dois são encontrados sozinhos).
+
 ```bash
 npm install
-npm run dev      # desenvolvimento (hot reload)
-npm start        # produção: gera o build e roda o servidor de produção (sem Vite)
+npm run dev      # desenvolvimento, com hot reload
+npm start        # produção: faz o build e roda o servidor de produção
 ```
 
-Abra <http://localhost:3000>. As abas da Home têm rota própria: `/catalog` (Catálogo), `/home` (Sala, também `/`) e `/status` (Status); o botão Voltar do navegador anda entre elas. O servidor de desenvolvimento também escuta na rede local, então amigos na mesma rede podem entrar usando o IP da sua máquina.
+Abra <http://localhost:3000>. Amigos na mesma rede entram pelo IP da sua máquina.
 
-### Variáveis de ambiente
+Para testar localmente não precisa configurar nada. Para pôr num servidor, veja [Deploy](docs/deployment.pt-BR.md) e [Configuração](docs/configuration.pt-BR.md).
 
-Copie `.env.example` para `.env`. Localmente nada é obrigatório (só a Atividade do Discord usa as duas primeiras); em servidor, defina pelo menos `SESSION_SECRET` e `TRUST_PROXY`. Variáveis já definidas no ambiente (systemd, Docker) têm prioridade sobre o arquivo.
+## Documentação
 
-| Variável | Descrição |
+| | |
 |---|---|
-| `VITE_DISCORD_CLIENT_ID` | ID da aplicação do Discord usada pela Atividade |
-| `DISCORD_CLIENT_SECRET` | Segredo da aplicação do Discord, usado pelo `/api/token` na troca OAuth2 |
-| `SESSION_SECRET` | Assina os tokens de sessão. Sem ele, um novo é gerado a cada início |
-| `ALLOWED_ORIGINS` | Origens extras (separadas por vírgula) autorizadas a chamar a API e abrir o WebSocket. Padrão: a própria origem + a Atividade do Discord |
-| `TRUST_PROXY` | `1` atrás de Caddy/nginx: o IP do cliente (usado nos limites) vem do `X-Forwarded-For` |
-| `FFMPEG_PATH` | *(opcional)* Executável do FFmpeg. Senão, `ffmpeg` no `PATH` e depois caminhos conhecidos do Windows |
-| `PYTHON_PATH` | *(opcional)* Python 3.10+ do extrator de legendas. Senão, `python3`, `python`, `py -3` |
-| `MAX_UPLOAD_DISK_GB` / `MAX_UPLOAD_FILE_GB` | Cota de disco dos envios (padrão 20) e tamanho máximo de um envio (padrão 50) |
-| `UPLOAD_TTL_HOURS` | Horas que um envio fica depois que a sala fecha (padrão 24) |
-| `UPLOAD_IDLE_HOURS` | Horas que um envio de sala aberta pode ficar sem ser lido antes de ser removido (padrão 24) |
-| `MIN_FREE_DISK_GB` | Espaço livre a manter no disco da máquina; abaixo disso os envios são recusados (padrão 5) |
-| `REDIS_URL` | *(opcional)* Um Redis local, ex.: `redis://127.0.0.1:6379`. Com ele as salas sobrevivem a um restart e o índice dos envios fica nele. Veja [Redis](#opcional-redis) |
-| `ROOM_STATE_TTL_HOURS` / `ROOM_HOST_GRACE_SECONDS` | Com Redis: por quanto tempo o estado salvo de uma sala vale (padrão 24) e quanto tempo o Host anterior tem para voltar depois de um restart antes de outra pessoa assumir (padrão 60) |
-| `CATALOG_URL` | *(opcional)* Addon do Stremio que alimenta o catálogo: a URL de instalação ou a base de um [AIOMetadata](https://github.com/cedya77/aiometadata) (`https://…/stremio/<uuid>/<config>/manifest.json`, `stremio://…` também vale), ou qualquer addon com catálogos. Vazio = Cinemeta. Deixe só no `.env` do servidor: ela leva a sua configuração e chaves |
-| `JIKAN_URL` | *(opcional)* API da nota do MyAnimeList mostrada na página dos animes: uma instância compatível com o Jikan (`GET <base>/anime/<id>` com `data.score`), base com o prefixo de versão. A API oficial do Jikan foi desligada, então use uma instância pública de terceiros ou a sua. Vazia = a instância pública padrão (jikan-edge). A nota é pedida à parte da página (3 tentativas no servidor e depois o navegador tenta de novo), fica em cache por 24 h; sem resposta, a página só omite a nota. Animes que chegam pelo id do IMDb são ligados ao id do MyAnimeList pela busca de anime da fonte |
-| `MAX_CACHE_GB` | Limite de `.cache/` (padrão 10, inclui os segmentos HLS); apaga primeiro o menos usado |
-| `MAX_FFMPEG_PROCS` | Processos FFmpeg/Python ao mesmo tempo (padrão 8) |
-| `FFMPEG_THROUGHPUT_MBPS` | Palpite inicial (padrão 40) de quão rápido o FFmpeg lê um CDN, usado para escolher entre o extrator de legendas e ler o arquivo todo. Depois de leituras reais, o servidor usa a média medida por host do CDN |
-| `SCREEN_SHARE_ENABLED` | *(opcional)* `1` liga a transmissão de tela. Precisa também das três variáveis abaixo; sem elas continua desligada. Veja [Transmissão de tela](#transmissão-de-tela) |
-| `MOQ_RELAY_URL` / `MOQ_TOKEN_PUBLISH` / `MOQ_TOKEN_SUBSCRIBE` | O relay MoQ (`https://…`, sem o token na URL) e seus dois tokens: um que publica (só entregue ao Host que está transmitindo) e outro que só assiste. **Segredos**: deixe só no `.env` do servidor |
-| `SCREEN_SHARE_MAX_LIVE` | Quantas salas podem transmitir ao mesmo tempo (padrão 10). O relay está em beta e ainda não mede nem cobra, então o teto é nosso |
-| `ALLOW_PRIVATE_URLS` | Só para testes locais: deixa o proxy alcançar endereços de rede privada. Mantenha vazio em produção |
-| `DISABLE_HMR` | *(opcional)* `true` desliga o hot reload do Vite |
-
-## Scripts
-
-| Comando | O que faz |
-|---|---|
-| `npm run dev` | Desenvolvimento: app + API + WebSocket na porta 3000, com hot reload |
-| `npm start` | Produção: `npm run build` e depois `npm run serve` |
-| `npm run serve` | Servidor de produção (`src/server/main.ts`): Express servindo `dist/` + API + WebSocket em `PORT` (padrão 3000), sem Vite. Precisa de um `npm run build` antes |
-| `npm run build` | Gera o frontend em `dist/` |
-| `npm run preview` | Preview do Vite sobre um `dist/` já gerado, com a API plugada (útil para checagens rápidas; produção usa `serve`) |
-| `npm run lint` | Checagem de tipos (`tsc --noEmit`) |
-| `npm test` | Vitest: servidor de salas (entrar/sair, autoridade do Host, kick/ban, sala vazia) e rotas da API (SSRF, envios/cota, Range, erros de legenda). As rotas de mídia precisam do FFmpeg. Os testes com um Redis de verdade só rodam com `REDIS_TEST_URL` definida |
-| `npm run test:e2e` | Faz o build e roda o E2E (Playwright) contra o servidor de produção, com um MKV gerado pelo FFmpeg (dois usuários na sala, sincronia, kick/ban, áudio alternativo, reload do Host). Na primeira vez: `npx playwright install chromium` |
-| `python -m pytest tests` | Roda os testes do `mkv_extractor` |
-
-> O backend mora em `src/server/` e não depende do Vite: `npm run serve` roda como um app Express comum, e `npm run dev` / `npm run preview` só plugam o mesmo router no Vite. Em desenvolvimento, editar um arquivo do servidor reinicia o servidor de dev (e derruba as salas abertas); em produção nada observa o código. Com `REDIS_URL`, as salas sobrevivem a um restart ou deploy (Host, bans, fila, vídeo e posição são restaurados; o Host anterior tem 60 s para voltar antes de outra pessoa assumir); sem ele, as salas caem num restart.
-
-## Como funciona
-
-```
-Navegador (React + Vidstack)
-   │  HTTP  ── /api/proxy, /api/tracks, /api/subtitle, /api/upload …
-   │  WebSocket ── /api/ws (salas, sincronia, chat)
-   ▼
-Backend: router Express (src/server/app.ts), servido por src/server/main.ts em produção
-ou plugado no servidor de dev/preview do Vite (vite.config.ts)
-   ├─ proxy de mídia: repasse com HTTP Range, remux fMP4 via FFmpeg para áudio alternativo
-   ├─ inspeção de faixas e extração de legendas/fontes (FFmpeg + mkv_extractor)
-   ├─ envios (.uploads/) e resolvedor do Google Drive
-   └─ servidor de salas (src/server/roomServer.ts)
-```
-
-### Rotas da API
-
-| Rota | Descrição |
-|---|---|
-| `GET /api/proxy?url=` | Faz o stream de um vídeo remoto (com Range). Com `audio=`, faz remux para fMP4 com essa faixa de áudio |
-| `POST /api/hls/start`, `GET /api/hls/<id>/<áudio>/index.m3u8`, `GET /api/hls/<id>/<áudio>/<n>.ts` | HLS compartilhado de uma faixa de áudio alternativa: playlist e segmentos de ~6 s gerados sob demanda e guardados em cache (só MKV com Cues + vídeo H.264; senão o `start` responde 501 e o player usa o remux) |
-| `GET /api/tracks?url=` | Faixas de áudio, legenda, capítulos e fontes de um arquivo |
-| `GET /api/subtitle?url=&track=` | Extrai uma legenda embutida (cache em `.cache/subtitles`) |
-| `GET /api/font?url=&track=` | Extrai uma fonte embutida. As fontes ficam guardadas uma vez por conteúdo (hardlinks em `.cache/fonts/_shared`), então episódios do mesmo grupo as compartilham |
-| `GET /api/fontmap?url=` | Os nomes pelos quais cada fonte embutida pode ser pedida (família, nome completo, PostScript). O player carrega só as fontes que a legenda usa, em vez das ~24 anexadas ao MKV |
-| `GET /api/resolve?url=` | Resolve redirecionamentos do Torrentio/debrid até a URL final da CDN |
-| `GET /api/upstream?url=` | Se o provedor do vídeo (ou o CDN dele) limitou o servidor agora (429). O player pergunta quando a reprodução falha, para dizer "o provedor limitou os pedidos". Não faz pedido nenhum ao provedor |
-| `GET /api/catalog/manifest`, `/row`, `/search`, `/meta` | O catálogo (fileiras, busca, detalhes) da fonte configurada (`CATALOG_URL`, padrão Cinemeta), com cache no servidor; se a fonte cair, serve a última resposta guardada (`stale: true`). A URL da fonte nunca chega ao navegador |
-| `GET /api/room?id=` | Se uma sala existe ou foi encerrada |
-| `POST /api/upload/start`, `PUT /api/upload/<id>?offset=`, `POST /api/upload/<id>/finish`, `DELETE /api/upload/<id>` | Envio em pedaços e retomável (até 50 GB) para `.uploads/`. Os pedaços são de 64 MB por padrão para cada requisição passar por proxies que limitam o corpo (o plano grátis da Cloudflare aceita 100 MB) |
-| `POST /api/uploads/claim`, `POST /api/uploads/status` | Reabre um envio recente numa sala nova e confere se ele ainda está no servidor |
-| `GET /api/uploads/<id>/<nome>` | Serve um arquivo enviado com suporte a Range |
-| `GET /api/drive?url=` | Resolve um link de compartilhamento do Google Drive para uma URL reproduzível |
-| `POST /api/session` | Token de sessão de quem assiste sozinho (quem está em sala recebe o seu pelo WebSocket). As rotas de mídia exigem o token |
-| `POST /api/screen/token` | Endereço do relay com o token certo para quem pede: de publicar para o Host que está transmitindo, só de assistir para os demais (e só quando a transmissão está ao vivo). Só membros da sala, com limite de pedidos, nunca em cache |
-| `GET /api/status` | Se o FFmpeg e o Python foram encontrados (só versões), e os números da transmissão de tela (ligada, transmissões ao vivo, bytes enviados pelos Hosts, saída estimada do relay) |
-| `POST /api/token` | Troca do código OAuth2 do Discord |
-| `WS /api/ws` | Salas: participantes, sincronia de reprodução, chat, moderação e as mensagens `screen:*` da transmissão de tela (a chave de criptografia viaja por aqui, só para quem está na sala) |
-
-Salas vazias são encerradas cerca de 30 segundos depois que a última pessoa sai (`EMPTY_ROOM_TTL_MS` em `src/server/roomServer.ts`). Uma sala restaurada do Redis a que ninguém volta encerra depois dos 60 s de prioridade do Host mais esses 30 segundos.
-
-## Deploy em um servidor Linux (Ubuntu 24.04)
-
-Uma VPS pequena basta. O Lunio roda como um único processo Node (`npm run serve`); o Caddy fica na frente cuidando de HTTPS e WebSocket, e o systemd mantém tudo de pé. Troque `lunio.exemplo.com` pelo seu domínio (o DNS precisa apontar para o servidor) e libere as portas 80 e 443.
-
-**1. Instalar Node 22, FFmpeg, Python e Caddy**
-
-```bash
-sudo apt update && sudo apt install -y ffmpeg python3 git curl debian-keyring debian-archive-keyring apt-transport-https
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs
-# Caddy: https://caddyserver.com/docs/install#debian-ubuntu-raspbian
-sudo apt install -y caddy
-```
-
-O `python3` do Ubuntu é o 3.12 (o Lunio pede 3.10+) e é detectado sozinho; não existe o comando `python` e não precisa.
-
-**2. Baixar o código e configurar**
-
-```bash
-sudo useradd --system --create-home --home-dir /opt/lunio --shell /usr/sbin/nologin lunio
-sudo -u lunio git clone https://github.com/gabszap/Lunio.git /opt/lunio/app
-cd /opt/lunio/app
-sudo -u lunio npm ci
-sudo -u lunio npm run build
-sudo -u lunio cp .env.example .env
-sudo -u lunio nano .env
-```
-
-No `.env`, defina pelo menos:
-
-```ini
-SESSION_SECRET=<saída de: openssl rand -hex 32>
-TRUST_PROXY=1                              # o Caddy está na frente: usa o IP real do cliente
-ALLOWED_ORIGINS=                           # só se o site também for servido por outras origens
-VITE_DISCORD_CLIENT_ID=...                 # só para a Atividade do Discord
-DISCORD_CLIENT_SECRET=...
-```
-
-Deixe `ALLOW_PRIVATE_URLS` vazio. Ele existe só para testes locais e desliga a proteção que impede o servidor de alcançar a sua rede interna.
-
-**3. Build e serviço systemd** — `/etc/systemd/system/lunio.service`
-
-```ini
-[Unit]
-Description=Lunio
-After=network.target
-
-[Service]
-User=lunio
-WorkingDirectory=/opt/lunio/app
-ExecStart=/usr/bin/npm run serve
-Restart=always
-RestartSec=3
-Environment=NODE_ENV=production
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl daemon-reload && sudo systemctl enable --now lunio
-journalctl -u lunio -f      # ao iniciar, mostra qual FFmpeg e qual Python foram encontrados
-```
-
-O `WorkingDirectory` importa: `.uploads/`, `.cache/`, `dist/` e `.env` ficam nele. O `npm run serve` não faz build, então rode `npm run build` uma vez a cada `git pull` (os restarts ficam instantâneos). `PORT` e `HOST` no `.env` mudam onde ele escuta (padrão `0.0.0.0:3000`).
-
-**4. Caddy (HTTPS + WebSocket)** — `/etc/caddy/Caddyfile`
-
-```caddyfile
-lunio.exemplo.com {
-	reverse_proxy 127.0.0.1:3000 {
-		flush_interval -1
-	}
-}
-```
-
-```bash
-sudo systemctl reload caddy
-```
-
-O Caddy obtém o certificado sozinho e faz proxy de WebSocket sem configuração extra, então o navegador conecta em `wss://lunio.exemplo.com/api/ws`. O `flush_interval -1` entrega o stream de áudio alternativo aos espectadores conforme o FFmpeg produz, sem buffer.
-
-**5. Conferir**
-
-Abra `https://lunio.exemplo.com` e vá em **Status**: Servidor, FFmpeg e Python devem estar verdes. Depois crie uma sala, entre por um segundo navegador e troque a faixa de áudio.
-
-**Atualizar:** `cd /opt/lunio/app && sudo -u lunio git pull && sudo -u lunio npm ci && sudo -u lunio npm run build && sudo systemctl restart lunio`. Sem `REDIS_URL`, reiniciar encerra as salas abertas; com ele, elas voltam.
-
-### Transmissão de tela
-
-Desligada por padrão. Usa **MoQ sobre WebTransport** por um relay: o navegador do Host captura a tela (`getDisplayMedia`), codifica com WebCodecs (vídeo H.264, áudio Opus) e publica no relay; quem assiste se inscreve, decodifica e desenha, com o áudio como relógio. O servidor só coordena (quem está transmitindo, a qualidade, as chaves) e nunca toca no vídeo.
-
-Para ligar é preciso um relay. O padrão é o [relay MoQ gerenciado da Cloudflare](https://developers.cloudflare.com/) (beta): crie um relay, ponha a URL e os dois tokens padrão dele no `.env` e ligue a flag:
-
-```bash
-SCREEN_SHARE_ENABLED=1
-MOQ_RELAY_URL=https://<seu relay>
-MOQ_TOKEN_PUBLISH=…
-MOQ_TOKEN_SUBSCRIBE=…
-```
-
-- **Quem faz o quê.** Só o Host da sala inicia a transmissão (Chromium no computador; a página pede a tela e, se o navegador oferecer, o áudio do sistema). A qualidade escolhida pelo Host vale para aquela transmissão: não há troca automática. O token de publicar do relay só é entregue ao Host que está transmitindo.
-- **Privacidade.** Todo quadro é criptografado (AES-GCM) com uma chave que o navegador do Host gera, e o servidor entrega essa chave só a quem está na sala naquele momento, pelo WebSocket da sala. Um token do relay não pode ser limitado a uma transmissão e revogá-lo não derruba uma conexão já aberta, então a criptografia é o que deixa os de fora de fora. Quando alguém é expulso, banido ou sai, o Host gira a chave e quem fica recebe a nova; quem saiu continua recebendo bytes que não consegue mais decodificar. As chaves nunca são guardadas, registradas em log nem postas no estado da sala.
-- **Navegadores.** Host: Chrome, Edge ou Brave no computador (versão recente: as antigas ignoram a opção que deixa o som do próprio vídeo da sala fora do áudio do sistema compartilhado, e quem assiste pode ouvir o vídeo do Host em dobro; compartilhar uma janela em vez da tela inteira evita isso). Quem assiste: navegadores Chromium e Firefox. Safari e iOS não são suportados, e a transmissão fica desligada dentro da Activity do Discord.
-- **Custo.** O relay está em beta, sem preço nem medidor. O servidor conta o que os Hosts enviam e estima a saída (bytes × espectadores): a aba **Status** mostra, e os números do dia ficam no Redis quando ele está ligado. Para ter ideia: 1080p60 é até 10 Mbps, cerca de 4,5 GB por hora *por espectador*. `SCREEN_SHARE_MAX_LIVE` limita as transmissões simultâneas. Se o relay gerenciado virar problema, o transporte fica atrás de uma interface, então um `moq-relay` próprio (ou outro provedor) pode entrar no lugar sem mexer no resto.
-- **Limites.** A transmissão acaba com o Host (troca de Host, saída, fechar a página ou reiniciar o servidor). Ela fica só na memória e nunca vai ao Redis. O 60 fps depende da máquina do Host: alguns computadores só capturam ~30 fps mesmo pedindo 60.
-
-### Opcional: Redis
-
-O Lunio funciona sem Redis. Com ele, **as salas sobrevivem a um restart ou deploy**: Host, bans, fila, vídeo atual e posição são salvos e restaurados antes de o servidor aceitar conexões, e o Host anterior tem 60 s para voltar (quem reconecta antes entra como espectador). Sem ele, um restart encerra todas as salas abertas. O chat e quem está conectado nunca são salvos. O Redis também guarda o índice dos envios (último uso, salas, marcas de sala fechada), reconstruído do disco a cada subida, e as respostas do catálogo (para um restart não esfriar a fonte do catálogo).
-
-O Redis nunca é a fonte da verdade e nunca trava o servidor: cada chamada tem teto de 300 ms e cai para o comportamento sem Redis em silêncio (um aviso no log por minuto). Rode-o **só em RAM e preso ao localhost**. Este exemplo usa Docker; sem ele, `sudo apt install redis-server` também serve, desde que escute só em `127.0.0.1` e com a persistência desligada (`save ""`, `appendonly no`):
-
-```bash
-docker run -d --name lunio-redis --restart unless-stopped -p 127.0.0.1:6379:6379 redis:8-alpine \
-  redis-server --save "" --appendonly no --maxmemory 128mb --maxmemory-policy volatile-ttl
-```
-
-Depois coloque `REDIS_URL=redis://127.0.0.1:6379` no `/opt/lunio/app/.env` e rode `sudo systemctl restart lunio`. A aba **Status** mostra "Redis: conectado" quando funciona. Nunca exponha a porta publicamente.
-
-## Desenvolvimento no Windows
-
-Tudo roda no Windows sem configuração extra: `npm install` e `npm run dev`. O FFmpeg é procurado nesta ordem: `FFMPEG_PATH` → `ffmpeg` no `PATH` → `C:\Program Files\mpv\ffmpeg.exe` → `C:\ffmpeg\ffmpeg.exe`. O Python: `PYTHON_PATH` → `python3` → `python` → `py -3`. O servidor imprime o que encontrou ao iniciar, e a aba **Status** também mostra. Para rodar uma segunda cópia ao lado do `npm run dev`, use `npx vite --port=3001 --strictPort`.
-
-## Estrutura do projeto
-
-```
-src/
-  App.tsx                 Telas: Home (catálogo, sala, status) e player
-  components/
-    home/                 Menu da sala e passos de cada fonte (stream, envio, YouTube, Drive, entrar)
-    catalog/              Catálogo, busca e detalhes do título
-    VideoPlayer.tsx       Composição do player (Vidstack): estado compartilhado, ordem dos hooks e renderização
-    player/               Hooks do player (sala, áudio alternativo, legendas, controles, atalhos…) e overlays
-    PlayerControls.tsx    Barra de controles e menus
-    WatchPartyPanel.tsx   Chat e participantes
-    ui.tsx                Componentes visuais compartilhados (design system)
-  lib/                    Cliente de sincronia, legendas, utilitários de mídia, catálogo, Discord
-  server/                 Backend: app.ts (router da API), main.ts (entrada de produção), routes/ (um arquivo
-                          por endpoint), media/ (remux FFmpeg, faixas, legendas, cache), roomServer.ts, roomStore.ts (salas no Redis), segurança
-mkv_extractor/            Extrator em Python de legendas de MKV remotos (HTTP Range)
-public/                   Arquivos estáticos: JASSUB (libass), fontes de fallback, exemplo Sintel
-assets/                   Imagens do README (readme/) e arte do Discord (discord/)
-DESIGN.md                 Notas do design system
-```
+| [Recursos em detalhe](docs/features.pt-BR.md) | Como cada recurso funciona e seus limites |
+| [Configuração](docs/configuration.pt-BR.md) | Todas as variáveis de ambiente |
+| [Deploy](docs/deployment.pt-BR.md) | Servidor Linux com Caddy e systemd, e Redis opcional |
+| [Transmissão de tela](docs/screen-sharing.pt-BR.md) | O relay, privacidade, navegadores e custo |
+| [Arquitetura e API](docs/architecture.pt-BR.md) | Como as peças se encaixam e as rotas da API |
+| [Desenvolvimento e testes](docs/development.pt-BR.md) | Requisitos, scripts e testes |
 
 ## Atalhos de teclado
 
@@ -303,9 +82,44 @@ DESIGN.md                 Notas do design system
 
 ## Limitações conhecidas
 
-- O **Catálogo** é experimental: funciona, mas é uma implementação inicial e vai mudar.
-- Os **Addons** só listam streams com `url` direta (sem magnet/infoHash, YouTube ou arquivos compactados), e não os que exigem cabeçalhos de pedido especiais. Não ficam disponíveis dentro do Discord. O servidor guarda o link do stream no estado da sala (Redis, até 24 h), mas só quem o enviou o vê inteiro: os outros recebem um id opaco (`lk_…`) nas mensagens da sala e nos pedidos `?url=`, e o servidor o troca de volta. Arquivos enviados ao próprio site e links do YouTube não são trocados.
-- Links de torrent aparecem no menu como "Em breve": precisam de um motor de torrent no servidor.
-- A **transmissão de tela** depende de um relay (veja [Transmissão de tela](#transmissão-de-tela)), o Host precisa de Chromium no computador, e quem assiste num celular fraco pode não acompanhar 1080p60 ou 4K (não há troca automática de qualidade).
-- Arquivos enviados ficam em `.uploads/` até a limpeza removê-los: `UPLOAD_TTL_HOURS` depois que a sala fecha, ou `UPLOAD_IDLE_HOURS` (24) sem leitura, e os mais antigos saem primeiro se a cota de disco for atingida.
-- O ban vale para a identidade do navegador (guardada no `localStorage`): uma aba nova mantém a identidade, mas outro navegador, janela anônima ou dados do site apagados geram uma identidade nova. Não há contas, então é até aí que vai.
+- Links de torrent ainda não são suportados (precisam de um motor de torrent no servidor).
+- A transmissão de tela exige Chrome, Edge ou Brave no computador para o Host; quem assiste pode usar navegadores Chromium ou Firefox. Safari e Discord Activity não são suportados.
+- O banimento vale para a identidade do navegador: outro navegador ou dados do site apagados começam do zero, já que não há contas.
+
+Mais em [docs/features.pt-BR.md](docs/features.pt-BR.md#limitações-conhecidas).
+
+## Estrutura do projeto
+
+```
+src/
+  App.tsx                   Telas: Home (catálogo, sala, status) e player
+  components/
+    home/                   Menu da sala, passos de cada fonte (stream, envio, YouTube, Drive, entrar), última sala e aba Status
+    catalog/                Fileiras do catálogo, busca, Explorar, página do título, addons e lista de streams
+    player/                 Hooks do player (sincronia da sala, áudio alternativo, legendas, controles, atalhos…),
+                            overlays e o palco da transmissão de tela
+    VideoPlayer.tsx         Composição do player (Vidstack)
+    PlayerControls.tsx      Barra de controles e menus
+    WatchPartyPanel.tsx     Chat e participantes
+    ui.tsx                  Primitivas de interface (design system)
+  lib/                      Cliente da sala (sync.ts), legendas, utilitários de mídia, catálogo, addons, continuar assistindo
+    screen/                 Motor da transmissão de tela: captura, codificação, criptografia, transporte MoQ, reprodução
+  server/                   Backend, independente do Vite
+    app.ts / main.ts        Roteador da API / entrada de produção
+    routes/                 Um arquivo por endpoint
+    media/                  Proxy, faixas, legendas, fontes, HLS, remux, envios, cache
+    roomServer.ts           Salas: sincronia, chat, fila, Host e estado da transmissão de tela
+    roomStore.ts            Salas guardadas no Redis
+  types/                    Tipos compartilhados entre cliente e servidor
+mkv_extractor/              Extrator Python de legendas e keyframes dentro de MKV remoto (HTTP Range)
+e2e/                        Testes de ponta a ponta com Playwright (servidor de produção + MKV local de teste)
+tests/                      Testes Python (mkv_extractor)
+docs/                       Documentação técnica
+public/                     Estáticos: JASSUB (libass), fontes de reserva, vídeo de exemplo Sintel
+assets/                     Imagens do README (readme/) e arte do Discord (discord/)
+DESIGN.md                   Notas do design system
+```
+
+## Licença
+
+[AGPL-3.0](LICENSE)

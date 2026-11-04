@@ -325,7 +325,7 @@ export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClos
               <div ref={shareRef} className="relative">
                 <TextButton tone="text" size="sm" onClick={toggleShareMenu} className="!h-10" aria-haspopup="menu" aria-expanded={shareOpen}>
                   {copiedLink ? <Check size={16} className="text-lu-success" /> : <Share2 size={16} />}
-                  {copiedLink ? t('Link copiado') : 'Compartilhar'}
+                  {copiedLink ? t('Link copiado') : t('Compartilhar')}
                   {!copiedLink && <ChevronDown size={14} className={cx('transition-transform', shareOpen && 'rotate-180')} />}
                 </TextButton>
                 {shareOpen && (
