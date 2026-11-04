@@ -19,7 +19,7 @@ Copy `.env.example` to `.env`. Locally nothing is required (only the Discord Act
 | `ROOM_STATE_TTL_HOURS` / `ROOM_HOST_GRACE_SECONDS` | With Redis: how long a room's saved state is valid (default 24) and how long the previous host has to come back after a restart before someone else takes over (default 60) |
 | `UPLOAD_IDLE_HOURS` | Hours an upload in an open room may go unread before it is removed (default 24) |
 | `MIN_FREE_DISK_GB` | Free space to keep on the machine's disk; uploads are refused below it (default 5) |
-| `CATALOG_URL` | *(optional)* Stremio addon that feeds the catalog: the install URL or base of an [AIOMetadata](https://github.com/cedya77/aiometadata) (`https://…/stremio/<uuid>/<config>/manifest.json`), or any addon with catalogs. Empty = the public Cinemeta addon from Stremio. Keep it only in the server `.env`: it carries your config and keys |
+| `CATALOG_URL` | *(optional)* Stremio addon that feeds the catalog: the install URL or base of an [AIOMetadata](https://github.com/cedya77/aiometadata) (`https://…/stremio/<id>/manifest.json`), or any addon with catalogs. Empty = the public Cinemeta addon from Stremio. Keep it only in the server `.env`: it carries your config and keys |
 | `JIKAN_URL` | *(optional)* API of the MyAnimeList score shown on anime pages: a Jikan-compatible instance (`GET <base>/anime/<id>` with `data.score`), base with the version prefix. The official Jikan API was shut down, so use a third-party public instance or your own. Empty = the default public instance (jikan-edge). The score is requested apart from the page (3 tries on the server, then the browser tries again), cached for 24 h; without an answer the page just omits it. Anime found by IMDb id are matched to their MyAnimeList id through the source's anime search |
 | `MAX_CACHE_GB` | Limit for `.cache/` (default 10, includes the HLS segments); the least recently used is deleted first |
 | `MAX_FFMPEG_PROCS` | FFmpeg/Python processes at once (default 8) |
@@ -34,15 +34,17 @@ Copy `.env.example` to `.env`. Locally nothing is required (only the Discord Act
 
 ### Getting the Cloudflare MoQ relay and tokens (screen sharing)
 
-Screen sharing needs a relay. Lunio uses [Cloudflare's managed MoQ relay](https://developers.cloudflare.com/) (beta, free of charge for now). You need a Cloudflare account; the relay is created once and its secrets go in the server's `.env`.
+Screen sharing needs a relay. Lunio uses [Cloudflare's managed MoQ relay](https://developers.cloudflare.com/) (beta). You need a Cloudflare account; the relay is created once and its secrets go in the server's `.env`.
 
-1. In the Cloudflare dashboard, create a **MoQ relay** (the option is in the Media / Realtime area; as it is a beta, its place and name may change — the Cloudflare docs have the current path). Give it any name, for example `lunio`.
-2. Creating the relay gives you its **URL** (`https://…`) and **two tokens**: one that can publish and watch, and one that can only watch. **Cloudflare shows the tokens only once**: copy them right away.
+> Cloudflare asks you to add a credit card to use MoQ, because it is a paid product. According to Cloudflare, nothing is charged during the beta.
+
+1. In the Cloudflare dashboard, create a **MoQ relay** (the option is in the Media / Realtime area; it is a beta, so its place and name may change — the Cloudflare docs have the current path). Give it any name, for example `lunio`.
+2. Creating the relay gives you its **URL** (`https://…`) and **two tokens**: one that can publish and watch, and one that can only watch. **Cloudflare shows the tokens only once**: copy them right away. The relay has one address per protocol draft; use the **draft-16** one.
 3. Put them in the server's `.env`:
 
 ```ini
 SCREEN_SHARE_ENABLED=1
-MOQ_RELAY_URL=https://<your relay>      # the URL only, with no token in it
+MOQ_RELAY_URL=https://<your relay>      # the draft-16 URL only, with no token in it
 MOQ_TOKEN_PUBLISH=<token that publishes>
 MOQ_TOKEN_SUBSCRIBE=<token that only watches>
 ```
@@ -58,23 +60,67 @@ If you lose a token, create a new one for the same relay in the dashboard or wit
 The catalog needs a Stremio addon that provides **metadata** (posters, descriptions, seasons, episodes). Two options:
 
 - **Do nothing.** Without `CATALOG_URL`, Lunio uses Stremio's public **Cinemeta** addon. It works out of the box.
-- **Use [AIOMetadata](https://github.com/cedya77/aiometadata)**, which lets you choose the catalogs (anime, streaming services, genres…) and the language. Open an AIOMetadata instance (a public one or your own), configure your catalogs, save the configuration and copy the **manifest URL** it gives you (`https://…/stremio/<id>/<config>/manifest.json`). Put it in the server's `.env`:
+- **Use [AIOMetadata](https://github.com/cedya77/aiometadata)**, which lets you choose the catalogs (anime, streaming services, genres…) and the language. Below is the configuration Lunio uses, ready to import.
+
+You can run your own AIOMetadata, or use a public instance such as <https://aiometadatafortheweebs.midnightignite.me/>. A public instance is run by someone else and stores your configuration, so do not put keys of your own in it.
+
+1. Open the instance. If it shows the setup wizard, click **Skip**.
+
+   ![AIOMetadata welcome screen, with the Skip button marked](../assets/docs/aiometadata-1-skip-wizard.png)
+
+2. In the side menu, open **Configuration**. (The **General** page is where you pick the display language and the time zone; the imported configuration uses Portuguese (Brazil) and Brasília.)
+
+   ![AIOMetadata General page, with Configuration marked in the side menu](../assets/docs/aiometadata-2-configuration.png)
+
+3. Under **Import & Export**, import the Lunio configuration. Either paste its address in **Configuration URL** and click **Fetch** (`https://lunio.stream/aiometadata-config.json`), or download [aiometadata-config.json](../public/aiometadata-config.json) and use **Import Configuration**. It has no keys in it. Then click **Save Configuration** (it asks you for a password the first time).
+
+   ![AIOMetadata Import & Export section, with Import Configuration and Save Configuration marked](../assets/docs/aiometadata-3-import.png)
+
+   On a public instance the TMDB and TVDB keys are already set. On your own instance, enter yours in **Integrations**.
+
+4. After saving, **Your Configuration** shows your UUID, your password and the **Install URL**. Copy the Install URL (`https://…/stremio/<id>/manifest.json`) and put it in the server's `.env`:
+
+   ![AIOMetadata Your Configuration section, with the Install URL](../assets/docs/aiometadata-4-install-url.png)
 
 ```ini
-CATALOG_URL=https://<instance>/stremio/<id>/<config>/manifest.json
+CATALOG_URL=https://<instance>/stremio/<id>/manifest.json
 ```
 
-Restart Lunio and open the **Catalog** tab: the rows are the catalogs of your configuration, in the same order. That URL carries your configuration and keys, so it stays only in the server `.env`; it never reaches the browser or the logs.
+Restart Lunio and open the **Catalog** tab: the rows are the catalogs of your configuration, in the same order. Keep your UUID and password: you need them to change the configuration later. The Install URL carries your configuration, so it stays only in the server `.env`; it never reaches the browser or the logs.
 
 If you use the MyAnimeList score on anime pages, also see `JIKAN_URL` above.
 
 ### Setting up streams (AIOStreams)
 
-The catalog only lists titles. To **watch**, each person adds a video addon in the catalog's **Addons** button; [AIOStreams](https://github.com/Viren070/AIOStreams) is a common choice because it gathers several sources in one addon.
+The catalog only lists titles. To **watch**, each person adds a video addon in the catalog's **Addons** button; [AIOStreams](https://github.com/Viren070/AIOStreams) is a common choice because it gathers several sources in one addon. Below is the configuration Lunio uses (sorting, filters and eight stream addons), ready to import.
 
-1. Open an AIOStreams instance (a public one or your own) and configure it: your debrid service or other sources, and how results are sorted and filtered.
-2. Save and copy the **manifest URL** (`https://…/manifest.json`).
-3. In Lunio, open **Catalog → Addons**, paste the manifest URL and add it.
-4. Open a movie or an episode: **Where to watch** lists the addon's streams. Each one has a badge saying whether it is likely to play in your browser (HEVC, Dolby Vision or DTS audio may not). Click one to create a room and start playing.
+You can run your own AIOStreams or use a public instance such as <https://aiostreamsfortheweebsstable.midnightignite.me/>. As with AIOMetadata, a public instance stores your configuration, including the debrid credentials you enter.
 
-The addon URL has your keys, so Lunio keeps it **only in your browser** (`localStorage`); the server never sees it. Only streams with a direct `url` are listed (no magnet links).
+1. Open the instance. The side menu has the pages of the configuration.
+
+   ![AIOStreams home page, with the Services icon marked in the side menu](../assets/docs/aiostreams-1-open.png)
+
+2. Go to the last page of the menu (**Save & Install**), under **Backups** click **Import** and choose [aiostreams-config.json](../public/aiostreams-config.json) (also at `https://lunio.stream/aiostreams-config.json`; download it first). The imported configuration has no credentials.
+
+   ![AIOStreams Install Addon page, with the Import button marked](../assets/docs/aiostreams-3-import.png)
+
+3. Open **Services**, turn on your debrid service and click the gear to enter its credentials (TorBox in the picture; any of them works). This is the step that is yours: the file brings no keys.
+
+   ![AIOStreams Services page, with the TorBox toggle and gear marked](../assets/docs/aiostreams-2-services.png)
+
+4. The configuration brings its addons: open **Addons** to see them (Torrentio, StremThru Torz, nekoBT, TsukiHime, Comet, Sootio, Jackettio and TorrentsDB).
+
+   ![AIOStreams My Addons list with eight stream addons](../assets/docs/aiostreams-6-my-addons.png)
+
+   If you do not see the Sorting page and the other advanced options, switch the interface to **Advanced** in the settings.
+
+   ![AIOStreams interface switch set to Advanced](../assets/docs/aiostreams-5-advanced.png)
+
+5. Back on **Save & Install**, create a password and click **Create** / **Save**. You get your UUID and the **Direct Manifest URL**. Copy the manifest URL (`https://…/stremio/<id>/manifest.json`).
+
+   ![AIOStreams Install Addon page, with the copy button of the manifest URL marked](../assets/docs/aiostreams-4-manifest-url.png)
+
+6. In Lunio, open **Catalog → Addons**, paste the manifest URL and add it.
+7. Open a movie or an episode: **Where to watch** lists the addon's streams. Each one has a badge saying whether it is likely to play in your browser (HEVC, Dolby Vision or DTS audio may not). Click one to create a room and start playing.
+
+The manifest URL has your keys, so Lunio keeps it **only in your browser** (`localStorage`); the server never sees it. Only streams with a direct `url` are listed (no magnet links).
