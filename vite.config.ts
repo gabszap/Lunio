@@ -64,6 +64,8 @@ export default defineConfig(() => {
     },
     optimizeDeps: {
       exclude: ['jassub'],
+      // Carregadas sob demanda (import()): sem isto o Vite só as descobre no primeiro uso, otimiza no meio da sessão e recarrega a página
+      include: ['hls.js', '@moq/net', '@discord/embedded-app-sdk'],
     },
     worker: {
       format: 'es' as const,
@@ -79,6 +81,8 @@ export default defineConfig(() => {
       // CORS é responsabilidade da nossa /api (src/server/cors.ts), não do Vite (`*`)
       cors: false,
       hmr: process.env.DISABLE_HMR !== 'true',
+      // Transforma o app em segundo plano ao subir o servidor: a primeira abertura do site não paga o custo de cada módulo
+      warmup: { clientFiles: ['./src/main.tsx', './src/App.tsx', './src/components/VideoPlayer.tsx', './src/components/catalog/CatalogTab.tsx'] },
       watch: {
         ignored: [
           // Testes e relatórios não fazem parte do app: mexer neles não deve recarregar nem reiniciar o dev server
