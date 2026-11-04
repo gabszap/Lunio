@@ -459,6 +459,8 @@ export const EN: Record<string, string> = {
   "Parar transmissão": "Stop sharing",
   "Transmitindo": "Sharing",
   "Assistindo": "Watching",
+  "Atrasado {time}": "Behind by {time}",
+  "Adiantado {time}": "Ahead by {time}",
   "Conectando à transmissão…": "Connecting to the broadcast…",
   "Ninguém assistindo ainda": "Nobody watching yet",
   "Assistindo ({n}): {names}": "Watching ({n}): {names}",

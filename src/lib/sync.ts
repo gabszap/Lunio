@@ -2,6 +2,7 @@ import { discordManager } from './discord';
 import { clearRoomToken, setRoomToken } from './access';
 import { logger } from './logger';
 import { t } from './/i18n';
+import { ServerClock } from './serverClock';
 import type { ScreenSignals } from './screen/signals';
 import type { ScreenKeyMaterial } from './screen/wire';
 import type { RoomScreen, ScreenQualityId } from '../types/screen';
@@ -66,6 +67,11 @@ class SyncManager implements ScreenSignals {
   private reconnectAttempts: number = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
+  private heartbeatBurst: NodeJS.Timeout[] = [];
+  /** Hora do servidor, medida pelo heartbeat: as posições da sala vêm carimbadas com ela. */
+  private clock = new ServerClock();
+  /** Heartbeats no ar: `clientTime` enviado -> leitura monotônica do envio. */
+  private pendingBeats = new Map<number, number>();
   private messageQueue: ClientMessage[] = [];
 
   // Previne loop de eco quando comandos remotos são aplicados localmente
@@ -284,6 +290,8 @@ class SyncManager implements ScreenSignals {
         this.isConnected = true;
         this.isConnecting = false;
         this.reconnectAttempts = 0;
+        this.clock.reset();
+        this.pendingBeats.clear();
 
         // Entra na sala
         this.send({
@@ -387,19 +395,30 @@ class SyncManager implements ScreenSignals {
     }, delay);
   }
 
+  private sendHeartbeat() {
+    if (!this.isConnected || this.ws?.readyState !== WebSocket.OPEN) return;
+    const curTime = this.getCurrentTimeCallback ? this.getCurrentTimeCallback() : 0;
+    // O `clientTime` é a chave da resposta: duas batidas no mesmo milissegundo não podem repeti-lo
+    let clientTime = Date.now();
+    while (this.pendingBeats.has(clientTime)) clientTime++;
+    const sentAt = performance.now();
+    this.pendingBeats.set(clientTime, sentAt);
+    for (const [key, at] of this.pendingBeats) if (sentAt - at > 30_000) this.pendingBeats.delete(key);
+    this.send({
+      type: 'client:heartbeat',
+      clientTime,
+      currentTime: Math.max(0, curTime),
+      state: 'ready',
+      rtt: this.clock.synced ? Math.round(this.clock.rtt) : undefined,
+    });
+  }
+
   private startHeartbeat() {
     this.stopHeartbeat();
-    this.heartbeatInterval = setInterval(() => {
-      if (this.isConnected && this.ws?.readyState === WebSocket.OPEN) {
-        const curTime = this.getCurrentTimeCallback ? this.getCurrentTimeCallback() : 0;
-        this.send({
-          type: 'client:heartbeat',
-          clientTime: Date.now(),
-          currentTime: Math.max(0, curTime),
-          state: 'ready',
-        });
-      }
-    }, 10000);
+    // Logo ao entrar: algumas batidas seguidas dão a hora do servidor antes de a primeira posição ser usada
+    this.sendHeartbeat();
+    this.heartbeatBurst = [300, 800, 1600].map((ms) => setTimeout(() => this.sendHeartbeat(), ms));
+    this.heartbeatInterval = setInterval(() => this.sendHeartbeat(), 5000);
   }
 
   private stopHeartbeat() {
@@ -407,6 +426,8 @@ class SyncManager implements ScreenSignals {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
+    for (const timer of this.heartbeatBurst) clearTimeout(timer);
+    this.heartbeatBurst = [];
   }
 
   public joinRoom(roomId: string) {
@@ -659,7 +680,11 @@ class SyncManager implements ScreenSignals {
       }
 
       case 'server:heartbeat_ack': {
-        // Latência calculada no servidor
+        const sentAt = this.pendingBeats.get(msg.clientTime);
+        if (sentAt !== undefined) {
+          this.pendingBeats.delete(msg.clientTime);
+          this.clock.add(sentAt, performance.now(), msg.serverTime);
+        }
         break;
       }
 
@@ -860,7 +885,8 @@ class SyncManager implements ScreenSignals {
     const { position, playing, rate, updatedAt } = this.roomState.playback;
     if (!playing) return Math.max(0, position);
 
-    const elapsed = (Date.now() - updatedAt) / 1000;
+    // `updatedAt` é hora do servidor: compara com a hora do servidor, não com o relógio daqui
+    const elapsed = (this.clock.now() - updatedAt) / 1000;
     return Math.max(0, position + elapsed * rate);
   }
 
