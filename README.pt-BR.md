@@ -15,7 +15,7 @@ O Lunio é um player de vídeo web feito para assistir junto. Crie uma sala, esc
 - **Traga seu vídeo** — cole um link de stream (Stremio, serviços debrid, `.mkv`, `.mp4`, HLS), envie um arquivo (até 50 GB) ou abra um vídeo do YouTube ou do Google Drive.
 - **Catálogo** *(beta)* — navegue e busque filmes e séries, explore por gênero, abra temporadas e episódios, tenha uma lista pessoal e continue de onde parou. Os metadados vêm de um addon do Stremio.
 - **Addons** — adicione seus próprios addons de vídeo do Stremio e veja *Onde assistir* em cada título, com um aviso de quais streams devem tocar no seu navegador. O link dos seus addons nunca sai do seu navegador.
-- **Transmissão de tela** *(beta experimental, desligada por padrão)* — o Host transmite a tela e o áudio do sistema para a sala, em até 4K a 60 fps. Quem assiste tem volume próprio, e o Host troca a qualidade com a transmissão no ar.
+- **Transmissão de tela** *(beta experimental)* — o Host transmite a tela e o áudio do sistema para a sala, em até 4K a 60 fps. Quem assiste tem volume próprio, e o Host troca a qualidade com a transmissão no ar.
 - **Legendas e áudio** — legendas ASS com as fontes e o estilo originais, além de `.srt` e `.vtt`; troque entre as faixas de áudio de um MKV sem esperar.
 - **Um player de verdade** — timeline com capítulos, pular abertura e encerramento (a sala vota), velocidade, continuar de onde parou, picture-in-picture, atalhos de teclado e links que abrem num instante do vídeo.
 - **Idiomas** — português e inglês.

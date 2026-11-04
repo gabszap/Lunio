@@ -2,7 +2,7 @@
 
 [English](screen-sharing.md) · **Português** · ← [Voltar ao README](../README.pt-BR.md)
 
-Desligada por padrão. Usa **MoQ sobre WebTransport** por um relay: o navegador do Host captura a tela (`getDisplayMedia`), codifica com WebCodecs (vídeo H.264, áudio Opus) e publica no relay; quem assiste se inscreve, decodifica e desenha, com o áudio como relógio. O servidor só coordena (quem está transmitindo, a qualidade, as chaves) e nunca toca no vídeo.
+Desligada por padrão. Para conseguir o relay e os tokens, siga o [tutorial da Cloudflare](configuration.pt-BR.md#pegando-o-relay-moq-e-os-tokens-da-cloudflare-transmissão-de-tela). Usa **MoQ sobre WebTransport** por um relay: o navegador do Host captura a tela (`getDisplayMedia`), codifica com WebCodecs (vídeo H.264, áudio Opus) e publica no relay; quem assiste se inscreve, decodifica e desenha, com o áudio como relógio. O servidor só coordena (quem está transmitindo, a qualidade, as chaves) e nunca toca no vídeo.
 
 Para ligar é preciso um relay. O padrão é o [relay MoQ gerenciado da Cloudflare](https://developers.cloudflare.com/) (beta): crie um relay, ponha a URL e os dois tokens padrão dele no `.env` e ligue a flag:
 

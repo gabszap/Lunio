@@ -2,7 +2,7 @@
 
 **English** · [Português](screen-sharing.pt-BR.md) · ← [Back to the README](../README.md)
 
-Off by default. It uses **MoQ over WebTransport** through a relay: the Host's browser captures the screen (`getDisplayMedia`), encodes it with WebCodecs (H.264 video, Opus audio) and publishes to the relay; viewers subscribe, decode and draw it, with the audio as the clock. The server only coordinates (who is broadcasting, the quality, the keys) and never touches the video.
+Off by default. To get the relay and its tokens, follow the [Cloudflare tutorial](configuration.md#getting-the-cloudflare-moq-relay-and-tokens-screen-sharing). It uses **MoQ over WebTransport** through a relay: the Host's browser captures the screen (`getDisplayMedia`), encodes it with WebCodecs (H.264 video, Opus audio) and publishes to the relay; viewers subscribe, decode and draw it, with the audio as the clock. The server only coordinates (who is broadcasting, the quality, the keys) and never touches the video.
 
 To turn it on you need a relay. The default is [Cloudflare's managed MoQ relay](https://developers.cloudflare.com/) (beta): create a relay, then put its URL and its two default tokens in `.env` and set the flag:
 

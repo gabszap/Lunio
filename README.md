@@ -15,7 +15,7 @@ Lunio is a web video player made for watching together. Create a room, pick a vi
 - **Bring your own video** — paste a stream link (Stremio, debrid services, `.mkv`, `.mp4`, HLS), upload a file (up to 50 GB), or open a YouTube or Google Drive video.
 - **Catalog** *(beta)* — browse and search movies and series, explore by genre, open seasons and episodes, keep a personal list and pick up where you left off. Metadata comes from a Stremio addon.
 - **Addons** — add your own Stremio video addons and see *Where to watch* on every title, with a hint of whether each stream will play in your browser. Your addon links never leave your browser.
-- **Screen sharing** *(experimental beta, off by default)* — the Host shares their screen and system audio with the room, up to 4K at 60 fps. Viewers have their own volume, and the Host picks the quality while live.
+- **Screen sharing** *(experimental beta)* — the Host shares their screen and system audio with the room, up to 4K at 60 fps. Viewers have their own volume, and the Host picks the quality while live.
 - **Subtitles and audio** — ASS subtitles with their original fonts and styling, plus `.srt` and `.vtt`; switch between the audio tracks of an MKV without waiting.
 - **A real player** — chapter timeline, skip intro and outro (the room votes), playback speed, resume where you left off, picture-in-picture, keyboard shortcuts, and links that open at a given moment.
 - **Languages** — Portuguese and English.
