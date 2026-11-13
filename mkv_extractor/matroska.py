@@ -62,6 +62,7 @@ FILE_NAME_ID = 0x466E
 FILE_DATA_ID = 0x465C
 
 CLUSTER_ID = 0x1F43B675
+CLUSTER_TIMESTAMP_ID = 0xE7
 BLOCK_GROUP_ID = 0xA0
 BLOCK_ID = 0xA1
 SIMPLE_BLOCK_ID = 0xA3
@@ -360,6 +361,7 @@ def fetch_cluster_headers(
     batch_size: int = 50,
     timeout: int = 60,
     verbose: bool = False,
+    with_timecodes: bool = False,
 ) -> dict[int, dict[str, Any]]:
     """
     Busca os cabeçalhos de todos os Clusters referenciados pelos Cues da track.
@@ -394,8 +396,45 @@ def fetch_cluster_headers(
                     f"Cue aponta para elemento não-Cluster: offset={absolute:,}, id=0x{header['id']:X}"
                 )
             headers[relative] = header
+            if with_timecodes:
+                header["timecode"] = _read_cluster_timecode(
+                    url, absolute, header, data, total_size, timeout, verbose
+                )
 
     return headers
+
+
+def _read_cluster_timecode(
+    url: str, absolute: int, header: dict[str, Any], initial: bytes,
+    total_size: int, timeout: int, verbose: bool,
+) -> int:
+    """Lê Timestamp sem baixar filhos grandes (Void, vídeo etc.) do Cluster."""
+    end = total_size if header["unknown_size"] else absolute + header["header_size"] + header["size"]
+    if end > total_size:
+        raise MatroskaStructureError("Cluster ultrapassa o final do arquivo.")
+    pos = absolute + header["header_size"]
+    window_start, window = absolute, initial
+    while pos < end:
+        local = pos - window_start
+        if local < 0 or local + min(12, end - pos) > len(window):
+            window_start = pos
+            window = read_range(url, pos, min(pos + RANGE_HEADER_SIZE, end) - 1, timeout=timeout, verbose=verbose)
+            local = 0
+        child = read_element_header(window, local)
+        child_start = pos + child["header_size"]
+        child_end = child_start + child["size"]
+        if child["unknown_size"] or child_end > end:
+            raise MatroskaStructureError("Filho de Cluster inválido ao procurar Timestamp.")
+        if child["id"] == CLUSTER_TIMESTAMP_ID:
+            if not 1 <= child["size"] <= 8:
+                raise MatroskaStructureError("Timestamp de Cluster inválido.")
+            offset = child_start - window_start
+            raw = window[offset:offset + child["size"]]
+            if len(raw) != child["size"]:
+                raw = read_range(url, child_start, child_end - 1, timeout=timeout, verbose=verbose)
+            return int.from_bytes(raw, "big")
+        pos = child_end
+    raise MatroskaStructureError("Cluster sem Timestamp.")
 
 
 def parse_block_element(block_data: bytes) -> dict[str, Any]:

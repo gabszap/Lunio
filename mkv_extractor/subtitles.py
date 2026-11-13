@@ -1,9 +1,47 @@
 """
-Seleção de faixas e reconstrução de legendas no formato Advanced SubStation Alpha (ASS).
+Seleção de faixas e reconstrução de legendas ASS e SRT.
 """
 
 from typing import Any
 from .errors import CodecNotSupportedError, TrackNotFoundError
+
+
+def subtitle_format(track: dict[str, Any]) -> str:
+    """Resolve o formato de saída e rejeita codecs de legenda não suportados."""
+    codec = (track.get("codec_id") or "").upper()
+    if codec in ("S_TEXT/ASS", "S_TEXT/SSA"):
+        return "ass"
+    if codec == "S_TEXT/UTF8":
+        return "srt"
+    raise CodecNotSupportedError(f"Codec de legenda não suportado: '{codec}'.")
+
+
+def ms_to_srt_time(ms: int | float) -> str:
+    total_ms = max(0, int(ms))
+    hours, remainder = divmod(total_ms, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds, milliseconds = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
+
+
+def build_srt(events: list[dict[str, Any]]) -> str:
+    """Reconstrói SRT em ordem temporal; duração ausente termina no próximo início distinto."""
+    ordered = sorted(events, key=lambda ev: (ev["start_ms"], ev["cue_index"]))
+    next_start = None
+    for event in reversed(ordered):
+        start = event["start_ms"]
+        if next_start is None or start < next_start:
+            following = next_start
+        if event["duration_ms"] is None:
+            event["duration_ms"] = following - start if following is not None else 3500
+        next_start = start
+
+    lines = []
+    for index, event in enumerate(ordered, 1):
+        start = event["start_ms"]
+        text = event["text"].replace("\r\n", "\n").replace("\r", "\n").strip("\n").replace("\n", "\r\n")
+        lines.extend([str(index), f"{ms_to_srt_time(start)} --> {ms_to_srt_time(start + event['duration_ms'])}", text, ""])
+    return "\r\n".join(lines) + ("\r\n" if lines else "")
 
 
 def ms_to_ass_time(ms: int | float) -> str:
@@ -70,7 +108,7 @@ def select_subtitle_track(
     stream_index: int | None = None,
 ) -> dict[str, Any]:
     """
-    Seleciona a melhor faixa de legenda ASS disponível com base nos critérios especificados,
+    Seleciona a melhor faixa de legenda de texto disponível com base nos critérios especificados,
     ou seleciona a faixa de número exato se track_number for fornecido.
 
     stream_index é o índice global do stream como o FFmpeg numera (ordem das TrackEntry, base 0).
@@ -83,6 +121,7 @@ def select_subtitle_track(
 
     if stream_index is not None:
         if 0 <= stream_index < len(tracks) and tracks[stream_index] in subtitle_tracks:
+            subtitle_format(tracks[stream_index])
             return tracks[stream_index]
         raise TrackNotFoundError(f"O stream #{stream_index} não é uma faixa de legenda neste MKV.")
 
@@ -98,14 +137,10 @@ def select_subtitle_track(
 
         if not target:
             raise TrackNotFoundError(f"Faixa de legenda #{track_number} não encontrada entre as faixas disponíveis.")
-        codec = (target.get("codec_id") or "").upper()
-        if codec != "S_TEXT/ASS":
-            raise CodecNotSupportedError(f"Faixa #{track_number} possui codec '{codec}', esperado 'S_TEXT/ASS'.")
+        subtitle_format(target)
         return target
 
-    ass_tracks = [t for t in subtitle_tracks if t.get("codec_id") == "S_TEXT/ASS"]
-    if not ass_tracks:
-        raise CodecNotSupportedError("Nenhuma faixa de legenda em formato texto ASS (S_TEXT/ASS) encontrada.")
+    text_tracks = select_all_subtitle_tracks(tracks)
 
     requested_lang = (language or "").lower()
     prefer_str = (prefer or "").lower()
@@ -152,7 +187,7 @@ def select_subtitle_track(
 
         return score
 
-    return max(ass_tracks, key=score_track)
+    return max(text_tracks, key=score_track)
 
 
 def build_ass(codec_private: bytes, events: list[dict[str, Any]]) -> str:
@@ -212,13 +247,13 @@ def select_subtitle_pair(
 
 def select_all_subtitle_tracks(tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    Retorna todas as faixas de legenda no formato ASS encontradas no container Matroska.
+    Retorna todas as faixas de legenda de texto suportadas no container Matroska.
     """
     ass_tracks = [
         t for t in tracks
-        if t.get("track_type") == 17 and (t.get("codec_id") or "").upper() == "S_TEXT/ASS"
+        if t.get("track_type") == 17 and (t.get("codec_id") or "").upper() in ("S_TEXT/ASS", "S_TEXT/SSA", "S_TEXT/UTF8")
     ]
     if not ass_tracks:
-        raise CodecNotSupportedError("Nenhuma faixa de legenda ASS encontrada no container.")
+        raise CodecNotSupportedError("Nenhuma faixa de legenda ASS, SSA ou SRT encontrada no container.")
     return ass_tracks
 

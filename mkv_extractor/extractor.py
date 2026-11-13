@@ -33,15 +33,27 @@ from .matroska import (
 )
 from .subtitles import (
     build_ass,
+    build_srt,
     ms_to_ass_time,
     parse_ass_sample,
     select_all_subtitle_tracks,
     select_subtitle_pair,
     select_subtitle_track,
+    subtitle_format,
 )
 
 HEAD_SCAN_SIZE = 1024 * 1024
 DEFAULT_BATCH_SIZE = 50
+
+
+def _output_path(output_path: str | Path, fmt: str) -> Path:
+    """Preserva caminhos explícitos compatíveis; completa somente os sem extensão."""
+    path = Path(output_path)
+    if not path.suffix:
+        return path.with_suffix(f".{fmt}")
+    if path.suffix.lower() != f".{fmt}":
+        raise MatroskaStructureError(f"A faixa é {fmt.upper()}; use uma saída .{fmt} em vez de '{path.suffix}'.")
+    return path
 
 # Quanto o FFmpeg lê do CDN por segundo (medido: ~935 MB em ~19 s na VPS) e quanto a conta do extrator pode passar disso
 # antes de valer mais a pena ler o arquivo inteiro. É o valor padrão: o servidor passa o medido (`--ffmpeg-mbps`).
@@ -106,10 +118,12 @@ def _extract_single_track_data(
     ffmpeg_bytes_per_s: float = FFMPEG_THROUGHPUT_BYTES_PER_S,
 ) -> dict[str, Any]:
     """
-    Extrai e reconstrói o arquivo ASS de uma faixa específica usando as Cues já indexadas.
+    Extrai e reconstrói ASS ou SRT usando as Cues já indexadas.
     """
     codec_private = selected.get("codec_private")
-    if not codec_private:
+    fmt = subtitle_format(selected)
+    out_p = _output_path(output_path, fmt) if output_path else None
+    if fmt == "ass" and not codec_private:
         raise MatroskaStructureError(f"A faixa ASS #{selected['track_number']} não possui CodecPrivate.")
 
     track_cues = get_track_cues(cues, selected["track_number"])
@@ -134,6 +148,7 @@ def _extract_single_track_data(
         batch_size=batch_size,
         timeout=timeout,
         verbose=verbose,
+        with_timecodes=fmt == "srt",
     )
 
     block_results = fetch_and_parse_blocks(
@@ -152,6 +167,19 @@ def _extract_single_track_data(
     for item in block_results:
         cue = item["cue"]
         block = item["block"]
+        if fmt == "srt":
+            cluster_time = cluster_headers[cue["cluster_position"]]["timecode"]
+            start_ms = max(0, ((cluster_time + block["relative_timecode"]) * scale) // 1_000_000)
+            duration = block.get("block_duration")
+            if duration is None:
+                duration = cue.get("duration")
+            events.append({
+                "text": block["payload"].decode("utf-8", errors="replace").rstrip("\x00"),
+                "start_ms": start_ms,
+                "duration_ms": (duration * scale) // 1_000_000 if duration is not None else None,
+                "cue_index": item["cue_index"],
+            })
+            continue
         parsed = parse_ass_sample(block["payload"])
 
         start_ms = (cue["time"] * scale) // 1_000_000
@@ -174,26 +202,28 @@ def _extract_single_track_data(
             "start_ms": start_ms,
         })
 
-    events.sort(key=lambda ev: (ev["read_order"], ev["cue_index"]))
-    ass_text = build_ass(codec_private, events)
+    if fmt == "srt":
+        subtitle_text = build_srt(events)
+    else:
+        events.sort(key=lambda ev: (ev["read_order"], ev["cue_index"]))
+        subtitle_text = build_ass(codec_private, events)
 
     out_file_str: str | None = None
-    if output_path:
-        out_p = Path(output_path)
+    if out_p is not None:
         out_p.parent.mkdir(parents=True, exist_ok=True)
         with out_p.open("w", encoding="utf-8", newline="") as f:
-            f.write(ass_text)
+            f.write(subtitle_text)
         out_file_str = str(out_p)
 
     res: dict[str, Any] = {
-        "format": "ass",
+        "format": fmt,
         "track_number": selected["track_number"],
         "language": selected.get("language") or "und",
         "name": selected.get("name") or "",
         "forced": selected.get("flag_forced") == 1 or "forced" in (selected.get("name") or "").lower(),
         "default": selected.get("flag_default") == 1,
         "codec_private": codec_private,
-        "content": ass_text,
+        "content": subtitle_text,
         "events": len(events),
     }
     if out_file_str:
@@ -217,7 +247,7 @@ def extract_remote_subtitle(
     ffmpeg_bytes_per_s: float = FFMPEG_THROUGHPUT_BYTES_PER_S,
 ) -> dict[str, Any] | list[dict[str, Any]]:
     """
-    Extrai legendas ASS embutidas em MKV remoto via HTTP Range sem transferir o vídeo.
+    Extrai legendas ASS/SSA e SRT de MKV remoto via HTTP Range sem transferir o vídeo.
 
     Suporta:
     - Faixa única (padrão)
@@ -273,21 +303,20 @@ def extract_remote_subtitle(
         track_output: str | Path | None = None
         if output_path:
             out_str = str(output_path)
+            fmt = subtitle_format(sel)
+            out = Path(output_path)
+            base = str(out.with_suffix("")) if out.suffix.lower() in (".ass", ".srt") else out_str
             if len(selected_tracks) == 1:
                 track_output = out_str
-            elif both:
+            elif both and not all_tracks:
                 is_forced = sel.get("flag_forced") == 1 or "forced" in (sel.get("name") or "").lower()
                 if is_forced:
-                    if out_str.lower().endswith(".ass"):
-                        track_output = out_str[:-4] + ".forced.ass"
-                    else:
-                        track_output = f"{out_str}_forced.ass"
+                    track_output = f"{base}.forced.{fmt}"
                 else:
                     track_output = out_str
             else:  # all_tracks
-                base = out_str[:-4] if out_str.lower().endswith(".ass") else out_str
                 tag = (sel.get("name") or sel.get("language") or "sub").strip().replace(" ", "_").lower()
-                track_output = f"{base}_track{sel['track_number']}_{tag}.ass"
+                track_output = f"{base}_track{sel['track_number']}_{tag}.{fmt}"
 
         res = _extract_single_track_data(
             final_url=final_url,
@@ -396,15 +425,15 @@ def extract_video_keyframes(url: str, timeout: int = 60, verbose: bool = False) 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Remote Subtitle Extractor: extração ultrarrápida de legendas ASS via HTTP Range."
+        description="Remote Subtitle Extractor: extração ultrarrápida de legendas ASS/SSA e SRT via HTTP Range."
     )
     parser.add_argument("url", help="URL remota do arquivo MKV")
-    parser.add_argument("-o", "--output", help="Caminho do arquivo .ass de saída")
+    parser.add_argument("-o", "--output", help="Caminho de saída .ass ou .srt conforme o codec (sem extensão: inferida)")
     parser.add_argument("--language", default="por", help="Idioma preferido (ex: por, eng, spa)")
     parser.add_argument("--prefer", default="brazilian", help="Texto de preferência no título da faixa")
     parser.add_argument("--forced", action="store_true", help="Priorizar faixa forçada (sinais/placas)")
     parser.add_argument("--both", action="store_true", help="Extrair tanto a legenda completa quanto a forçada (forced/placas) em uma única execução")
-    parser.add_argument("--all", action="store_true", dest="all_tracks", help="Extrair todas as faixas de legendas ASS do arquivo")
+    parser.add_argument("--all", action="store_true", dest="all_tracks", help="Extrair todas as faixas de legendas ASS/SSA e SRT do arquivo")
     parser.add_argument("--track", type=int, default=None, help="Número exato da faixa a extrair (opcional)")
     parser.add_argument("--stream-index", type=int, default=None, help="Índice global do stream como o FFmpeg numera (0:N)")
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="Tamanho do lote multi-range")
