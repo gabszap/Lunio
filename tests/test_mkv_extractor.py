@@ -341,6 +341,11 @@ class TestKeepAliveAndCost(unittest.TestCase):
         self.assertAlmostEqual(est_slow, 80.0)
         self.assertAlmostEqual(est_fast, 10.0)
 
+    def test_estimate_costs_accounts_for_multipart_batches_and_payload_bytes(self):
+        requests, seconds, _ = extractor_module.estimate_costs(800_000_000, self._cues(100), 0.2, 40_000_000, multipart=True, batch_size=50, estimated_bytes=2_000_000)
+        self.assertEqual(requests, 6)
+        self.assertAlmostEqual(seconds, 1.25)
+
     def test_a_slower_ffmpeg_makes_the_extractor_worth_it_and_a_faster_one_does_not(self):
         with mock.patch.object(extractor_module, "supports_multirange", return_value=False),              mock.patch.object(extractor_module, "measure_rtt", return_value=0.2):
             # ~1086 requisições x 0,2 s = ~217 s no extrator; o FFmpeg lendo 935 MB a 3 MB/s levaria ~312 s: o extrator compensa

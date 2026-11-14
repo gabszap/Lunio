@@ -15,6 +15,7 @@ export interface VideoInfo {
 }
 
 export interface TracksResult {
+  container?: string;
   title: string;
   rawTitle: string;
   duration: number;
@@ -413,6 +414,7 @@ export function parseTracks(stderr: string, targetUrl: string, streamUrl: string
   }
 
   const result = {
+    container: /Input #0, (.+?), from/.exec(stderr)?.[1],
     title: cleanTitle,
     rawTitle: rawFileTitle,
     parsedTorrent,

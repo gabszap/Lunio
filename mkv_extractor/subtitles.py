@@ -27,14 +27,7 @@ def ms_to_srt_time(ms: int | float) -> str:
 def build_srt(events: list[dict[str, Any]]) -> str:
     """Reconstrói SRT em ordem temporal; duração ausente termina no próximo início distinto."""
     ordered = sorted(events, key=lambda ev: (ev["start_ms"], ev["cue_index"]))
-    next_start = None
-    for event in reversed(ordered):
-        start = event["start_ms"]
-        if next_start is None or start < next_start:
-            following = next_start
-        if event["duration_ms"] is None:
-            event["duration_ms"] = following - start if following is not None else 3500
-        next_start = start
+    resolve_event_durations(ordered)
 
     lines = []
     for index, event in enumerate(ordered, 1):
@@ -42,6 +35,21 @@ def build_srt(events: list[dict[str, Any]]) -> str:
         text = event["text"].replace("\r\n", "\n").replace("\r", "\n").strip("\n").replace("\n", "\r\n")
         lines.extend([str(index), f"{ms_to_srt_time(start)} --> {ms_to_srt_time(start + event['duration_ms'])}", text, ""])
     return "\r\n".join(lines) + ("\r\n" if lines else "")
+
+
+def resolve_event_durations(events, fallback_ms=3500):
+    next_start = following = None
+    for event in reversed(sorted(events, key=lambda ev: (ev["start_ms"], ev["cue_index"]))):
+        start = event["start_ms"]
+        if next_start is None or start < next_start:
+            following = next_start
+        if event["duration_ms"] is None:
+            if following is None and fallback_ms is None:
+                from .errors import MatroskaStructureError
+                raise MatroskaStructureError("Último evento sem duração e estimativa desabilitada.")
+            event["duration_ms"] = following - start if following is not None else fallback_ms
+            event["duration_source"] = "next_start" if following is not None else "fallback_estimate"
+        next_start = start
 
 
 def ms_to_ass_time(ms: int | float) -> str:
