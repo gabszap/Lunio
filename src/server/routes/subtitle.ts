@@ -3,6 +3,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { sendApiError } from '../http';
 import { isBlockedError } from '../security';
 import { getOrExtractSubtitle } from '../media/subtitles';
+import { getMediaFingerprint } from '../media/fingerprint';
+import { getSubtitlePreparationStatus } from '../media/subtitleProgress';
 
 /** GET /api/subtitle?url=…&track=… — extrai uma legenda embutida (mkv_extractor → FFmpeg), com cache em disco. */
 export async function handleSubtitle(req: IncomingMessage, res: ServerResponse) {
@@ -19,10 +21,19 @@ export async function handleSubtitle(req: IncomingMessage, res: ServerResponse) 
       return;
     }
 
+    if (reqUrl.searchParams.get('status') === '1') {
+      const status = getSubtitlePreparationStatus(getMediaFingerprint(targetUrl, customFingerprint), track);
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      res.end(JSON.stringify(status));
+      return;
+    }
+
     // A extração continua em background mesmo se o cliente desconectar momentaneamente, garantindo que o arquivo fique no cache
     const content = await getOrExtractSubtitle(targetUrl, track, customFingerprint);
 
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('X-Subtitle-Format', 'ass');
     res.end(content);
   } catch (e: any) {
     // O detalhe (stderr do FFmpeg, caminhos) fica só no log; o cliente recebe código + frase genérica

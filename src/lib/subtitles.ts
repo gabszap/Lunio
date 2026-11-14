@@ -5,6 +5,7 @@ import {
   SubtitlePreferences,
   ResolvedMediaRef,
   SubtitleFormat,
+  SubtitlePreparationStatus,
 } from '../types/media';
 import { logger } from './logger';
 import { apiFetch } from './access';
@@ -12,6 +13,9 @@ import { collectAssFontNames, selectFontsToLoad } from './assFonts';
 import { srtToVtt } from './media';
 import { sessionManager } from './session';
 import { t } from './/i18n';
+import { requireSubtitleFormat } from './subtitleFormats';
+import { effectiveSubtitleOffset, shiftCueWindow } from './subtitleTiming';
+import { observeSubtitlePreparation } from './subtitleProgress';
 
 /**
  * Creates a JASSUB class compatible with Vidstack's LibASSTextRenderer.
@@ -226,7 +230,8 @@ export class SubtitleResolver {
           return {
             id: `embedded_${media.mediaFingerprint || media.mediaUrl}_${st.index}`,
             language: lang,
-            format,
+            format: 'ass' as const,
+            sourceFormat: format,
             source: 'embedded',
             // fingerprint estável: token novo do TorBox não invalida o cache de legendas
             url: `/api/subtitle?url=${encodeURIComponent(media.mediaUrl)}&track=${st.index}${
@@ -390,9 +395,10 @@ export class SubtitleResolver {
       // 2. Se for anime/animação asiática (JP/CN/KR ou preferência ASS):
       // ASS/SSA ganha preferência máxima para manter karaoke, estilos de fala e placas intactas
       if (isAsianOrAnime || preferences.preferAssForAnime) {
-        if (cand.format === 'ass' || cand.format === 'ssa') {
+        const sourceFormat = cand.sourceFormat || cand.format;
+        if (sourceFormat === 'ass' || sourceFormat === 'ssa') {
           score += 300;
-        } else if (cand.format === 'srt' || cand.format === 'vtt') {
+        } else if (sourceFormat === 'srt' || sourceFormat === 'vtt') {
           score += 80;
         }
       }
@@ -438,6 +444,7 @@ export class SubtitleResolver {
     signal?: AbortSignal
   ): Promise<SubtitleCandidate> {
     if (candidate.availability === 'ready' && candidate.content) {
+      candidate.format = requireSubtitleFormat(candidate.content);
       return candidate;
     }
 
@@ -452,6 +459,7 @@ export class SubtitleResolver {
       const cached = this.candidateCache.get(candidate.id)!;
       if (cached.content) {
         candidate.content = cached.content;
+        candidate.format = requireSubtitleFormat(cached.content);
         candidate.availability = 'ready';
         return candidate;
       }
@@ -462,9 +470,9 @@ export class SubtitleResolver {
     const controller = new AbortController();
     this.activeExtractionAbort = controller;
 
-    if (signal) {
-      signal.addEventListener('abort', () => controller.abort());
-    }
+    const onAbort = () => controller.abort();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) controller.abort();
 
     candidate.availability = 'pending';
 
@@ -492,6 +500,12 @@ export class SubtitleResolver {
       }
 
       const content = await res.text();
+      if (controller.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+      candidate.format = requireSubtitleFormat(content);
+      const declared = res.headers.get('X-Subtitle-Format');
+      if (declared && declared !== candidate.format && !(declared === 'ass' && candidate.format === 'ssa')) {
+        throw Object.assign(new Error('Formato entregue não corresponde ao declarado.'), { code: 'SUBTITLE_INVALID' });
+      }
       candidate.content = content;
       candidate.availability = 'ready';
       candidate.errorCode = undefined;
@@ -510,6 +524,7 @@ export class SubtitleResolver {
       }
       throw err;
     } finally {
+      signal?.removeEventListener('abort', onAbort);
       if (this.activeExtractionAbort === controller) {
         this.activeExtractionAbort = null;
       }
@@ -543,10 +558,15 @@ export class SubtitleResolver {
 export const subtitleResolver = new SubtitleResolver();
 
 export class SubtitleManager {
+  private preparationGeneration = 0;
+  private preparationController: AbortController | null = null;
+  private cancelNativeLoad: (() => void) | null = null;
   private libassRenderer: LibASSTextRenderer | null = null;
   private jassubInstance: any = null;
   private nativeTrackEl: HTMLTrackElement | null = null;
   private nativeBlobUrl: string | null = null;
+  private nativeOriginalCues: Array<{ cue: TextTrackCue; start: number; end: number }> = [];
+  private timelineOriginSec = 0;
   private currentTrack: SubtitleTrack | null = null;
   private isLibassInitialized = false;
   private subtitleDelaySec = 0; // -10.0s to +10.0s
@@ -598,7 +618,7 @@ export class SubtitleManager {
     if (typeof window !== 'undefined') {
       localStorage.setItem('vidstack_player_subtitle_delay', clamped.toString());
     }
-    this.setTimeOffset(clamped);
+    this.applySubtitleOffset();
     logger.setting('Sincronia da legenda', `${Math.round(clamped * 1000)} ms`);
   }
 
@@ -659,22 +679,66 @@ export class SubtitleManager {
     video: HTMLVideoElement,
     track: SubtitleTrack | null,
     timeOffset: number = 0,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onStatus?: (status: SubtitlePreparationStatus) => void,
   ) {
-    if (!track) {
-      this.destroyDirectJassub();
-      this.destroyNativeTrack();
-      return;
-    }
+    const generation = ++this.preparationGeneration;
+    this.preparationController?.abort();
+    const controller = new AbortController();
+    this.preparationController = controller;
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+    const preparationSignal = controller.signal;
+    const report = (status: SubtitlePreparationStatus) => {
+      if (!preparationSignal.aborted && generation === this.preparationGeneration) onStatus?.(status);
+    };
+    let stopObservation = () => {};
+    try {
+      if (!track) {
+        this.destroyDirectJassub();
+        this.destroyNativeTrack();
+        return;
+      }
+      this.timelineOriginSec = timeOffset;
+      if (!track.content) {
+        report({ stage: 'queued', updatedAt: Date.now() });
+        stopObservation = observeSubtitlePreparation(track.src, report, preparationSignal);
+        try {
+          if (track.candidate) {
+            track.content = (await subtitleResolver.prepareCandidate(track.candidate, preparationSignal)).content;
+          } else if (track.src) {
+            const response = await apiFetch(track.src, { signal: preparationSignal });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            track.content = await response.text();
+          }
+        } finally {
+          stopObservation();
+        }
+      }
+      if (preparationSignal.aborted || generation !== this.preparationGeneration) throw new DOMException('Aborted', 'AbortError');
+      const format = requireSubtitleFormat(track.content || '');
+      track.type = format === 'ass' || format === 'ssa' ? 'ass' : 'vtt';
+      const effectiveOffset = effectiveSubtitleOffset(this.timelineOriginSec, this.subtitleDelaySec);
 
-    const effectiveOffset = timeOffset !== 0 ? timeOffset : this.subtitleDelaySec;
-
-    if (track.type === 'ass' || track.type === 'ssa') {
-      this.destroyNativeTrack();
-      await this.attachDirectJassub(video, track, effectiveOffset, signal);
-    } else {
-      this.destroyDirectJassub();
-      await this.attachNativeTrack(video, track, signal);
+      if (track.type === 'ass') {
+        this.destroyNativeTrack();
+        await this.attachDirectJassub(video, track, effectiveOffset, preparationSignal, report);
+      } else {
+        this.destroyDirectJassub();
+        report({ stage: 'initializing_renderer', updatedAt: Date.now() });
+        await this.attachNativeTrack(video, track, preparationSignal);
+      }
+      report({ stage: 'ready', updatedAt: Date.now() });
+    } catch (error: any) {
+      if (error.name !== 'AbortError') report({ stage: 'failed', updatedAt: Date.now(), errorCode: error.code });
+      throw error;
+    } finally {
+      stopObservation();
+      // Promise.all can reject while sibling font transfers are still active.
+      controller.abort();
+      if (this.preparationController === controller) this.preparationController = null;
+      signal?.removeEventListener('abort', abort);
     }
   }
 
@@ -682,15 +746,20 @@ export class SubtitleManager {
     video: HTMLVideoElement,
     track: SubtitleTrack,
     timeOffset: number = 0,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onStatus?: (status: SubtitlePreparationStatus) => void,
   ) {
+    const generation = this.preparationGeneration;
+    const assertCurrent = () => {
+      if (signal?.aborted || generation !== this.preparationGeneration) throw new DOMException('Aborted', 'AbortError');
+    };
     // Destrói instância anterior e limpa canvas residual
     if (this.jassubInstance) {
-      try {
-        await this.jassubInstance.destroy();
-      } catch {}
+      const previous = this.jassubInstance;
       this.jassubInstance = null;
+      this.disposeJassub(previous);
     }
+    assertCurrent();
 
     const oldCanvas = document.querySelector('canvas.JASSUB') as HTMLCanvasElement;
     if (oldCanvas) {
@@ -703,6 +772,7 @@ export class SubtitleManager {
       return;
     }
 
+    let instance: any = null;
     try {
       logger.info(`[Legenda] Carregando "${track.label}"…`);
       let subContent = track.content;
@@ -742,10 +812,12 @@ export class SubtitleManager {
       track.content = subContent;
 
       const JASSUBModule = await import('jassub');
+      assertCurrent();
       const JASSUB = (JASSUBModule as any).default || JASSUBModule;
 
       const session = sessionManager.getSession();
       const embeddedFonts = session?.source?.fonts || [];
+      onStatus?.({ stage: 'loading_fonts', updatedAt: Date.now() });
 
       // Só as fontes que a legenda cita (o MKV costuma trazer ~24, ~46 MB). Se o servidor não souber dizer quais são
       // (rota indisponível, nomes ilegíveis), carrega todas como antes.
@@ -754,13 +826,14 @@ export class SubtitleManager {
         try {
           const res = await apiFetch(
             `/api/fontmap?url=${encodeURIComponent(session.source.mediaUrl)}&fingerprint=${encodeURIComponent(session.source.mediaFingerprint || '')}`,
-            { signal: AbortSignal.timeout(20_000) }
+            { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000) }
           );
           if (res.ok) fontMap = await res.json();
         } catch {
           // sem o mapa: carrega todas
         }
       }
+      assertCurrent();
       const { urls: embeddedFontUrls, skipped } = selectFontsToLoad(embeddedFonts, fontMap, collectAssFontNames(subContent));
 
       if (embeddedFontUrls.length > 0) {
@@ -770,6 +843,21 @@ export class SubtitleManager {
         );
       }
 
+      const fontSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000);
+      const fonts = await Promise.all([
+        '/fonts/trebuc.ttf',
+        '/fonts/trebucbd.ttf',
+        '/fonts/trebucbi.ttf',
+        '/fonts/trebucit.ttf',
+        '/jassub/default.woff2',
+        ...embeddedFontUrls,
+      ].map(async url => {
+        const response = await apiFetch(url, { signal: fontSignal });
+        if (!response.ok) throw Object.assign(new Error(t('Falha ao carregar fontes da legenda.')), { code: 'SUBTITLE_FONT_FAILED' });
+        return new Uint8Array(await response.arrayBuffer());
+      }));
+      assertCurrent();
+
       const opts: any = {
         video,
         subContent,
@@ -777,33 +865,32 @@ export class SubtitleManager {
         wasmUrl: '/jassub/wasm/jassub-worker.wasm',
         modernWasmUrl: '/jassub/wasm/jassub-worker-modern.wasm',
         defaultFont: 'Trebuchet MS',
-        fonts: [
-          '/fonts/trebuc.ttf',
-          '/fonts/trebucbd.ttf',
-          '/fonts/trebucbi.ttf',
-          '/fonts/trebucit.ttf',
-          '/jassub/default.woff2',
-          ...embeddedFontUrls,
-        ],
+        fonts,
         timeOffset: timeOffset || 0,
         asyncRender: true,
       };
 
-      this.jassubInstance = new JASSUB(opts);
-
-      await Promise.race([
-        this.jassubInstance.ready,
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error(`Tempo limite de ${LIBASS_INIT_TIMEOUT_MS / 1000}s esgotado ao inicializar LibASS WASM.`)), LIBASS_INIT_TIMEOUT_MS)
-        ),
-      ]);
+      instance = new JASSUB(opts);
+      this.jassubInstance = instance;
+      onStatus?.({ stage: 'initializing_renderer', updatedAt: Date.now() });
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', aborted); };
+        const aborted = () => { cleanup(); reject(new DOMException('Aborted', 'AbortError')); };
+        const timer = setTimeout(() => { cleanup(); reject(new Error(`Tempo limite de ${LIBASS_INIT_TIMEOUT_MS / 1000}s esgotado ao inicializar LibASS WASM.`)); }, LIBASS_INIT_TIMEOUT_MS);
+        signal?.addEventListener('abort', aborted, { once: true });
+        if (signal?.aborted) aborted();
+        Promise.resolve(instance.ready).then(() => { cleanup(); resolve(); }, error => { cleanup(); reject(error); });
+      });
+      assertCurrent();
+      instance.timeOffset = effectiveSubtitleOffset(this.timelineOriginSec, this.subtitleDelaySec);
 
       this.currentTrack = track;
 
       // Posiciona o canvas perfeitamente sobre a camada de vídeo com fundo 100% transparente
       const setupCanvas = () => {
+        if (signal?.aborted || generation !== this.preparationGeneration || this.jassubInstance !== instance) return;
         const canvas =
-          (this.jassubInstance?._canvas as HTMLCanvasElement) ||
+          (instance?._canvas as HTMLCanvasElement) ||
           (video.parentElement?.querySelector('canvas.JASSUB') as HTMLCanvasElement) ||
           (document.querySelector('canvas.JASSUB') as HTMLCanvasElement);
 
@@ -823,12 +910,14 @@ export class SubtitleManager {
       };
 
       setupCanvas();
-      setTimeout(setupCanvas, 80);
-      setTimeout(setupCanvas, 300);
 
       logger.info(`[Legenda] Exibindo "${track.label}" (ASS)`);
     } catch (err: any) {
-      if (err.name === 'AbortError') return;
+      if (instance && this.jassubInstance === instance) {
+        this.jassubInstance = null;
+        this.disposeJassub(instance);
+      }
+      if (err.name === 'AbortError') throw err;
       logger.error('[Legenda] Falha ao ativar o renderizador de ASS:', err);
       throw err;
     }
@@ -836,7 +925,8 @@ export class SubtitleManager {
 
   public async attachNativeTrack(video: HTMLVideoElement, track: SubtitleTrack, signal?: AbortSignal) {
     this.destroyNativeTrack();
-
+    const generation = this.preparationGeneration;
+    let ownedTrack: HTMLTrackElement | null = null;
     try {
       let content = track.content;
       if (!content) {
@@ -862,6 +952,7 @@ export class SubtitleManager {
       }
 
       if (!content) return;
+      if (signal?.aborted || generation !== this.preparationGeneration) throw new DOMException('Aborted', 'AbortError');
       track.content = content;
 
       const vttContent = content.trim().startsWith('WEBVTT') ? content : srtToVtt(content);
@@ -870,29 +961,57 @@ export class SubtitleManager {
       this.nativeBlobUrl = blobUrl;
 
       const trackEl = document.createElement('track');
+      ownedTrack = trackEl;
       trackEl.kind = 'subtitles';
       trackEl.label = track.label;
       trackEl.srclang = track.language || 'pt';
       trackEl.src = blobUrl;
       trackEl.default = true;
 
-      video.appendChild(trackEl);
       this.nativeTrackEl = trackEl;
-      this.currentTrack = track;
 
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+          clearTimeout(timer);
+          trackEl.removeEventListener('load', loaded);
+          trackEl.removeEventListener('error', failed);
+          signal?.removeEventListener('abort', aborted);
+          if (this.cancelNativeLoad === aborted) this.cancelNativeLoad = null;
+        };
+        const loaded = () => { cleanup(); resolve(); };
+        const failed = () => { cleanup(); reject(new Error('Falha ao carregar a legenda no navegador.')); };
+        const aborted = () => { cleanup(); reject(new DOMException('Aborted', 'AbortError')); };
+        const timer = setTimeout(failed, 15_000);
+        this.cancelNativeLoad = aborted;
+        trackEl.addEventListener('load', loaded, { once: true });
+        trackEl.addEventListener('error', failed, { once: true });
+        signal?.addEventListener('abort', aborted, { once: true });
+        if (signal?.aborted) aborted();
+        else {
+          video.appendChild(trackEl);
+          trackEl.track.mode = 'hidden';
+        }
+      });
+      if (signal?.aborted || generation !== this.preparationGeneration || this.nativeTrackEl !== trackEl) throw new DOMException('Aborted', 'AbortError');
+      this.currentTrack = track;
       if (trackEl.track) {
+        this.nativeOriginalCues = Array.from(trackEl.track.cues || []).map(cue => ({ cue, start: cue.startTime, end: cue.endTime }));
+        this.applySubtitleOffset();
         trackEl.track.mode = 'showing';
       }
 
       logger.info(`[Legenda] Exibindo "${track.label}" (VTT)`);
     } catch (err: any) {
-      if (err.name === 'AbortError') return;
+      if (ownedTrack && this.nativeTrackEl === ownedTrack) this.destroyNativeTrack();
+      if (err.name === 'AbortError') throw err;
       logger.error('[Legenda] Falha ao carregar a legenda VTT:', err);
       throw err;
     }
   }
 
   public destroyNativeTrack() {
+    this.cancelNativeLoad?.();
+    this.nativeOriginalCues = [];
     if (this.nativeTrackEl) {
       try {
         if (this.nativeTrackEl.track) {
@@ -933,19 +1052,38 @@ export class SubtitleManager {
   }
 
   public setTimeOffset(offset: number) {
+    this.timelineOriginSec = offset;
+    this.applySubtitleOffset();
+  }
+
+  private applySubtitleOffset() {
+    const offset = effectiveSubtitleOffset(this.timelineOriginSec, this.subtitleDelaySec);
     if (this.jassubInstance) {
       try {
         this.jassubInstance.timeOffset = offset;
         this.jassubInstance.resize(true);
       } catch {}
     }
+    const track = this.nativeTrackEl?.track;
+    if (track) {
+      const present = new Set(Array.from(track.cues || []));
+      for (const { cue, start, end } of this.nativeOriginalCues) {
+        const shifted = shiftCueWindow(start, end, offset);
+        if (!shifted) {
+          if (present.has(cue)) track.removeCue(cue);
+        } else {
+          // Reuse each browser cue to preserve its text, ID and layout settings.
+          cue.startTime = shifted.start;
+          cue.endTime = shifted.end;
+          if (!present.has(cue)) track.addCue(cue);
+        }
+      }
+    }
   }
 
   public destroyDirectJassub() {
     if (this.jassubInstance) {
-      try {
-        this.jassubInstance.destroy();
-      } catch {}
+      this.disposeJassub(this.jassubInstance);
       this.jassubInstance = null;
     }
     const canvas = document.querySelector('canvas.JASSUB') as HTMLCanvasElement;
@@ -956,7 +1094,13 @@ export class SubtitleManager {
       } catch {}
     }
     this.currentTrack = null;
-    subtitleResolver.cancelActivePreparation();
+  }
+
+  private disposeJassub(instance: any) {
+    try { void Promise.resolve(instance.destroy()).catch(() => {}); } catch {}
+    // This JASSUB version waits for ready inside destroy(). A cancelled WASM
+    // initialization must release its worker without delaying the next track.
+    try { instance._worker?.terminate(); } catch {}
   }
 
   public getCurrentTrack(): SubtitleTrack | null {

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { touchCacheFile } from '../cleanup';
+import { randomUUID } from 'node:crypto';
+import { validateAssDocument } from '../../lib/subtitleFormats';
 import { config } from '../config';
 import { spawnLimited } from '../limits';
 import { ffmpegBin, getTools, killTree } from '../tools';
@@ -13,12 +14,31 @@ import { resolveFinalCdnUrl } from './resolver';
 import { tracksCache } from './tracks';
 import { isInternalUploadUrl } from './uploads';
 import { cooldownRemainingMs, hostOf, noteRateLimited, runOnHost } from './upstreamGate';
+import { readCachedSubtitle, writeCachedSubtitle, type CachedSubtitleV2 } from './subtitleCache';
+import { subtitleProgress } from './subtitleProgress';
 
 const pendingSubtitleExtractions = new Map<string, Promise<string>>();
 const activeSubtitleProcesses = new Map<string, () => void>();
 /** Quem já está na fila do portão e pode ser promovido quando o usuário pede a mesma faixa que estava só em pré-extração. */
 const gateBumps = new Map<string, () => void>();
 const interactiveWanted = new Set<string>();
+
+function readSubtitleOutput(file: string): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(fs.readFileSync(file));
+  } catch (cause) {
+    throw Object.assign(new Error('Saída local da legenda inválida.', { cause }), { code: 'SUBTITLE_INVALID' });
+  }
+}
+
+function publishSubtitle(hash: string, track: string, content: string, producer: CachedSubtitleV2['producer']) {
+  try {
+    writeCachedSubtitle(hash, track, content, producer);
+  } catch (error: any) {
+    if (error?.code === 'SUBTITLE_INVALID') throw error;
+    throw Object.assign(new Error('Falha ao publicar cache da legenda.', { cause: error }), { code: 'SUBTITLE_CACHE_FAILED' });
+  }
+}
 
 /** `[TotalSize] 935568536` (o extrator informa o tamanho do arquivo quando prefere o FFmpeg). */
 function parseTotalSize(stderr: string): number | null {
@@ -92,9 +112,13 @@ async function extractRemoteMkvSubtitle(
     }
     let stderr = '';
     let stdout = '';
+    let finished = false;
     proc.stderr?.on('data', (d) => stderr += d.toString());
     proc.stdout?.on('data', (d) => stdout += d.toString());
     proc.on('error', (err) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
       activeSubtitleProcesses.delete(extractionKey);
       reject(err);
     });
@@ -107,26 +131,36 @@ async function extractRemoteMkvSubtitle(
     });
 
     const timer = setTimeout(() => {
+      finished = true;
       killTree(proc);
       reject(new Error(`Tempo limite de ${REMOTE_ATTEMPT_TIMEOUT_MS / 1000}s excedido no mkv_extractor.`));
     }, REMOTE_ATTEMPT_TIMEOUT_MS);
 
     proc.on('close', (code) => {
       clearTimeout(timer);
-      if (code === 0 && fs.existsSync(outputFile) && fs.statSync(outputFile).size > 50) {
+      activeSubtitleProcesses.delete(extractionKey);
+      if (finished) return;
+      finished = true;
+      if (code === 0) {
         try {
-          const content = fs.readFileSync(outputFile, 'utf-8');
+          const content = readSubtitleOutput(outputFile);
           const metadata = JSON.parse(stdout);
           if (metadata.format !== format || metadata.coverage !== 'verified' || path.resolve(metadata.output_file) !== path.resolve(outputFile)) {
             throw new Error('Formato, cobertura ou caminho de saída inconsistente no mkv_extractor.');
           }
           resolve(content);
         } catch (err: any) {
-          reject(err);
+          reject(Object.assign(err, { code: 'SUBTITLE_INVALID' }));
         }
       } else {
         const errMsg = (stderr || stdout || '').trim();
         const err: any = new Error(`mkv_extractor finalizou com código ${code}: ${errMsg.slice(-300)}`);
+        // The CLI reports local output/encoding failures separately from transport failures.
+        if (/\[FatalError\] (?:OSError|PermissionError|FileNotFoundError|IsADirectoryError|NotADirectoryError|FileExistsError):/.test(errMsg)) {
+          err.code = 'SUBTITLE_CACHE_FAILED';
+        } else if (/\[FatalError\] Unicode(?:Encode|Decode|Translate)?Error:/.test(errMsg)) {
+          err.code = 'SUBTITLE_INVALID';
+        }
         err.fallbackReason = /\[FallbackReason\] ([a-z_]+)/.exec(errMsg)?.[1];
         err.nonRetryable = Boolean(err.fallbackReason && err.fallbackReason !== 'http_transport_error');
         // O extrator avisa (código 4) quando a conta de requisições sai mais cara que ler o arquivo com o FFmpeg
@@ -158,17 +192,20 @@ async function convertLocalSrt(input: string, output: string, extractionKey: str
       return;
     }
     let stderr = '';
+    let finished = false;
     proc.stderr?.on('data', d => stderr += d.toString());
-    const timer = setTimeout(() => { killTree(proc); reject(new Error('Tempo limite na conversão local SRT → ASS.')); }, 30_000);
+    const timer = setTimeout(() => { finished = true; killTree(proc); reject(new Error('Tempo limite na conversão local SRT → ASS.')); }, 30_000);
     activeSubtitleProcesses.set(extractionKey, () => killTree(proc));
-    proc.on('error', err => { clearTimeout(timer); reject(err); });
+    proc.on('error', err => { finished = true; clearTimeout(timer); reject(err); });
     proc.on('close', code => {
       clearTimeout(timer);
       activeSubtitleProcesses.delete(extractionKey);
+      if (finished) return;
+      finished = true;
       if (code !== 0) { reject(new Error(`Falha na conversão local SRT → ASS: ${stderr.slice(-300)}`)); return; }
       try {
-        const content = fs.readFileSync(output, 'utf-8');
-        if (!content.includes('[Events]')) throw new Error('ASS local inválido.');
+        const content = readSubtitleOutput(output);
+        if (!validateAssDocument(content).valid) throw new Error('ASS local inválido.');
         resolve(content);
       } catch (err) { reject(err); }
     });
@@ -180,17 +217,10 @@ async function convertLocalSrt(input: string, output: string, extractionKey: str
  */
 async function extractSubtitleTrack(targetUrl: string, track: string, customFingerprint?: string, prefetch = false): Promise<string> {
   const hash = getMediaFingerprint(targetUrl, customFingerprint);
-  // Prefixo "s" = índice de stream do FFmpeg. O cache antigo ("_track") podia conter a faixa vizinha (bug de índice).
-  const cacheFile = path.join(SUB_CACHE_DIR, `${hash}_s${track}.ass`);
-
-  if (fs.existsSync(cacheFile) && fs.statSync(cacheFile).size > 100) {
-    touchCacheFile(cacheFile);
-    return fs.readFileSync(cacheFile, 'utf-8');
-  }
-
-  // Remove arquivo corrompido ou incompleto com 0 bytes
-  if (fs.existsSync(cacheFile)) {
-    try { fs.unlinkSync(cacheFile); } catch {}
+  const cached = readCachedSubtitle(hash, track);
+  if (cached !== null) {
+    subtitleProgress.set(hash, track, 'ready');
+    return cached;
   }
 
   const extractionKey = `${hash}_${track}`;
@@ -203,6 +233,9 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
     return await pendingSubtitleExtractions.get(extractionKey)!;
   }
 
+  subtitleProgress.set(hash, track, 'queued');
+  const temporaryFiles = new Set<string>();
+  let gateWaitTimer: ReturnType<typeof setInterval> | undefined;
   const extractionPromise = (async () => {
     try {
       const streamUrl = await resolveFinalCdnUrl(targetUrl);
@@ -222,10 +255,27 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
 
       // Uma extração por vez por host do CDN (limite de conexões do TorBox); as pedidas pelo usuário passam as pré-extrações
       const host = hostOf(streamUrl);
+      const reportGateWait = () => {
+        const wait = cooldownRemainingMs(host);
+        const stage = wait > 0 ? 'waiting_cdn' : 'queued';
+        const previous = subtitleProgress.get(hash, track);
+        const retryAt = wait > 0 ? Date.now() + wait : undefined;
+        if (previous?.stage !== stage || previous?.retryAt !== retryAt) {
+          subtitleProgress.set(hash, track, stage, { retryAt });
+        }
+      };
+      reportGateWait();
+      gateWaitTimer = setInterval(reportGateWait, 500);
+      gateWaitTimer.unref();
       const gated = runOnHost(host, prefetch && !interactiveWanted.has(extractionKey) ? 'prefetch' : 'interactive', async () => {
-      const tmpFile = path.join(SUB_CACHE_DIR, `${hash}_track${track}_${Date.now()}.tmp.ass`);
+      clearInterval(gateWaitTimer);
+      subtitleProgress.set(hash, track, 'extracting');
+      fs.mkdirSync(SUB_CACHE_DIR, { recursive: true });
+      const tmpFile = path.join(SUB_CACHE_DIR, `${hash}_track${track}_${randomUUID()}.tmp.ass`);
       const nativeFormat: 'ass' | 'srt' | null = /ass|ssa/.test(subCodec) ? 'ass' : /subrip|srt|s_text\/utf8/.test(subCodec) ? 'srt' : null;
       const nativeFile = nativeFormat === 'srt' ? tmpFile.replace(/\.ass$/, '.srt') : tmpFile;
+      temporaryFiles.add(tmpFile);
+      temporaryFiles.add(nativeFile);
 
       // 1. Tenta primeiro extração remota ultrarrápida via HTTP Range (módulo mkv_extractor)
       const isCandidateMkv = targetUrl.toLowerCase().includes('.mkv') ||
@@ -236,14 +286,14 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
 
       // Tamanho do arquivo quando o extrator preferiu o FFmpeg: serve para medir a velocidade dessa leitura
       let fileSizeForSpeed: number | null = null;
+      let nativeContent: string | undefined;
       if (isCandidateMkv && nativeFormat) {
         try {
           console.log(`[Subtitle] 🚀 Tentando extração remota ultrarrápida (HTTP Range / EBML) para faixa ${trackLabel}...`);
-          const t0 = Date.now();
-          let content = '';
           for (let attempt = 1; ; attempt++) {
             try {
-              content = await extractRemoteMkvSubtitle(streamUrl, track, nativeFile, extractionKey, ffmpegMbpsFor(host), nativeFormat);
+              subtitleProgress.set(hash, track, 'extracting');
+              nativeContent = await extractRemoteMkvSubtitle(streamUrl, track, nativeFile, extractionKey, ffmpegMbpsFor(host), nativeFormat);
               break;
             } catch (attemptErr: any) {
               // Sem Python, servidor ocupado ou estouro de tempo não melhora tentando de novo: o retry é para falha de
@@ -252,12 +302,16 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
               if (
                 attempt >= REMOTE_ATTEMPTS ||
                 attemptErr?.code === 'busy' ||
+                attemptErr?.code === 'SUBTITLE_INVALID' ||
+                attemptErr?.code === 'SUBTITLE_CACHE_FAILED' ||
                 /Python 3\.10\+ não encontrado/.test(attemptErr?.message || '') ||
                 /^Tempo limite/.test(attemptErr?.message || '') ||
                 attemptErr?.preferFfmpeg || attemptErr?.nonRetryable
               ) throw attemptErr;
               const limited = attemptErr?.httpStatus === 429;
               if (limited) noteRateLimited(host, attemptErr.retryAfter);
+              if (limited) subtitleProgress.set(hash, track, 'waiting_cdn', { retryAt: Date.now() + cooldownRemainingMs(host), errorCode: 'UPSTREAM_RATE_LIMITED' });
+              else subtitleProgress.set(hash, track, 'queued');
               console.warn(`[Subtitle] ↻ Tentativa ${attempt}/${REMOTE_ATTEMPTS} falhou na faixa ${trackLabel} (${attemptErr.message?.slice(0, 100)}). ${limited ? 'CDN pediu para esperar' : 'Tentando de novo'}…`);
               try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
               try { if (nativeFile !== tmpFile && fs.existsSync(nativeFile)) fs.unlinkSync(nativeFile); } catch {}
@@ -266,21 +320,6 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
             }
           }
 
-          if (nativeFormat === 'srt') {
-            try {
-              content = await convertLocalSrt(nativeFile, tmpFile, extractionKey);
-            } catch (error: any) {
-              if (error?.code !== 'busy') error.code = 'LOCAL_SUBTITLE_CONVERSION_FAILED';
-              throw error;
-            }
-            fs.unlinkSync(nativeFile);
-          }
-          if (fs.existsSync(tmpFile)) {
-            fs.renameSync(tmpFile, cacheFile);
-          }
-          const elapsedSec = ((Date.now() - t0) / 1000).toFixed(1);
-          console.log(`[Subtitle] ⚡ Sucesso! Faixa ${trackLabel} extraída via mkv_extractor em ${elapsedSec}s (${content.length} bytes).`);
-          return content;
         } catch (mkvErr: any) {
           try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
           try { if (nativeFile !== tmpFile && fs.existsSync(nativeFile)) fs.unlinkSync(nativeFile); } catch {}
@@ -288,7 +327,8 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
             mkvErr.code = 'url_blocked';
             throw mkvErr;
           }
-          if (mkvErr?.code === 'LOCAL_SUBTITLE_CONVERSION_FAILED') throw mkvErr;
+          if (mkvErr?.code === 'SUBTITLE_INVALID') throw mkvErr;
+          if (mkvErr?.code === 'SUBTITLE_CACHE_FAILED') throw mkvErr;
           if (mkvErr?.code === 'busy') throw mkvErr;
           if (mkvErr?.httpStatus === 429) {
             noteRateLimited(host, mkvErr.retryAfter);
@@ -304,8 +344,24 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
         }
       }
 
+      // Local validation/conversion/publication is outside the remote fallback boundary.
+      if (nativeContent !== undefined) {
+        if (nativeFormat === 'srt') {
+          subtitleProgress.set(hash, track, 'converting');
+          try {
+            nativeContent = await convertLocalSrt(nativeFile, tmpFile, extractionKey);
+          } catch (error: any) {
+            if (error?.code !== 'busy') error.code = 'LOCAL_SUBTITLE_CONVERSION_FAILED';
+            throw error;
+          }
+        }
+        publishSubtitle(hash, track, nativeContent, nativeFormat === 'srt' ? 'native-srt' : 'native-ass');
+        return nativeContent;
+      }
+
       // 2. Fallback resiliente com FFmpeg completo
       console.log(`[Subtitle] 🔄 Iniciando extração de compatibilidade via FFmpeg para faixa ${trackLabel}...`);
+      subtitleProgress.set(hash, track, 'extracting');
 
       const subCodecArgs = (subCodec.includes('ass') || subCodec.includes('ssa'))
         ? ['-c:s', 'copy']
@@ -344,8 +400,9 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
         }
         const ffmpegStartedAt = Date.now();
         let stderr = '';
+        let finished = false;
         proc.stderr?.on('data', (d) => stderr += d.toString());
-        proc.on('error', (err) => reject(err));
+        proc.on('error', (err) => { finished = true; clearTimeout(timer); reject(err); });
 
         activeSubtitleProcesses.set(extractionKey, () => {
           try {
@@ -355,6 +412,7 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
         });
 
         const timer = setTimeout(() => {
+          finished = true;
           killTree(proc);
           const timeoutErr: any = new Error('Tempo limite de 480s excedido ao extrair legenda individual.');
           timeoutErr.code = 'EXTRACTION_FAILED';
@@ -364,17 +422,18 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
         proc.on('close', (code) => {
           clearTimeout(timer);
           activeSubtitleProcesses.delete(extractionKey);
-          if (fs.existsSync(tmpFile) && fs.statSync(tmpFile).size > 50) {
+          if (finished) return;
+          finished = true;
+          if (code === 0) {
             try {
-              if (fs.existsSync(cacheFile)) fs.unlinkSync(cacheFile);
-              fs.renameSync(tmpFile, cacheFile);
-              const content = fs.readFileSync(cacheFile, 'utf-8');
+              const content = readSubtitleOutput(tmpFile);
+              publishSubtitle(hash, track, content, 'ffmpeg');
               console.log(`[Subtitle] ✅ Legenda ${trackLabel} extraída com sucesso (${content.length} bytes).`);
               // O FFmpeg leu o arquivo todo: guarda a velocidade real deste CDN para as próximas decisões
               if (fileSizeForSpeed) recordFfmpegRead(host, fileSizeForSpeed, Date.now() - ffmpegStartedAt);
               resolve(content);
-            } catch {
-              resolve(fs.readFileSync(tmpFile, 'utf-8'));
+            } catch (error) {
+              reject(error);
             }
           } else {
             try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
@@ -392,8 +451,19 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
       });
       });
       gateBumps.set(extractionKey, gated.bump);
-      return await gated.promise;
+      const content = await gated.promise;
+      subtitleProgress.set(hash, track, 'ready');
+      return content;
+    } catch (error: any) {
+      if (error?.code === 'UPSTREAM_RATE_LIMITED') {
+        subtitleProgress.set(hash, track, 'waiting_cdn', { retryAt: Date.now() + error.retryAfter * 1000, errorCode: error.code, active: false });
+      } else {
+        subtitleProgress.set(hash, track, 'failed', { errorCode: error?.code || 'EXTRACTION_FAILED' });
+      }
+      throw error;
     } finally {
+      clearInterval(gateWaitTimer);
+      for (const file of temporaryFiles) { try { fs.unlinkSync(file); } catch {} }
       pendingSubtitleExtractions.delete(extractionKey);
       activeSubtitleProcesses.delete(extractionKey);
       gateBumps.delete(extractionKey);
@@ -410,13 +480,11 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
  */
 export async function getOrExtractSubtitle(targetUrl: string, track: string, customFingerprint?: string, opts: { prefetch?: boolean } = {}): Promise<string> {
   const hash = getMediaFingerprint(targetUrl, customFingerprint);
-  const cacheFile = path.join(SUB_CACHE_DIR, `${hash}_s${track}.ass`);
-
-  // Se já existe no cache e é válido, responde em 0ms
-  if (fs.existsSync(cacheFile) && fs.statSync(cacheFile).size > 100) {
-    touchCacheFile(cacheFile);
+  const cached = readCachedSubtitle(hash, track);
+  if (cached !== null) {
+    subtitleProgress.set(hash, track, 'ready');
     warmFonts(targetUrl, customFingerprint);
-    return fs.readFileSync(cacheFile, 'utf-8');
+    return cached;
   }
 
   // Extração pontual exclusiva da faixa selecionada

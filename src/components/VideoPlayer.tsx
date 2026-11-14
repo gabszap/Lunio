@@ -4,7 +4,6 @@ import {
   MediaProvider,
   isHLSProvider,
   type MediaProviderInstance,
-  Track,
   Captions,
   type MediaPlayerInstance,
 } from '@vidstack/react';
@@ -513,20 +512,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }`}
       >
         <MediaProvider ref={mediaProviderRef} className="w-full h-full flex items-center justify-center [&_video]:!max-w-none [&_video]:!max-h-none [&_video]:!w-full [&_video]:!h-full">
-          {/* Subtitle Tracks: Apenas faixas WebVTT no Track nativo; faixas ASS/SSA são gerenciadas via LibASS/JASSUB */}
-          {detectedSubtitles
-            .filter((track) => track.type === 'vtt')
-            .map((track) => (
-              <Track
-                key={track.src}
-                src={track.src}
-                kind="subtitles"
-                label={track.label}
-                lang={track.language}
-                type={track.type}
-                default={track.default}
-              />
-            ))}
+          {/* SubtitleManager owns custom tracks and their converted, retimed blobs. */}
         </MediaProvider>
         <Captions className="vds-captions" />
       </MediaPlayer>
@@ -534,9 +520,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {/* Transmissão de tela: palco do espectador (por cima do vídeo) e faixa do Host */}
       <ScreenStage lift />
 
-      {/* Legenda obrigatória sendo preparada (PlaybackReadiness v8) */}
-      {subs.isPreparingSubtitle && readiness.selectedSubtitle.required && !subs.subtitleFailurePrompt && (
-        <SubtitlePreparingBadge label={activeSubtitle?.label} />
+      {/* Fase da legenda selecionada; o gating continua dependendo da obrigatoriedade. */}
+      {subs.isPreparingSubtitle && !subs.subtitleFailurePrompt && (
+        <SubtitlePreparingBadge label={activeSubtitle?.label} status={subs.subtitlePreparationStatus} />
       )}
 
       {/* Falha na legenda obrigatória (Gating v8) */}

@@ -1,5 +1,12 @@
 /** Dicionário PT → EN. A chave é o texto em português usado em `t('…')` / `msg('…')`. */
 export const EN: Record<string, string> = {
+  "Extraindo legenda": "Extracting subtitles",
+  "Aguardando o servidor de origem": "Waiting for the origin server",
+  "Convertendo legenda": "Converting subtitles",
+  "Carregando fontes da legenda": "Loading subtitle fonts",
+  "Preparando exibição da legenda": "Preparing subtitle display",
+  "Legenda na fila": "Subtitles queued",
+  "Falha ao carregar fontes da legenda.": "Failed to load subtitle fonts.",
   ", {n} mensagens novas": ", {n} new messages",
   ", {n} na sala": ", {n} in the room",
   "1 item": "1 item",

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from 'react';
 import type { MediaPlayerInstance } from '@vidstack/react';
-import type { AudioTrackOption, PlaybackReadiness, ResolvedMediaRef, SubtitleTrack } from '../../types/media';
+import type { AudioTrackOption, PlaybackReadiness, ResolvedMediaRef, SubtitleTrack, SubtitlePreparationStatus } from '../../types/media';
 import { logger } from '../../lib/logger';
 import { subtitleManager, subtitleResolver } from '../../lib/subtitles';
 import { getVideoElement } from './dom';
@@ -33,6 +33,7 @@ export function useSubtitles(args: {
   const readinessRef = useRef(readiness);
   readinessRef.current = readiness;
   const [isPreparingSubtitle, setIsPreparingSubtitle] = useState<boolean>(false);
+  const [subtitlePreparationStatus, setSubtitlePreparationStatus] = useState<SubtitlePreparationStatus>({ stage: 'idle', updatedAt: 0 });
 
   const [activeSubtitle, setActiveSubtitle] = useState<SubtitleTrack | null>(null);
 
@@ -122,6 +123,10 @@ export function useSubtitles(args: {
   };
 
   // Handle active subtitle changes com SubtitleManager (JASSUB WASM + Nativo) e PlaybackReadiness
+  useEffect(() => () => {
+    void subtitleManager.applyTrack(null as any, null);
+  }, []);
+
   useEffect(() => {
     let isCancelled = false;
     const abortController = new AbortController();
@@ -134,8 +139,12 @@ export function useSubtitles(args: {
 
       if (videoEl) {
         setIsPreparingSubtitle(true);
+        setSubtitlePreparationStatus({ stage: 'queued', updatedAt: Date.now() });
+        setReadiness(prev => ({ ...prev, selectedSubtitle: { ...prev.selectedSubtitle, enabled: true, ready: false, failed: false } }));
         subtitleManager
-          .applyTrack(videoEl, activeSubtitle, audioOffsetRef.current, abortController.signal)
+          .applyTrack(videoEl, activeSubtitle, audioOffsetRef.current, abortController.signal, status => {
+            if (!isCancelled) setSubtitlePreparationStatus(status);
+          })
           .then(() => {
             if (isCancelled) return;
             failedSubtitleIdsRef.current.delete(subtitleKey(activeSubtitle));
@@ -181,6 +190,7 @@ export function useSubtitles(args: {
       localStorage.removeItem('vidstack_player_subtitle');
       subtitleManager.applyTrack(null as any, null);
       setIsPreparingSubtitle(false);
+      setSubtitlePreparationStatus({ stage: 'idle', updatedAt: Date.now() });
       setSubtitleFailurePrompt(null);
       setReadiness((prev) => ({
         ...prev,
@@ -264,6 +274,7 @@ export function useSubtitles(args: {
     readiness,
     setReadiness,
     isPreparingSubtitle,
+    subtitlePreparationStatus,
     activeSubtitle,
     setActiveSubtitle,
     subtitleFailurePrompt,

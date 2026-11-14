@@ -26,6 +26,7 @@ export interface SubtitleCandidate {
   id: string;
   language: string;
   format: SubtitleFormat;
+  sourceFormat?: SubtitleFormat;
   source: SubtitleSourceType;
   url?: string;
   trackId?: number;
@@ -144,6 +145,15 @@ export type SubtitleTrack = {
   content?: string;
   candidate?: SubtitleCandidate;
 };
+
+export type SubtitlePreparationStage = 'idle' | 'queued' | 'extracting' | 'waiting_cdn' | 'converting' | 'loading_fonts' | 'initializing_renderer' | 'ready' | 'failed';
+
+export interface SubtitlePreparationStatus {
+  stage: SubtitlePreparationStage;
+  updatedAt: number;
+  retryAt?: number;
+  errorCode?: string;
+}
 
 export type AudioTrackOption = {
   id: string;

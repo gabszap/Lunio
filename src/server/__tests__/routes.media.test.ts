@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { hasBinary } from './helpers';
+import { getMediaFingerprint } from '../media/fingerprint';
 
 // Aqui o proxy PRECISA alcançar 127.0.0.1 (servidor de fixture local), então a rede privada é liberada.
 // A cobertura do bloqueio (padrão de produção) está em routes.security.test.ts.
@@ -153,30 +154,39 @@ describe.skipIf(!ffmpegOk)('rotas de mídia (FFmpeg)', () => {
       const res = await fetch(`${api.base}/api/subtitle?url=${encodeURIComponent(mediaUrl)}&track=3&fingerprint=t-sub-${Date.now()}`, h());
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toContain('text/plain');
+      expect(res.headers.get('x-subtitle-format')).toBe('ass');
       expect(await res.text()).toContain('Legenda de teste do Lunio');
     });
 
-    it('token novo com o mesmo fingerprint reaproveita o cache (nenhum arquivo novo)', async () => {
+    it('token novo com o mesmo fingerprint reaproveita o mesmo envelope', async () => {
       const fp = `ih:abc|f:0|n:teste.mkv|s:-${Date.now()}`;
       const url = (t: string) => `${api.base}/api/subtitle?url=${encodeURIComponent(`${mediaUrl}?token=${t}`)}&track=3&fingerprint=${encodeURIComponent(fp)}`;
       const first = await fetch(url('AAA'), h());
       expect(first.status).toBe(200);
-      const afterFirst = listCache().length;
+      const file = path.join(CACHE, 'subtitles', `${getMediaFingerprint(mediaUrl, fp)}_s3_v2.json`);
+      const afterFirst = fs.readFileSync(file, 'utf8');
+      expect(JSON.parse(afterFirst)).toMatchObject({ version: 2, track: '3', format: 'ass' });
       const second = await fetch(url('BBB'), h());
       expect(second.status).toBe(200);
       expect(await second.text()).toContain('Legenda de teste');
-      expect(listCache().length).toBe(afterFirst);
+      expect(fs.readFileSync(file, 'utf8')).toBe(afterFirst);
     });
 
     it('outro arquivo do mesmo torrent (fileIndex diferente) não divide cache', async () => {
       const base = `ih:def|f:%d|n:teste.mkv|s:-${Date.now()}`;
       const get = (i: number) => fetch(`${api.base}/api/subtitle?url=${encodeURIComponent(mediaUrl)}&track=3&fingerprint=${encodeURIComponent(base.replace('%d', String(i)))}`, h());
       expect((await get(0)).status).toBe(200);
-      // Só as legendas: a extração de uma legenda também começa a ler as fontes do arquivo (pasta em `fonts/`)
-      const subtitleFiles = () => listCache().filter((f) => f.includes(`${path.sep}subtitles${path.sep}`)).length;
-      const n0 = subtitleFiles();
+      const key = (i: number) => getMediaFingerprint(mediaUrl, base.replace('%d', String(i)));
+      const file = (i: number) => path.join(CACHE, 'subtitles', `${key(i)}_s3_v2.json`);
+      expect(fs.existsSync(file(0))).toBe(true);
+      expect(fs.existsSync(file(1))).toBe(false);
       expect((await get(1)).status).toBe(200);
-      expect(subtitleFiles()).toBe(n0 + 1);
+      expect(key(0)).not.toBe(key(1));
+      for (const i of [0, 1]) {
+        const entry = JSON.parse(fs.readFileSync(file(i), 'utf8'));
+        expect(entry).toMatchObject({ version: 2, mediaKey: key(i), track: '3', format: 'ass' });
+        expect(entry.content).toContain('Legenda de teste');
+      }
     });
 
     it('faixa que não existe: 422 EXTRACTION_FAILED, sem arquivo ASS falso e sem vazar detalhes', async () => {

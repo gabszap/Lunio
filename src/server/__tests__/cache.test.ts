@@ -79,7 +79,7 @@ describe('sweepCache: idade por tipo e limite de tamanho', () => {
   it('legendas e HLS passam de 24 h; fontes só de 7 dias; o que está dentro do prazo fica', () => {
     const root = makeRoot();
     put(path.join(root, 'subtitles', 'velha_s3.ass'), 100, 25 * HOUR);
-    put(path.join(root, 'subtitles', 'nova_s3.ass'), 100, 2 * HOUR);
+    put(path.join(root, 'subtitles', 'nova_s3_v2.json'), 100, 2 * HOUR);
     put(path.join(root, 'fonts', 'midia1', 'f1.ttf'), 100, 3 * 24 * HOUR); // 3 dias: fonte fica
     put(path.join(root, 'fonts', 'midia2', 'f1.ttf'), 100, 8 * 24 * HOUR); // 8 dias: sai
     put(path.join(root, 'hls', 'm1', '0.ts'), 100, 30 * HOUR);
@@ -89,7 +89,7 @@ describe('sweepCache: idade por tipo e limite de tamanho', () => {
 
     expect(removed).toBe(3);
     expect(fs.existsSync(path.join(root, 'subtitles', 'velha_s3.ass'))).toBe(false);
-    expect(fs.existsSync(path.join(root, 'subtitles', 'nova_s3.ass'))).toBe(true);
+    expect(fs.existsSync(path.join(root, 'subtitles', 'nova_s3_v2.json'))).toBe(true);
     expect(fs.existsSync(path.join(root, 'fonts', 'midia1'))).toBe(true);
     expect(fs.existsSync(path.join(root, 'fonts', 'midia2'))).toBe(false);
     expect(fs.existsSync(path.join(root, 'hls', 'm1'))).toBe(false);
@@ -106,12 +106,12 @@ describe('sweepCache: idade por tipo e limite de tamanho', () => {
 
   it('ainda acima do limite: sai o menos usado primeiro, só até caber', () => {
     const root = makeRoot();
-    put(path.join(root, 'subtitles', 'a_s1.ass'), 400, 5 * HOUR);
-    put(path.join(root, 'subtitles', 'b_s1.ass'), 400, 3 * HOUR);
+    put(path.join(root, 'subtitles', 'a_s1_v2.json'), 400, 5 * HOUR);
+    put(path.join(root, 'subtitles', 'b_s1_v2.json'), 400, 3 * HOUR);
     put(path.join(root, 'subtitles', 'c_s1.ass'), 400, 1 * HOUR);
     expect(sweepCache(NOW, root, ages, 900)).toBe(1); // 1200 → 800
-    expect(fs.existsSync(path.join(root, 'subtitles', 'a_s1.ass'))).toBe(false);
-    expect(fs.existsSync(path.join(root, 'subtitles', 'b_s1.ass'))).toBe(true);
+    expect(fs.existsSync(path.join(root, 'subtitles', 'a_s1_v2.json'))).toBe(false);
+    expect(fs.existsSync(path.join(root, 'subtitles', 'b_s1_v2.json'))).toBe(true);
   });
 
   it('não apaga o que foi mexido há menos de 2 min, mesmo acima do limite', () => {

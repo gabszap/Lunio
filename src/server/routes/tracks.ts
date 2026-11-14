@@ -1,14 +1,12 @@
 import { sharedFingerprint, urlParam } from './linkParam';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import fs from 'node:fs';
-import path from 'node:path';
 import { sendApiError } from '../http';
 import { spawnLimited } from '../limits';
 import { isBlockedError } from '../security';
 import { ffmpegBin } from '../tools';
 import { FFMPEG_NET_ONLY } from '../media/ffmpeg';
 import { getMediaFingerprint } from '../media/fingerprint';
-import { SUB_CACHE_DIR } from '../media/paths';
+import { readCachedSubtitle } from '../media/subtitleCache';
 import { resolveFinalCdnUrl } from '../media/resolver';
 import { getOrExtractSubtitle } from '../media/subtitles';
 import { parseTracks, tracksCache, videoLineForLog } from '../media/tracks';
@@ -109,8 +107,7 @@ export async function handleTracks(req: IncomingMessage, res: ServerResponse) {
           if (pSub && pSub.index !== undefined) {
             const subTrackIdx = String(pSub.index);
             const subHash = getMediaFingerprint(targetUrl, trackFingerprint);
-            const subCacheFile = path.join(SUB_CACHE_DIR, `${subHash}_s${subTrackIdx}.ass`);
-            if (!fs.existsSync(subCacheFile)) {
+            if (readCachedSubtitle(subHash, subTrackIdx) === null) {
               console.log(`[Tracks] 🚀 Pré-extraindo legenda prioritária #${subTrackIdx} (${pSub.title}) em background para o cache...`);
               getOrExtractSubtitle(targetUrl, subTrackIdx, trackFingerprint, { prefetch: true }).catch((e) => {
                 console.warn(`[Tracks] Pré-extração de legenda deferida:`, e.message);
