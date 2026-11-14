@@ -18,7 +18,7 @@ export function tabFromPath(pathname: string): HomeTab {
 }
 
 /** Parâmetros que só fazem sentido no catálogo. */
-const CATALOG_PARAMS = ['search', 'detail', 'season', 'genre'];
+const CATALOG_PARAMS = ['search', 'detail', 'season', 'genre', 'calendar'];
 
 /** Leva o endereço para a rota da aba (entrada nova no histórico). Já estando nela, não faz nada. */
 export function pushTabUrl(tab: HomeTab) {

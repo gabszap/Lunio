@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { sendApiError, sendJson } from '../http';
+import { calendarService } from '../calendar';
 import {
   CATALOG_ID_RE,
   CATALOG_TYPE_RE,
@@ -28,6 +29,11 @@ export async function handleCatalog(req: IncomingMessage, res: ServerResponse) {
 
   try {
     if (req.method !== 'GET') return void sendApiError(res, 405, 'method_not_allowed');
+
+    if (action === 'calendar') {
+      try { return void sendJson(res, 200, await calendarService.get()); }
+      catch { return void sendApiError(res, 502, 'catalog_unavailable'); }
+    }
 
     if (action === 'manifest') {
       return void sendJson(res, 200, await getManifest());

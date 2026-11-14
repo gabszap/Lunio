@@ -18,6 +18,7 @@ import { DetailRef, DiscoverRef, discoverFromUrl, writeDetailToUrl, writeDiscove
 import { AddonsPanel } from './AddonsPanel';
 import { Detail } from './Detail';
 import { Discover } from './Discover';
+import { Calendar } from './Calendar';
 import { HomeRows } from './HomeRows';
 import { PosterCard } from './Poster';
 import { Row } from './Row';
@@ -108,8 +109,11 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   const [discoverOpen, setDiscoverOpen] = useState(initialDiscover !== null);
   const [discoverSel, setDiscoverSel] = useState<DiscoverRef | null>(initialDiscover);
   const discoverScroll = useRef(0);
+  const [calendarOpen, setCalendarOpen] = useState(() => new URLSearchParams(window.location.search).get('calendar') === '1');
+  const calendarScroll = useRef(0);
   const openItem = (item: CatalogItem) => {
     if (discoverOpen) discoverScroll.current = window.scrollY;
+    if (calendarOpen) calendarScroll.current = window.scrollY;
     setEpisodeId(null);
     setSelected(item);
   };
@@ -151,6 +155,18 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   useEffect(() => () => writeDiscoverToUrl(null), []);
 
   useEffect(() => {
+    const url = new URL(window.location.href);
+    if (calendarOpen) url.searchParams.set('calendar', '1');
+    else url.searchParams.delete('calendar');
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+  }, [calendarOpen, selected]);
+  useEffect(() => () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('calendar');
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+  }, []);
+
+  useEffect(() => {
     if (!debounced) {
       setResults(null);
       return;
@@ -169,12 +185,12 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
 
   useEffect(() => {
     if (!selected) setMyList(getMyList());
-    window.scrollTo({ top: !selected && discoverOpen ? discoverScroll.current : 0 });
+    window.scrollTo({ top: !selected && discoverOpen ? discoverScroll.current : !selected && calendarOpen ? calendarScroll.current : 0 });
     // só ao abrir ou fechar um título
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
-  if (selected || discoverOpen) {
+  if (selected || discoverOpen || calendarOpen) {
     const fromUrl = selected && initialDetail && initialDetail.id === selected.id && initialDetail.type === selected.type;
     // O Explorar fica no mesmo lugar da árvore com ou sem título aberto (escondido por baixo dele), então não perde a grade nem a posição
     return (
@@ -197,6 +213,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
           />
         )}
         {selected && <AddonsPanel open={addonsOpen} onClose={() => setAddonsOpen(false)} onChange={setAddons} />}
+        {calendarOpen && <div hidden={Boolean(selected)}><Calendar myList={myList} onOpen={openItem} onBack={() => setCalendarOpen(false)} /></div>}
         {discoverOpen && (
           <div hidden={Boolean(selected)}>
             <Discover
@@ -264,7 +281,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
           <Puzzle size={16} />
           <span>{t('Addons')}</span>
         </GhostButton>
-        <GhostButton disabled title={t('Em breve')}>
+        <GhostButton onClick={() => setCalendarOpen(true)}>
           <CalendarDays size={16} />
           <span>{t('Calendário')}</span>
         </GhostButton>
