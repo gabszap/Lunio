@@ -26,7 +26,7 @@ async function readJson(file: string): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-/** Protótipo: cache em memória, URLs fixas, uma atualização compartilhada por vez. */
+/** Índice AniSchedule de metadados/IDs. O horário AniList não substitui a distribuição Sub do AnimeSchedule. */
 export function createCalendarService(read: ReadJson = readJson, now = () => Date.now()) {
   const stored = new Map<string, { data: unknown[]; at: number; signature: string }>();
   let cached: CalendarData | null = null;

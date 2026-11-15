@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeCalendar, calendarWeek, localDayKey, matchCalendarItem } from './calendar';
+import { normalizeCalendar, calendarWeek, localDayKey, matchCalendarItem, filterCalendarEvents, DEFAULT_CALENDAR_FILTERS, parseCalendarFilters } from './calendar';
 
 describe('agenda AniSchedule', () => {
   const media = { id: 195516, idMal: 61987, title: { english: 'The Apothecary Diaries Season 3' }, airingSchedule: { nodes: [{ episode: 8, airingAt: 1795183200 }] } };
@@ -35,5 +35,20 @@ describe('agenda AniSchedule', () => {
     expect(week[6].getDay()).toBe(0);
     expect(localDayKey(week[0])).toBe('2026-10-26');
     expect(localDayKey(week[6])).toBe('2026-11-01');
+  });
+
+  it('filtra formatos, Donghua, plataforma e busca, com popularidade como ordem padrão', () => {
+    const base = normalizeCalendar([{ kind: 'sub', schedule: [media], feed: [] }])[0];
+    const events = [
+      { ...base, key: 'tv', title: 'Nia Liston', format: 'TV', popularity: 200, platforms: ['HiDive'] },
+      { ...base, key: 'short', title: 'Curta', format: 'TV_SHORT', popularity: 500 },
+      { ...base, key: 'cn', title: 'Donghua', format: 'ONA', donghua: true, popularity: 600 },
+      { ...base, key: 'popular', title: 'Outro anime', format: 'TV', popularity: 400 },
+    ];
+    expect(filterCalendarEvents(events, DEFAULT_CALENDAR_FILTERS).map(e => e.key)).toEqual(['popular', 'tv']);
+    expect(filterCalendarEvents(events, { ...DEFAULT_CALENDAR_FILTERS, platform: 'HiDive' }).map(e => e.key)).toEqual(['tv']);
+    expect(filterCalendarEvents(events, DEFAULT_CALENDAR_FILTERS, 'NÍA')).toHaveLength(1);
+    expect(filterCalendarEvents(events, { ...DEFAULT_CALENDAR_FILTERS, formats: ['ONA'], showDonghua: true }).map(e => e.key)).toEqual(['cn']);
+    expect(parseCalendarFilters({ formats: ['TV', 'inexistente'], sort: 'inválida' })).toMatchObject({ formats: ['TV'], sort: 'popularity' });
   });
 });

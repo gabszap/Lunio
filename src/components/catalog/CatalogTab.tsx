@@ -14,7 +14,7 @@ import {
 } from '../../lib/catalog';
 import { GhostButton, IconButton, PillTabs, PrimaryButton, Spinner } from '../ui';
 import { t } from '../../lib/i18n';
-import { DetailRef, DiscoverRef, discoverFromUrl, writeDetailToUrl, writeDiscoverToUrl, writeSearchToUrl } from '../../lib/searchUrl';
+import { DetailRef, DiscoverRef, discoverFromUrl, writeDetailToUrl, writeDiscoverToUrl, writeSearchToUrl, readCalendarFromUrl, writeCalendarToUrl } from '../../lib/searchUrl';
 import { AddonsPanel } from './AddonsPanel';
 import { Detail } from './Detail';
 import { Discover } from './Discover';
@@ -109,7 +109,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   const [discoverOpen, setDiscoverOpen] = useState(initialDiscover !== null);
   const [discoverSel, setDiscoverSel] = useState<DiscoverRef | null>(initialDiscover);
   const discoverScroll = useRef(0);
-  const [calendarOpen, setCalendarOpen] = useState(() => new URLSearchParams(window.location.search).get('calendar') === '1');
+  const [calendarOpen, setCalendarOpen] = useState(readCalendarFromUrl);
   const calendarScroll = useRef(0);
   const openItem = (item: CatalogItem) => {
     if (discoverOpen) discoverScroll.current = window.scrollY;
@@ -137,8 +137,8 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   // A busca vai para o endereço (e sai dele quando a aba fecha). Com um título aberto a rota é só /detail/…: a busca volta
   // ao endereço quando o título fecha (ela continua aqui, no estado)
   useEffect(() => {
-    writeSearchToUrl(selected ? '' : debounced);
-  }, [debounced, selected]);
+    writeSearchToUrl(selected || calendarOpen ? '' : debounced);
+  }, [debounced, selected, calendarOpen]);
   useEffect(() => () => writeSearchToUrl(''), []);
   // O título aberto também vai para o endereço
   useEffect(() => {
@@ -155,16 +155,9 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   useEffect(() => () => writeDiscoverToUrl(null), []);
 
   useEffect(() => {
-    const url = new URL(window.location.href);
-    if (calendarOpen) url.searchParams.set('calendar', '1');
-    else url.searchParams.delete('calendar');
-    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    writeCalendarToUrl(calendarOpen && !selected);
   }, [calendarOpen, selected]);
-  useEffect(() => () => {
-    const url = new URL(window.location.href);
-    url.searchParams.delete('calendar');
-    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
-  }, []);
+  useEffect(() => () => writeCalendarToUrl(false), []);
 
   useEffect(() => {
     if (!debounced) {

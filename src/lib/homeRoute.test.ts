@@ -4,6 +4,8 @@ import { canonicalizeCatalogUrl, pushTabUrl, tabFromPath } from './homeRoute';
 describe('tabFromPath', () => {
   it('/catalog é o catálogo, /status o status, e /, /home e o que não existe são a Sala', () => {
     expect(tabFromPath('/catalog')).toBe('catalog');
+    expect(tabFromPath('/calendar')).toBe('catalog');
+    expect(tabFromPath('/calendar/')).toBe('catalog');
     expect(tabFromPath('/discover/series/streaming.cru_series')).toBe('catalog');
     expect(tabFromPath('/catalog/')).toBe('catalog');
     expect(tabFromPath('/status')).toBe('status');

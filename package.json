@@ -29,6 +29,7 @@
     "jassub": "^2.5.16",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "parse5": "^8.1.1",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "vidstack": "^1.15.6",

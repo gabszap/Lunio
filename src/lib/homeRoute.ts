@@ -12,7 +12,7 @@ export const TAB_PATHS: Record<HomeTab, string> = { catalog: '/catalog', room: '
 /** Aba de um caminho; `/`, `/home` e qualquer rota desconhecida são a Sala. */
 export function tabFromPath(pathname: string): HomeTab {
   const p = pathname.replace(/\/+$/, '') || '/';
-  if (p === TAB_PATHS.catalog || p.startsWith('/detail/') || p.startsWith('/discover/')) return 'catalog';
+  if (p === TAB_PATHS.catalog || p === '/calendar' || p.startsWith('/detail/') || p.startsWith('/discover/')) return 'catalog';
   if (p === TAB_PATHS.status) return 'status';
   return 'room';
 }

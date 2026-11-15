@@ -3,8 +3,15 @@ import type { CatalogItem } from './catalog';
 export type CalendarKind = 'sub' | 'dub';
 export interface CalendarEvent {
   key: string;
-  anilistId: number;
+  anilistId?: number;
   malId?: string;
+  route?: string;
+  aliases?: string[];
+  format?: string;
+  donghua?: boolean;
+  platforms?: string[];
+  popularity?: number;
+  totalEpisodes?: number;
   title: string;
   poster?: string;
   episode: number;
@@ -21,8 +28,34 @@ export interface CalendarData {
   failedSources: string[];
   rangeStart: string;
   rangeEnd: string;
+  source?: string;
 }
 export interface CalendarSource { kind: CalendarKind; schedule: unknown[]; feed: unknown[] }
+
+export const CALENDAR_FORMATS = ['TV', 'TV_SHORT', 'ONA', 'OVA', 'SPECIAL', 'MOVIE', 'OTHER'] as const;
+export interface CalendarFilters { formats: string[]; showDonghua: boolean; platform: string; sort: 'popularity' | 'time' | 'name' }
+export const DEFAULT_CALENDAR_FILTERS: CalendarFilters = { formats: ['TV', 'ONA'], showDonghua: false, platform: '', sort: 'popularity' };
+export function parseCalendarFilters(raw: unknown): CalendarFilters {
+  const value = raw as Partial<CalendarFilters> | null;
+  if (!value || typeof value !== 'object') return { ...DEFAULT_CALENDAR_FILTERS };
+  return {
+    formats: Array.isArray(value.formats) ? value.formats.filter(f => CALENDAR_FORMATS.includes(f as typeof CALENDAR_FORMATS[number])) : [...DEFAULT_CALENDAR_FILTERS.formats],
+    showDonghua: value.showDonghua === true,
+    platform: typeof value.platform === 'string' ? value.platform.slice(0, 60) : '',
+    sort: value.sort === 'time' || value.sort === 'name' ? value.sort : 'popularity',
+  };
+}
+export function filterCalendarEvents(events: CalendarEvent[], filters: CalendarFilters, query = ''): CalendarEvent[] {
+  const normalize = (value: string) => value.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
+  const q = normalize(query.trim());
+  return events.filter(event => filters.formats.includes(event.format ?? 'TV')
+    && (filters.showDonghua || !event.donghua)
+    && (!filters.platform || event.platforms?.includes(filters.platform))
+    && (!q || [event.title, ...(event.aliases ?? [])].some(title => normalize(title).includes(q))))
+    .sort((a, b) => filters.sort === 'name' ? a.title.localeCompare(b.title)
+      : filters.sort === 'time' ? (a.at ?? '9999').localeCompare(b.at ?? '9999') || a.title.localeCompare(b.title)
+      : (b.popularity ?? 0) - (a.popularity ?? 0) || a.title.localeCompare(b.title));
+}
 
 /** Adaptador do formato publicado: agenda e histórico têm contratos diferentes. */
 export function normalizeCalendar(sources: CalendarSource[]): CalendarEvent[] {
@@ -44,6 +77,7 @@ export function normalizeCalendar(sources: CalendarSource[]): CalendarEvent[] {
     const key = `${kind}:${raw.id}:${episode}`;
     events.set(key, {
       key, anilistId: raw.id, malId: Number.isInteger(malId) && malId > 0 ? String(malId) : undefined,
+      aliases: Object.values(m.title ?? {}).filter((title): title is string => typeof title === 'string'),
       title: typeof name === 'string' ? name.slice(0, 300) : `Anime ${malId ? `MAL ${malId}` : `AniList ${raw.id}`}`,
       poster: typeof poster === 'string' && /^https:\/\//i.test(poster) ? poster.slice(0, 1000) : undefined,
       episode: episode as number, kind, at: validTime ? new Date(time).toISOString() : null,
