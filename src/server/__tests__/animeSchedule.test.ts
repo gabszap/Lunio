@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { parseTimetable, parseScheduleIdentity, isoWeek, createAnimeScheduleService } from '../animeSchedule';
+import { parseTimetable, parseScheduleIdentity, isoWeek, createAnimeScheduleService, validCalendarQuery } from '../animeSchedule';
 
 function tile(kind: string, time: string) {
   return `<div data-route="nia-liston" data-aired-episode="6" data-episodes="25" data-popularity="992.41" data-media-types="tv" class="timetable-column-show">
@@ -39,6 +39,34 @@ describe('AnimeSchedule: horários reais de distribuição', () => {
     expect(isoWeek('2026-11-09')).toEqual({ year: 2026, week: 46 });
     expect(isoWeek('2027-01-04')).toEqual({ year: 2027, week: 1 });
     expect(isoWeek('2026-12-28')).toEqual({ year: 2026, week: 53 });
+  });
+
+  it('valida datas e fusos sem impor outro horizonte à navegação da fonte', () => {
+    expect(validCalendarQuery('2020-01-06', 'America/Halifax')).toBe(true);
+    expect(validCalendarQuery('2030-01-07', 'UTC')).toBe(true);
+    expect(validCalendarQuery('2026-02-30', 'UTC')).toBe(false);
+    expect(validCalendarQuery('0000-01-01', 'UTC')).toBe(false);
+    expect(validCalendarQuery('2026-11-09', 'UTC; injected=1')).toBe(false);
+    expect(validCalendarQuery('2026-11-09', 'Not/AZone')).toBe(false);
+  });
+
+  it('respeita a navegação publicada pela fonte e não inventa semanas depois da última', async () => {
+    const page = `<div id="timetable-wrapper" data-year="2026" data-week="49"><a id="previous-week-link" href="?year=2026&amp;week=48">Anterior</a>${html}</div>`;
+    const service = createAnimeScheduleService(async () => page);
+    expect(await service.get('2026-11-30', 'UTC')).toMatchObject({ navigation: { current: '2026-11-30', previous: '2026-11-23', next: null } });
+  });
+
+  it('uma grade vazia válida mantém os links da fonte, inclusive na virada do ano', async () => {
+    const page = '<div id="timetable-wrapper" data-year="2026" data-week="53"><a id="previous-week-link" href="?year=2026&amp;week=52">Anterior</a><a id="next-week-link" href="?year=2027&amp;week=1">Próxima</a><div id="timetable"></div></div>';
+    const service = createAnimeScheduleService(async () => page);
+    expect(await service.get('2026-12-28', 'UTC')).toMatchObject({ events: [], navigation: { current: '2026-12-28', previous: '2026-12-21', next: '2027-01-04' } });
+  });
+
+  it('rejeita uma página de outra semana e não usa links externos como navegação', async () => {
+    const page = `<div id="timetable-wrapper" data-year="2026" data-week="49"><a id="next-week-link" href="https://evil.test/?year=2026&amp;week=50">Próxima</a>${html}</div>`;
+    const service = createAnimeScheduleService(async () => page);
+    await expect(service.get('2026-12-07', 'UTC')).rejects.toThrow();
+    expect(await service.get('2026-11-30', 'UTC')).toMatchObject({ navigation: { next: null } });
   });
 
   it('envia o fuso com barra literal no cookie, conforme o formato aceito pela fonte', async () => {

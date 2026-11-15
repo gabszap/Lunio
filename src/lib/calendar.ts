@@ -29,6 +29,7 @@ export interface CalendarData {
   rangeStart: string;
   rangeEnd: string;
   source?: string;
+  navigation?: { current: string; previous: string | null; next: string | null };
 }
 export interface CalendarSource { kind: CalendarKind; schedule: unknown[]; feed: unknown[] }
 export interface CalendarMatches {

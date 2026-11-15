@@ -11,7 +11,8 @@ test('calendário Sub/Dub: fuso local, lista por temporada, navegação e retorn
   await page.route('**/poster.svg', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="300"><rect width="200" height="300" fill="#534176"/></svg>' }));
   const identityRequests: string[] = [];
   await page.route('**/api/catalog/**', route => {
-    const action = new URL(route.request().url()).pathname.split('/').pop();
+    const url = new URL(route.request().url());
+    const action = url.pathname.split('/').pop();
     const json = (data: unknown) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(data) });
     if (action === 'calendar-match') { identityRequests.push('match'); return json({ matches: { 'kusuriya-no-hitorigoto-3rd-season': { malId: '61987', anilistId: 195516 } }, incomplete: false }); }
     if (action === 'calendar-identity') { identityRequests.push('identity'); return json({ malId: '61987', anilistId: 195516 }); }
@@ -20,6 +21,7 @@ test('calendário Sub/Dub: fuso local, lista por temporada, navegação e retorn
     if (action === 'malscore') return json({ score: null, failed: false });
     if (action === 'calendar') return json({
       checkedAt: '2026-11-14T20:00:00Z', updatedAt: '2026-11-14T20:00:00Z', stale: false, failedSources: [], rangeStart: '2026-10-01T00:00:00Z', rangeEnd: '2027-02-01T00:00:00Z',
+      navigation: { current: url.searchParams.get('date'), previous: '2026-11-02', next: url.searchParams.get('date') === '2026-11-09' ? '2026-11-16' : null },
       events: [
         { key: 'sub:1:7', route: 'kusuriya-no-hitorigoto-3rd-season', title: 'The Apothecary Diaries Season 3', kind: 'sub', episode: 7, at: '2026-11-13T14:00:00Z', delayed: false, format: 'TV', platforms: ['HiDive'], popularity: 500, poster: '/poster.svg' },
         { key: 'dub:1:5', route: 'kusuriya-no-hitorigoto-3rd-season', title: 'The Apothecary Diaries Season 3', kind: 'dub', episode: 5, at: '2026-11-13T16:00:00Z', delayed: false },
@@ -35,6 +37,11 @@ test('calendário Sub/Dub: fuso local, lista por temporada, navegação e retorn
   await page.getByRole('button', { name: 'Calendário', exact: true }).click();
   await expect(page).toHaveURL(/\/calendar$/);
   await expect(page.getByText('3 lançamentos na semana')).toBeVisible();
+  const activeFilters = page.getByRole('region', { name: 'Filtros ativos' });
+  await expect(activeFilters.getByText('Sem Donghua', { exact: true })).toBeVisible();
+  await expect(activeFilters.getByText('TV', { exact: true })).toBeVisible();
+  await expect(activeFilters.getByText('ONA', { exact: true })).toBeVisible();
+  await expect(page.getByRole('searchbox')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Abrir The Apothecary Diaries Season 3, episódio 7, Sub/ }).getByText('10:00')).toBeVisible();
   await expect(page.getByRole('button', { name: /Abrir Outro anime/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Abrir / }).first()).toHaveAccessibleName(/Outro anime/);
@@ -74,15 +81,14 @@ test('calendário Sub/Dub: fuso local, lista por temporada, navegação e retorn
   await page.getByRole('button', { name: 'Curtas de TV', exact: true }).click();
   await expect(page.getByText('5 lançamentos na semana')).toBeVisible();
   await page.getByRole('button', { name: 'Restaurar filtros', exact: true }).click();
-  await page.getByRole('searchbox', { name: 'Buscar no calendário' }).fill('Outro');
-  await expect(page.getByText('1 lançamento na semana')).toBeVisible();
-  await page.getByRole('searchbox', { name: 'Buscar no calendário' }).clear();
   await settings.getByRole('button', { name: 'HiDive', exact: true }).click();
   await expect(page.getByText('1 lançamento na semana')).toBeVisible();
+  await expect(settings.getByRole('button', { name: 'HiDive', exact: true }).locator('img')).toHaveAttribute('src', '/streaming-icons/hidive.svg');
+  await expect(activeFilters.getByText('HiDive', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Restaurar filtros', exact: true }).click();
   await settings.getByRole('button', { name: 'Fechar filtros', exact: true }).click();
   await expect(settings).toHaveCount(0);
-  await page.getByRole('switch', { name: 'Só minha lista' }).check();
+  await page.getByRole('button', { name: 'Minha lista', exact: true }).click();
   await expect(page.getByText('2 lançamentos na semana')).toBeVisible();
   await expect(page.getByRole('button', { name: /Abrir Outro anime/ })).toHaveCount(0);
   await page.getByRole('tab', { name: 'Dub', exact: true }).click();
@@ -134,7 +140,7 @@ test('Minha lista reúne temporadas pelo IMDb e preserva somente os lançamentos
       const ids = url.searchParams.get('ids')?.split(',') ?? [];
       return json({ matches: { ...(ids.includes('61987') ? { 'kusuriya-no-hitorigoto-zoku-hen': { malId: '61987' } } : {}), ...(ids.includes('21') ? { 'one-piece': { malId: '21' } } : {}) }, incomplete: false });
     }
-    if (action === 'calendar') return json({ checkedAt: '2026-11-14T20:00:00Z', updatedAt: '2026-11-14T20:00:00Z', stale: false, failedSources: [], rangeStart: '2026-10-01T00:00:00Z', rangeEnd: '2027-02-01T00:00:00Z', events: [
+    if (action === 'calendar') return json({ checkedAt: '2026-11-14T20:00:00Z', updatedAt: '2026-11-14T20:00:00Z', stale: false, failedSources: [], rangeStart: '2026-10-01T00:00:00Z', rangeEnd: '2027-02-01T00:00:00Z', navigation: { current: '2026-11-09', previous: '2026-11-02', next: '2026-11-16' }, events: [
       { key: 'apo-sub', route: 'kusuriya-no-hitorigoto-zoku-hen', title: 'The Apothecary Diaries Season 3', kind: 'sub', episode: 7, at: '2026-11-13T15:00:00Z', format: 'TV' },
       { key: 'apo-dub', route: 'kusuriya-no-hitorigoto-zoku-hen', title: 'The Apothecary Diaries Season 3', kind: 'dub', episode: 5, at: '2026-11-13T16:40:00Z', format: 'TV' },
       { key: 'op-dub', route: 'one-piece', title: 'One Piece', kind: 'dub', episode: 1159, at: '2026-11-10T17:00:00Z', format: 'TV' },
@@ -144,7 +150,7 @@ test('Minha lista reúne temporadas pelo IMDb e preserva somente os lançamentos
   });
   await page.goto('/calendar');
   await expect(page.getByText('4 lançamentos na semana')).toBeVisible();
-  await page.getByRole('switch', { name: 'Só minha lista' }).check();
+  await page.getByRole('button', { name: 'Minha lista', exact: true }).click();
   await expect(page.getByText('3 lançamentos na semana')).toBeVisible();
   await expect(page.getByRole('button', { name: /Abrir The Apothecary Diaries Season 3, episódio 7, Sub/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Abrir The Apothecary Diaries Season 3, episódio 5, Dub/ })).toBeVisible();
@@ -160,6 +166,35 @@ test('Minha lista reúne temporadas pelo IMDb e preserva somente os lançamentos
   await expect(page.getByText('1 lançamento na semana')).toBeVisible();
   await expect(page.getByRole('button', { name: /Abrir The Apothecary Diaries/ })).toHaveCount(0);
   await otherTab.close();
+});
+
+test('a navegação para no limite da fonte e continua funcionando em semanas sem resultados', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-11-30T20:00:00Z'));
+  await page.addInitScript(() => localStorage.setItem('lunio_lang', 'pt'));
+  const requests: string[] = [];
+  await page.route('**/api/catalog/**', route => {
+    const url = new URL(route.request().url());
+    const action = url.pathname.split('/').pop();
+    if (action !== 'calendar') return route.fulfill({ json: { name: 'Fixture', rows: [], metas: [] } });
+    const current = url.searchParams.get('date')!;
+    requests.push(current);
+    return route.fulfill({ json: { events: [], stale: false, failedSources: [], checkedAt: '2026-11-30T20:00:00Z', updatedAt: '2026-11-30T20:00:00Z', rangeStart: '2026-10-01T00:00:00Z', rangeEnd: '2027-03-01T00:00:00Z',
+      navigation: { current, previous: current === '2026-11-30' ? '2026-11-23' : '2026-11-16', next: current === '2026-11-30' ? null : '2026-11-30' },
+    } });
+  });
+  await page.goto('/calendar');
+  await expect(page.getByText('0 lançamentos na semana')).toBeVisible();
+  const next = page.getByRole('button', { name: 'Próxima semana', exact: true });
+  const previous = page.getByRole('button', { name: 'Semana anterior', exact: true });
+  await expect(next).toBeDisabled();
+  await expect(previous).toBeEnabled();
+  await previous.click();
+  await expect(next).toBeEnabled();
+  await next.click();
+  await expect(next).toBeDisabled();
+  await page.getByRole('region', { name: 'Informações da agenda' }).getByRole('button', { name: 'Atualizar agenda', exact: true }).click();
+  await expect.poll(() => requests.length).toBe(4);
+  expect(requests).toEqual(['2026-11-30', '2026-11-23', '2026-11-30', '2026-11-30']);
 });
 
 test('35 temporadas: abas não quebram e a última temporada é alcançável com os controles e no celular', async ({ page }) => {

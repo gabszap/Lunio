@@ -17,7 +17,9 @@ const routeValid = (route: string) => route.length <= 240 && /^[a-z0-9]+(?:-[a-z
 
 /** Lê o registro marcado como Sub/Dub, nunca infere um atraso a partir do horário Raw. */
 export function parseTimetable(html: string): CalendarEvent[] {
-  const doc = parse(html, { scriptingEnabled: false }) as HtmlNode;
+  return timetableFromDocument(parse(html, { scriptingEnabled: false }) as HtmlNode);
+}
+function timetableFromDocument(doc: HtmlNode): CalendarEvent[] {
   const timetable = nodes(doc, node => attr(node, 'id') === 'timetable')[0];
   if (!timetable) throw new Error('AnimeSchedule: grade ausente');
   const result = new Map<string, CalendarEvent>();
@@ -75,14 +77,40 @@ export function isoWeek(day: string): { year: number; week: number } {
   const date = new Date(`${day}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
   const year = date.getUTCFullYear();
-  const week = Math.ceil((((date.getTime() - Date.UTC(year, 0, 1)) / 86400_000) + 1) / 7);
+  const yearStart = Date.parse(`${String(year).padStart(4, '0')}-01-01T00:00:00Z`);
+  const week = Math.ceil((((date.getTime() - yearStart) / 86400_000) + 1) / 7);
   return { year, week };
 }
 
+function weekMonday(year: number, week: number): string | null {
+  if (!Number.isInteger(year) || year < 1 || year > 9999 || !Number.isInteger(week) || week < 1 || week > 53) return null;
+  const day = new Date(`${String(year).padStart(4, '0')}-01-04T00:00:00Z`);
+  day.setUTCDate(day.getUTCDate() - (day.getUTCDay() + 6) % 7 + (week - 1) * 7);
+  const key = day.toISOString().slice(0, 10);
+  const actual = isoWeek(key);
+  return actual.year === year && actual.week === week ? key : null;
+}
+function navigationFromDocument(doc: HtmlNode, year: number, week: number): NonNullable<CalendarData['navigation']> {
+  const wrapper = nodes(doc, node => attr(node, 'id') === 'timetable-wrapper')[0];
+  if (wrapper && (Number(attr(wrapper, 'data-year')) !== year || Number(attr(wrapper, 'data-week')) !== week)) throw new Error('AnimeSchedule: semana divergente');
+  const current = weekMonday(year, week)!;
+  const link = (id: string, direction: number): string | null => {
+    const node = nodes(doc, node => node.tagName === 'a' && attr(node, 'id') === id)[0];
+    if (!node || !attr(node, 'href')) return null;
+    try {
+      const url = new URL(attr(node, 'href'), 'https://animeschedule.net/');
+      if (url.origin !== 'https://animeschedule.net' || url.pathname !== '/') return null;
+      const target = weekMonday(Number(url.searchParams.get('year')), Number(url.searchParams.get('week')));
+      return target && Date.parse(target) - Date.parse(current) === direction * 7 * 86400_000 ? target : null;
+    } catch { return null; }
+  };
+  return { current, previous: link('previous-week-link', -1), next: link('next-week-link', 1) };
+}
+
 export function validCalendarQuery(day: string, timezone: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^[A-Za-z0-9_+\-/]+$/.test(timezone) || timezone.length > 80) return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || Number(day.slice(0, 4)) < 1 || !/^[A-Za-z0-9_+\-/]+$/.test(timezone) || timezone.length > 80) return false;
   const date = new Date(`${day}T12:00:00Z`);
-  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== day || Math.abs(Date.now() - date.getTime()) > 190 * 86400_000) return false;
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== day) return false;
   try { new Intl.DateTimeFormat('en', { timeZone: timezone }); return true; } catch { return false; }
 }
 
@@ -143,10 +171,12 @@ export function createAnimeScheduleService(read: ReadHtml = readHtml, now = () =
     if (!promise) {
       promise = (async () => {
         try {
-          const events = parseTimetable(await read(`/?year=${year}&week=${week}`, timezone));
-          if (!events.length) throw new Error('Agenda sem registros Sub/Dub');
+          const doc = parse(await read(`/?year=${year}&week=${week}`, timezone), { scriptingEnabled: false }) as HtmlNode;
+          const events = timetableFromDocument(doc);
+          const navigation = navigationFromDocument(doc, year, week);
+          if (!events.length && !nodes(doc, node => attr(node, 'id') === 'timetable-wrapper').length) throw new Error('Agenda sem registros ou navegação');
           const data: CalendarData = { events, source: 'AnimeSchedule.net', stale: false, failedSources: [], checkedAt: new Date(time).toISOString(), updatedAt: new Date(time).toISOString(),
-            rangeStart: new Date(time - 42 * 86400_000).toISOString(), rangeEnd: new Date(time + 120 * 86400_000).toISOString() };
+            navigation, rangeStart: `${navigation.previous ?? navigation.current}T00:00:00.000Z`, rangeEnd: new Date(Date.parse(navigation.next ?? navigation.current) + 7 * 86400_000 - 1).toISOString() };
           cache.set(key, { data, at: time, retryAt: time + 15 * 60_000 });
           return data;
         } catch (error) {
@@ -166,6 +196,7 @@ export function createAnimeScheduleService(read: ReadHtml = readHtml, now = () =
     const wanted = new Set(malIds);
     const matches: Record<string, ScheduleIdentity> = {};
     const routes = [...new Set(data.events.map(event => event.route!))];
+    if (!routes.length) return { matches, incomplete: false };
     const { year, week } = isoWeek(day);
     const cursorKey = `${year}:${week}:${timezone}`;
     const cursor = (matchCursors.get(cursorKey) ?? 0) % routes.length;

@@ -31,7 +31,7 @@ export function SeasonTabs({ seasons, value, onChange }: { seasons: number[]; va
     const container = bar.current;
     if (container) container.scrollBy({ left: direction * Math.max(160, container.clientWidth * 0.8), behavior: 'smooth' });
   };
-  return <div className="w-full min-w-0 flex items-center gap-1.5">
+  return <div className="w-fit max-w-full min-w-0 flex items-center gap-1.5">
     {edges.overflow && <IconButton label={t('Temporadas anteriores')} size={36} disabled={edges.start} onClick={() => move(-1)}><ChevronLeft size={18} /></IconButton>}
     <div ref={bar} role="tablist" aria-label={t('Temporadas')} className="min-w-0 flex-1 flex gap-1 p-1 overflow-x-auto custom-scrollbar rounded-xl border border-lu-border bg-lu-bg2">
       {seasons.map((season, index) => <button key={season} type="button" role="tab" aria-selected={season === value} tabIndex={season === value ? 0 : -1}

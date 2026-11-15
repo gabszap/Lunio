@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight, RefreshCw, Search, SlidersHorizontal } from 'lucide-react';
+import { Bookmark, CalendarDays, ChevronLeft, ChevronRight, RefreshCw, SlidersHorizontal } from 'lucide-react';
 import { apiFetch } from '../../lib/access';
 import { calendarWeek, localDayKey, matchCalendarItem, filterCalendarEvents, parseCalendarFilters, type CalendarData, type CalendarEvent, type CalendarMatches, type CalendarFilters } from '../../lib/calendar';
 import { fetchMeta, type CatalogItem } from '../../lib/catalog';
 import { t, useLang } from '../../lib/i18n';
 import { GhostButton, IconButton, PillTabs, Spinner, TextButton, cx } from '../ui';
 import { CalendarSettings } from './CalendarSettings';
+import { CalendarFilterSummary } from './CalendarFilterSummary';
 
 interface Props { myList: CatalogItem[]; onOpen: (item: CatalogItem) => void; onBack: () => void }
 const PREFS = 'lunio_calendar_filters';
@@ -18,7 +19,7 @@ async function readJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   return response.json();
 }
 
-/** Protótipo funcional AniSchedule: somente Sub e Dub; lista pessoal continua no navegador. */
+/** Agenda pública do AnimeSchedule: somente Sub e Dub; lista pessoal continua no navegador. */
 export function Calendar({ myList, onOpen, onBack }: Props) {
   const lang = useLang();
   const locale = lang === 'pt' ? 'pt-BR' : 'en-US';
@@ -30,7 +31,6 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
   const [onlyMine, setOnlyMine] = useState(false);
   const [filters, setFilters] = useState<CalendarFilters>(loadFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [query, setQuery] = useState('');
   const [identities, setIdentities] = useState<Record<string, { malId?: string; anilistId?: number }>>({});
   const [opening, setOpening] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
@@ -110,9 +110,9 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
     const item = matchCalendarItem(target, myList, resolved);
     return { ...target, aliases: [...(event.aliases ?? []), ...(item ? [item.name] : [])] };
   }), [activeData, identities, myList, resolved]);
-  const filtered = useMemo(() => filterCalendarEvents(enhancedEvents, filters, query).filter(event =>
+  const filtered = useMemo(() => filterCalendarEvents(enhancedEvents, filters).filter(event =>
     !onlyMine || matchCalendarItem(event, myList, resolved)
-  ), [enhancedEvents, filters, query, onlyMine, myList, resolved]);
+  ), [enhancedEvents, filters, onlyMine, myList, resolved]);
   const platforms = useMemo(() => [...new Set((activeData?.events ?? []).flatMap(event => event.platforms ?? []))], [activeData]);
   const buckets = days.map(day => {
     const key = localDayKey(day);
@@ -120,7 +120,10 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
   });
   const count = buckets.reduce((sum, bucket) => sum + bucket.events.length, 0);
   const undated = filtered.filter(event => !event.at && event.delayed);
-  const moveWeek = (step: number) => setAnchor(date => new Date(date.getFullYear(), date.getMonth(), date.getDate() + step * 7, 12));
+  const moveWeek = (step: number) => {
+    const target = step < 0 ? activeData?.navigation?.previous : activeData?.navigation?.next;
+    if (target && !loading) setAnchor(new Date(`${target}T12:00:00`));
+  };
   const titleFor = (event: CalendarEvent) => event.title;
   const open = async (event: CalendarEvent) => {
     setOpening(event.key);
@@ -170,35 +173,40 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
             <span className="text-[11px] text-lu-muted border border-lu-border-strong rounded-md px-2 py-1">{t('Experimental')}</span></div>
           <p className="m-0 mt-2 text-[14px] text-lu-muted">{t('A semana dos seus animes, em Sub e Dub.')}</p>
         </div>
-        <label className="inline-flex gap-3 items-center h-11 px-3 rounded-[10px] bg-lu-surface border border-lu-border text-[13px] font-medium">
-          <input type="checkbox" role="switch" checked={onlyMine} onChange={e => setOnlyMine(e.target.checked)} className="w-4 h-4 accent-lu-accent" />{t('Só minha lista')}
-        </label>
       </header>
       <div className="flex flex-wrap gap-4 items-center justify-between">
         <div className="flex items-center gap-1">
-          <IconButton label={t('Semana anterior')} size={36} onClick={() => moveWeek(-1)} disabled={!!data && days[0].getTime() - 7 * 86400_000 < Date.parse(data.rangeStart)}><ChevronLeft size={18} /></IconButton>
+          <IconButton label={t('Semana anterior')} size={36} onClick={() => moveWeek(-1)} disabled={loading || !activeData?.navigation?.previous}><ChevronLeft size={18} /></IconButton>
           <h2 className="m-0 px-1 text-[13px] sm:text-[15px] font-semibold tabular whitespace-nowrap">{weekLabel}</h2>
-          <IconButton label={t('Próxima semana')} size={36} onClick={() => moveWeek(1)} disabled={!!data && days[6].getTime() + 7 * 86400_000 > Date.parse(data.rangeEnd)}><ChevronRight size={18} /></IconButton>
+          <IconButton label={t('Próxima semana')} size={36} onClick={() => moveWeek(1)} disabled={loading || !activeData?.navigation?.next}><ChevronRight size={18} /></IconButton>
           <TextButton size="sm" onClick={() => setAnchor(new Date())}>{t('Hoje')}</TextButton>
         </div>
         <div className="flex items-center gap-2">
           <PillTabs label={t('Tipo de lançamento')} size="sm" value={filters.kind} onChange={kind => setFilters(current => ({ ...current, kind }))} options={[{ value: 'all' as const, label: t('Todos') }, { value: 'sub' as const, label: 'Sub' }, { value: 'dub' as const, label: 'Dub' }]} />
-          <IconButton label={t('Atualizar calendário')} size={36} disabled={loading} onClick={() => setAttempt(n => n + 1)}><RefreshCw size={16} /></IconButton>
-          <GhostButton onClick={() => setFiltersOpen(value => !value)} aria-expanded={filtersOpen}><SlidersHorizontal size={16} />{t('Filtros')}</GhostButton>
         </div>
       </div>
-      <div className="flex flex-wrap gap-3 items-center justify-between">
-        <label className="flex items-center gap-2 h-11 px-3 rounded-[10px] bg-lu-surface border border-lu-border w-full sm:max-w-[400px] text-lu-muted"><Search size={17} /><input aria-label={t('Buscar no calendário')} type="search" placeholder={t('Buscar anime…')} value={query} onChange={e => setQuery(e.target.value)} className="min-w-0 flex-1 bg-transparent outline-none text-lu-text text-[14px]" /></label>
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="flex items-center gap-2 shrink-0">
+          <GhostButton aria-pressed={onlyMine} onClick={() => setOnlyMine(value => !value)} className={onlyMine ? '!bg-lu-tint !border-lu-accent/40 !text-lu-accent' : undefined}><Bookmark size={16} />{t('Minha lista')}</GhostButton>
+          <GhostButton onClick={() => setFiltersOpen(value => !value)} aria-expanded={filtersOpen}><SlidersHorizontal size={16} />{t('Filtros')}</GhostButton>
+        </div>
+        <CalendarFilterSummary filters={filters} onlyMine={onlyMine} />
       </div>
       {filtersOpen && <CalendarSettings value={filters} onChange={setFilters} platforms={platforms} onClose={() => setFiltersOpen(false)} />}
       {loading && !activeData && <div role="status" className="flex gap-2 items-center justify-center py-16 text-lu-muted"><Spinner size={18} />{t('Carregando lançamentos…')}</div>}
       {error && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-lu-border p-5 bg-lu-surface"><span>{t('Não foi possível atualizar o calendário.')}</span><GhostButton onClick={() => setAttempt(n => n + 1)}>{t('Tentar de novo')}</GhostButton></div>}
       {openError !== null && <p role="alert" className="m-0 text-[13px] text-lu-warning">{t('Não foi possível ligar este anime ao catálogo.')} {openError && <a href={`https://animeschedule.net/anime/${openError}`} target="_blank" rel="noopener noreferrer" className="underline">{t('Ver na fonte')}</a>}</p>}
       {activeData && <>
-        <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-lu-muted">
-          <span>{count === 1 ? t('1 lançamento na semana') : t('{count} lançamentos na semana', { count })}{onlyMine && checking && <span role="status"> · {t('Conferindo sua lista…')}</span>}</span>
-          <span>{t('Horários no seu fuso')} · {timezone}</span>
-        </div>
+        <section aria-label={t('Informações da agenda')} className="flex flex-wrap items-center justify-between gap-3 text-[12px] text-lu-muted">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <span>{count === 1 ? t('1 lançamento na semana') : t('{count} lançamentos na semana', { count })}{onlyMine && checking && <span role="status"> · {t('Conferindo sua lista…')}</span>}</span>
+            <span>{t('Horários no seu fuso')} · {timezone}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <span>{t('Consultado em {date}', { date: new Date(data.checkedAt).toLocaleString(locale) })}</span>
+            <TextButton size="sm" disabled={loading || (onlyMine && checking)} onClick={() => setAttempt(n => n + 1)}><RefreshCw size={14} className={loading ? 'animate-spin' : undefined} />{t('Atualizar agenda')}</TextButton>
+          </div>
+        </section>
         {data.stale && <p role="status" className="m-0 text-[13px] text-lu-warning">{t('Parte da agenda não respondeu. Mostrando os dados disponíveis.')}</p>}
         {onlyMine && mappingFailures > 0 && <p role="status" className="m-0 text-[13px] text-lu-warning">{t('{count} títulos da lista não puderam ser conferidos.', { count: mappingFailures })}</p>}
         {onlyMine && mappingIncomplete && <p role="status" className="m-0 text-[13px] text-lu-warning">{t('Não foi possível conferir toda a agenda. Alguns animes da sua lista podem estar ausentes.')}</p>}
@@ -214,9 +222,8 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
           </section>)}
         </div>
         {undated.length > 0 && <section aria-label={t('Adiados sem data')}><h2 className="text-[15px] font-semibold">{t('Adiados sem data')}</h2><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">{undated.map(renderEvent)}</div></section>}
-        <footer className="flex flex-wrap gap-x-4 gap-y-2 text-[12px] text-lu-muted border-t border-lu-border pt-4">
+        <footer className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-lu-muted border-t border-lu-border pt-4">
           <a href="https://animeschedule.net/" target="_blank" rel="noopener noreferrer" className="text-lu-muted hover:text-lu-text">{t('Horários por AnimeSchedule.net')}</a>
-          <span>{t('Consultado em {date}', { date: new Date(data.checkedAt).toLocaleString(locale) })}</span>
           <span>{t('A programação pode mudar.')}</span>
           {filtered.some(e => e.missingTitle && e.at && buckets.some(b => b.key === localDayKey(new Date(e.at!)) )) && <span>{t('Alguns títulos do histórico não têm metadados na agenda atual.')}</span>}
         </footer>

@@ -382,7 +382,7 @@ export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, epis
 
       {isSeries && !openEpisode && seasons.length > 0 && (
         <section aria-label={t('Episódios')} className="px-4 sm:px-12 pt-2 flex flex-col gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col items-start gap-3 min-w-0">
             <div className="flex flex-wrap items-center gap-3">
               <h2 className="m-0 text-[18px] font-semibold">{t('Episódios')}</h2>
               {episodes.length > 0 && (
