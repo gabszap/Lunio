@@ -51,4 +51,22 @@ describe('agenda AniSchedule', () => {
     expect(filterCalendarEvents(events, { ...DEFAULT_CALENDAR_FILTERS, formats: ['ONA'], showDonghua: true }).map(e => e.key)).toEqual(['cn']);
     expect(parseCalendarFilters({ formats: ['TV', 'inexistente'], sort: 'inválida' })).toMatchObject({ formats: ['TV'], sort: 'popularity' });
   });
+
+  it('prefere Sub ou Dub apenas para a mesma entrada da semana, sem esconder a única versão selecionada', () => {
+    const base = normalizeCalendar([{ kind: 'sub', schedule: [media], feed: [] }])[0];
+    const events = [
+      { ...base, key: 'apo-sub', route: 'apo', episode: 7 },
+      { ...base, key: 'apo-dub', route: 'apo', episode: 5, kind: 'dub' as const },
+      { ...base, key: 'other', route: 'other', malId: '99', kind: 'sub' as const },
+    ];
+    expect(filterCalendarEvents(events, { ...DEFAULT_CALENDAR_FILTERS, prefer: 'dub' }).map(e => e.key).sort()).toEqual(['apo-dub', 'other']);
+    expect(filterCalendarEvents(events, { ...DEFAULT_CALENDAR_FILTERS, prefer: 'sub' }).map(e => e.key).sort()).toEqual(['apo-sub', 'other']);
+    expect(filterCalendarEvents(events, { ...DEFAULT_CALENDAR_FILTERS, prefer: 'dub', kind: 'sub' }).map(e => e.key).sort()).toEqual(['apo-sub', 'other']);
+  });
+
+  it('migra preferências antigas e valida as novas opções de exibição', () => {
+    expect(parseCalendarFilters({ formats: ['TV'] })).toMatchObject({ kind: 'all', prefer: 'all', hour12: false, showImages: true });
+    expect(parseCalendarFilters({ kind: 'raw', prefer: 'raw', hour12: 'yes', showImages: 'no' })).toMatchObject({ kind: 'all', prefer: 'all', hour12: false, showImages: true });
+    expect(parseCalendarFilters({ kind: 'dub', prefer: 'sub', hour12: true, showImages: false })).toMatchObject({ kind: 'dub', prefer: 'sub', hour12: true, showImages: false });
+  });
 });

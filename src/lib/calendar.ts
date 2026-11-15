@@ -31,10 +31,17 @@ export interface CalendarData {
   source?: string;
 }
 export interface CalendarSource { kind: CalendarKind; schedule: unknown[]; feed: unknown[] }
+export interface CalendarMatches {
+  matches: Record<string, { malId?: string; anilistId?: number }>;
+  incomplete: boolean;
+}
 
 export const CALENDAR_FORMATS = ['TV', 'TV_SHORT', 'ONA', 'OVA', 'SPECIAL', 'MOVIE', 'OTHER'] as const;
-export interface CalendarFilters { formats: string[]; showDonghua: boolean; platform: string; sort: 'popularity' | 'time' | 'name' }
-export const DEFAULT_CALENDAR_FILTERS: CalendarFilters = { formats: ['TV', 'ONA'], showDonghua: false, platform: '', sort: 'popularity' };
+export interface CalendarFilters {
+  formats: string[]; showDonghua: boolean; platform: string; sort: 'popularity' | 'time' | 'name';
+  kind: 'all' | CalendarKind; prefer: 'all' | CalendarKind; hour12: boolean; showImages: boolean;
+}
+export const DEFAULT_CALENDAR_FILTERS: CalendarFilters = { formats: ['TV', 'ONA'], showDonghua: false, platform: '', sort: 'popularity', kind: 'all', prefer: 'all', hour12: false, showImages: true };
 export function parseCalendarFilters(raw: unknown): CalendarFilters {
   const value = raw as Partial<CalendarFilters> | null;
   if (!value || typeof value !== 'object') return { ...DEFAULT_CALENDAR_FILTERS };
@@ -43,15 +50,23 @@ export function parseCalendarFilters(raw: unknown): CalendarFilters {
     showDonghua: value.showDonghua === true,
     platform: typeof value.platform === 'string' ? value.platform.slice(0, 60) : '',
     sort: value.sort === 'time' || value.sort === 'name' ? value.sort : 'popularity',
+    kind: value.kind === 'sub' || value.kind === 'dub' ? value.kind : 'all',
+    prefer: value.prefer === 'sub' || value.prefer === 'dub' ? value.prefer : 'all',
+    hour12: value.hour12 === true,
+    showImages: value.showImages !== false,
   };
 }
 export function filterCalendarEvents(events: CalendarEvent[], filters: CalendarFilters, query = ''): CalendarEvent[] {
   const normalize = (value: string) => value.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
   const q = normalize(query.trim());
-  return events.filter(event => filters.formats.includes(event.format ?? 'TV')
+  const available = events.filter(event => filters.formats.includes(event.format ?? 'TV')
+    && (filters.kind === 'all' || event.kind === filters.kind)
     && (filters.showDonghua || !event.donghua)
     && (!filters.platform || event.platforms?.includes(filters.platform))
-    && (!q || [event.title, ...(event.aliases ?? [])].some(title => normalize(title).includes(q))))
+    && (!q || [event.title, ...(event.aliases ?? [])].some(title => normalize(title).includes(q))));
+  const identity = (event: CalendarEvent) => event.route ? `route:${event.route}` : event.malId ? `mal:${event.malId}` : event.anilistId ? `al:${event.anilistId}` : event.key;
+  const preferred = new Set(available.filter(event => event.kind === filters.prefer).map(identity));
+  return available.filter(event => filters.prefer === 'all' || event.kind === filters.prefer || !preferred.has(identity(event)))
     .sort((a, b) => filters.sort === 'name' ? a.title.localeCompare(b.title)
       : filters.sort === 'time' ? (a.at ?? '9999').localeCompare(b.at ?? '9999') || a.title.localeCompare(b.title)
       : (b.popularity ?? 0) - (a.popularity ?? 0) || a.title.localeCompare(b.title));

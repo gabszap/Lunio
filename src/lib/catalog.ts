@@ -41,6 +41,8 @@ export interface CatalogMeta extends CatalogItem {
   imdbRating?: string;
   /** Id do anime no MyAnimeList (para o link da página dele). */
   malId?: string;
+  /** Entradas MAL da mesma série, confirmadas pelo mesmo IMDb, inclusive temporadas futuras. */
+  seriesMalIds?: string[];
   /** Nota (0–10) no MyAnimeList, votos e posição no ranking (ausentes se a API do MAL não respondeu). */
   malScore?: number;
   malScoredBy?: number;

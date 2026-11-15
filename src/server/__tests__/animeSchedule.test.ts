@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { parseTimetable, parseScheduleIdentity, isoWeek, createAnimeScheduleService } from '../animeSchedule';
-import { calendarService } from '../calendar';
 
 function tile(kind: string, time: string) {
   return `<div data-route="nia-liston" data-aired-episode="6" data-episodes="25" data-popularity="992.41" data-media-types="tv" class="timetable-column-show">
@@ -68,24 +67,42 @@ describe('AnimeSchedule: horários reais de distribuição', () => {
     await expect(service.get('2026-11-09', 'America/Halifax')).rejects.toThrow();
   });
 
-  it('não mostra lista vazia como sucesso quando a fonte de IDs está indisponível', async () => {
-    const spy = vi.spyOn(calendarService, 'get').mockRejectedValue(new Error('offline'));
-    try {
-      const service = createAnimeScheduleService(async () => html);
-      await expect(service.match('2026-11-09', 'UTC', ['63382'])).rejects.toThrow();
-    } finally { spy.mockRestore(); }
+  it('liga a lista pelo ID da própria fonte sem depender de nomes de um índice auxiliar', async () => {
+    const profile = vi.fn(async (path: string) => path.startsWith('/anime/') ? '<a class="anime-link myanimelist-link" href="//myanimelist.net/anime/63382">MAL</a>' : html);
+    const service = createAnimeScheduleService(profile);
+    expect(await service.match('2026-11-09', 'UTC', ['63382'])).toEqual({ matches: { 'nia-liston': { malId: '63382' } }, incomplete: false });
+    expect(await service.match('2026-11-09', 'UTC', ['777'])).toEqual({ matches: {}, incomplete: false });
+    expect(profile.mock.calls.filter(([path]) => path.startsWith('/anime/'))).toHaveLength(1);
   });
 
-  it('nomes apenas selecionam candidatos; o ID confirmado na fonte decide a associação', async () => {
-    const spy = vi.spyOn(calendarService, 'get');
+  it('retorna associações confirmadas e avisa quando parte dos perfis falha', async () => {
+    const service = createAnimeScheduleService(async path => {
+      if (path === '/anime/falhou') throw new Error('offline');
+      return path.startsWith('/anime/') ? '<a class="myanimelist-link" href="//myanimelist.net/anime/63382">MAL</a>' : html.replace('id="timetable">', `id="timetable">${tile('sub', '2026-11-10T08:55-04:00').replace('nia-liston', 'falhou')}`);
+    });
+    expect(await service.match('2026-11-09', 'UTC', ['63382', '777'])).toEqual({ matches: { 'nia-liston': { malId: '63382' } }, incomplete: true });
+    expect(await service.match('2026-11-09', 'UTC', [])).toEqual({ matches: {}, incomplete: false });
+  });
+
+  it('limita a espera de perfis travados e retoma por outras rotas na próxima atualização', async () => {
+    vi.useFakeTimers();
     try {
-      for (const actualId of ['777', '63382']) {
-        const service = createAnimeScheduleService(async path => path.startsWith('/anime/') ? `<a class="anime-link myanimelist-link" href="//myanimelist.net/anime/${actualId}">MAL</a>` : html);
-        const data = await service.get('2026-11-09', 'UTC');
-        spy.mockResolvedValue({ ...data, events: [{ ...data.events[0], malId: '63382', aliases: ['Nia & Liston'] }] });
-        const matches = await service.match('2026-11-09', 'UTC', ['63382']);
-        expect(matches).toEqual(actualId === '63382' ? { 'nia-liston': { malId: '63382' } } : {});
-      }
-    } finally { spy.mockRestore(); }
+      const timetable = `<div id="timetable">${['a-travou', 'b-travou', 'c-travou', 'nia-liston'].map(route => tile('sub', '2026-11-10T08:55-04:00').replace('nia-liston', route)).join('')}</div>`;
+      const read = vi.fn(async (path: string) => {
+        if (!path.startsWith('/anime/')) return timetable;
+        if (path.includes('travou')) return new Promise<string>(() => {});
+        return '<a class="myanimelist-link" href="//myanimelist.net/anime/63382">MAL</a>';
+      });
+      const service = createAnimeScheduleService(read);
+      let settled = false;
+      const first = service.match('2026-11-09', 'UTC', ['63382']).then(result => { settled = true; return result; });
+      await vi.advanceTimersByTimeAsync(30_001);
+      expect(settled).toBe(true);
+      expect(await first).toEqual({ matches: {}, incomplete: true });
+      const next = service.match('2026-11-09', 'UTC', ['63382']);
+      await vi.advanceTimersByTimeAsync(30_001);
+      expect(await next).toEqual({ matches: { 'nia-liston': { malId: '63382' } }, incomplete: true });
+      expect(read.mock.calls.filter(([path]) => path === '/anime/nia-liston')).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
   });
 });

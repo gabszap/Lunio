@@ -93,6 +93,19 @@ beforeAll(async () => {
       ] });
     }
     // Busca por nome de um anime que só se conhece pelo IMDb: o item do MAL vem com o imdb_id junto
+    if (rest === '/catalog/anime.series/search.anime_series/search=Diários de uma Apotecária.json') {
+      return respond(res, { metas: [
+        { id: 'mal:54492', type: 'series', imdb_id: 'tt26743760', name: 'The Apothecary Diaries', releaseInfo: '2023' },
+        { id: 'mal:58514', type: 'series', imdb_id: 'tt26743760', name: 'The Apothecary Diaries Season 2', releaseInfo: '2025' },
+      ] });
+    }
+    if (rest === '/catalog/anime.series/search.anime_series/search=The Apothecary Diaries.json') {
+      return respond(res, { metas: [
+        { id: 'mal:54492', type: 'series', imdb_id: 'tt26743760', name: 'The Apothecary Diaries', releaseInfo: '2023' },
+        { id: 'mal:61987', type: 'series', imdb_id: 'tt26743760', name: 'The Apothecary Diaries Season 3', releaseInfo: '2026' },
+        { id: 'mal:99999', type: 'series', imdb_id: 'tt9999999', name: 'The Apothecary Diaries Movie', releaseInfo: '2026' },
+      ] });
+    }
     if (rest.startsWith('/catalog/anime.series/search.anime_series/search=Anime IMDb')) {
       return respond(res, { metas: [{ id: 'mal:99', type: 'series', imdb_id: 'tt0000003', name: 'Outro' }, { id: 'mal:777', type: 'series', imdb_id: 'tt0000002', name: 'Anime IMDb' }, { id: 'mal:778', type: 'series', imdb_id: 'tt0000002', name: 'Anime IMDb 2' }] });
     }
@@ -116,6 +129,7 @@ beforeAll(async () => {
     if (rest.startsWith('/catalog/movie/tmdb.popular')) return respond(res, { metas: [{ id: 'tt1', type: 'movie', name: 'Popular 1' }, { id: 'tt2', name: '' }, { type: 'movie' }] });
     if (rest.startsWith('/catalog/anime/mal.airing')) return respond(res, { metas: [{ id: 'mal:5114', type: 'anime', name: 'Anime A', poster: 'https://cdn.myanimelist.net/x.jpg' }] });
     if (rest.startsWith('/meta/series/tt0000001')) return respond(res, { meta: { id: 'tt0000001', type: 'series', name: 'Link Click', _malId: '5114', videos: [] } });
+    if (rest.startsWith('/meta/series/tt26743760')) return respond(res, { meta: { id: 'tt26743760', imdb_id: 'tt26743760', name: 'Diários de uma Apotecária', type: 'series', _originalLanguage: 'ja', videos: [{ id: 'tt26743760:1:1', season: 1, episode: 1, released: '2023-10-22T11:00:00Z' }] } });
     if (rest.startsWith('/meta/series/tt0000002')) return respond(res, { meta: { id: 'tt0000002', imdb_id: 'tt0000002', type: 'series', name: 'Anime IMDb', _originalLanguage: 'ja', videos: [] } });
     // Anime do IMDb com várias entradas no MAL: a ordem do id não é a das temporadas (200 é uma OVA, 300 e 350 são partes da 2ª)
     if (rest.startsWith('/meta/series/tt0000005')) {
@@ -499,6 +513,13 @@ describe('/api/catalog/*', () => {
     const body = await json(await get('meta?type=series&id=tt0000002')); // mal:777 e mal:778 não têm meta no fake
     expect(body.meta).toMatchObject({ id: 'tt0000002', malId: '777' });
     expect(body.meta.seasonMalIds).toBeUndefined();
+  });
+
+  it('a lista acompanha temporadas novas pelo mesmo IMDb, mesmo com busca traduzida e episódios ainda ausentes', async () => {
+    const body = await json(await get('meta?type=series&id=tt26743760'));
+    expect(body.meta.seasonMalIds).toEqual({ '1': '54492' });
+    expect(body.meta.seriesMalIds).toEqual(['54492', '58514', '61987']);
+    expect(body.meta.seriesMalIds).not.toContain('99999');
   });
 
   it('série que não é anime não gasta uma busca nem tem id do MAL', async () => {

@@ -14,7 +14,8 @@ import {
   toggleMyList,
   useWatchedEpisodes,
 } from '../../lib/catalog';
-import { GhostButton, PillTabs, PrimaryButton, Spinner, TextButton, cx } from '../ui';
+import { GhostButton, PrimaryButton, Spinner, TextButton, cx } from '../ui';
+import { SeasonTabs } from './SeasonTabs';
 import { t } from '../../lib/i18n';
 import { writeSeasonToUrl } from '../../lib/searchUrl';
 import { ImdbIcon, MalIcon } from './BrandIcons';
@@ -239,7 +240,7 @@ export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, epis
   ].filter(Boolean);
 
   return (
-    <div className="-mx-4 sm:-mx-12 -mt-6 flex flex-col">
+    <div className="-mx-4 sm:-mx-12 -mt-6 min-w-0 flex flex-col">
       <section className="relative px-4 sm:px-12 pt-2 pb-10">
         <div
           aria-hidden="true"
@@ -405,15 +406,7 @@ export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, epis
                 </TextButton>
               )}
             </div>
-            <div className="max-w-full overflow-x-auto no-scrollbar">
-              <PillTabs
-                label={t('Temporadas')}
-                size="sm"
-                value={String(season)}
-                onChange={(v) => setSeason(Number(v))}
-                options={seasons.map((s) => ({ value: String(s), label: s === 0 ? t('Especiais') : t('Temporada {s}', { s }) }))}
-              />
-            </div>
+            <SeasonTabs seasons={seasons} value={season} onChange={setSeason} />
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {episodes.map((ep) => {

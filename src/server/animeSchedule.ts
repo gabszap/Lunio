@@ -1,7 +1,6 @@
 import { parse } from 'parse5';
 import { BoundedCache } from './cache';
-import { calendarService } from './calendar';
-import type { CalendarData, CalendarEvent } from '../lib/calendar';
+import type { CalendarData, CalendarEvent, CalendarMatches } from '../lib/calendar';
 
 type HtmlNode = { nodeName: string; tagName?: string; attrs?: { name: string; value: string }[]; value?: string; childNodes?: HtmlNode[] };
 export interface ScheduleIdentity { malId?: string; anilistId?: number }
@@ -15,7 +14,6 @@ function nodes(root: HtmlNode, matches: (node: HtmlNode) => boolean): HtmlNode[]
   return found;
 }
 const routeValid = (route: string) => route.length <= 240 && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(route);
-const canonical = (value: string) => value.normalize('NFKD').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 
 /** Lê o registro marcado como Sub/Dub, nunca infere um atraso a partir do horário Raw. */
 export function parseTimetable(html: string): CalendarEvent[] {
@@ -117,6 +115,7 @@ async function readHtml(path: string, timezone: string): Promise<string> {
 export function createAnimeScheduleService(read: ReadHtml = readHtml, now = () => Date.now()) {
   const cache = new BoundedCache<{ data: CalendarData; at: number; retryAt: number }>(48, 24 * 3600_000, now);
   const identities = new BoundedCache<ScheduleIdentity>(600, 24 * 3600_000, now);
+  const matchCursors = new BoundedCache<number>(48, 24 * 3600_000, now);
   const inflight = new Map<string, Promise<CalendarData>>();
   const identityInflight = new Map<string, Promise<ScheduleIdentity>>();
   async function identity(route: string): Promise<ScheduleIdentity> {
@@ -161,36 +160,45 @@ export function createAnimeScheduleService(read: ReadHtml = readHtml, now = () =
     }
     return promise;
   }
-  async function match(day: string, timezone: string, malIds: string[]): Promise<Record<string, ScheduleIdentity>> {
+  async function match(day: string, timezone: string, malIds: string[]): Promise<CalendarMatches> {
+    if (!malIds.length) return { matches: {}, incomplete: false };
     const data = await get(day, timezone);
     const wanted = new Set(malIds);
     const matches: Record<string, ScheduleIdentity> = {};
     const routes = [...new Set(data.events.map(event => event.route!))];
-    for (const route of routes) {
+    const { year, week } = isoWeek(day);
+    const cursorKey = `${year}:${week}:${timezone}`;
+    const cursor = (matchCursors.get(cursorKey) ?? 0) % routes.length;
+    const candidates: Array<{ route: string; index: number }> = [];
+    for (let offset = 0; offset < routes.length; offset++) {
+      const index = (cursor + offset) % routes.length;
+      const route = routes[index];
       const known = identities.get(route);
-      if (known?.malId && wanted.has(known.malId)) matches[route] = known;
+      if (known) { if (known.malId && wanted.has(known.malId)) matches[route] = known; }
+      else candidates.push({ route, index });
     }
-    const confirmed = new Set(Object.values(matches).map(ids => ids.malId));
-    if ([...wanted].every(id => confirmed.has(id))) return matches;
-    // Nomes só reduzem as consultas. A associação final exige o ID publicado na página da fonte.
-    const aliases = new Set<string>();
-    // Falha da fonte não equivale a uma lista sem lançamentos: o cliente deve exibir o aviso.
-    for (const event of (await calendarService.get()).events) {
-      if (event.malId && wanted.has(event.malId)) for (const title of event.aliases ?? [event.title]) aliases.add(canonical(title));
-    }
-    const candidates = routes.filter(route => {
-      const known = identities.get(route);
-      if (known) return false;
-      return data.events.some(event => event.route === route && aliases.has(canonical(event.title)));
-    });
-    let lookupFailed = false;
-    for (let i = 0; i < candidates.length; i += 3) {
-      await Promise.all(candidates.slice(i, i + 3).map(async route => {
-        try { const ids = await identity(route); if (ids.malId && wanted.has(ids.malId)) matches[route] = ids; } catch { lookupFailed = true; }
-      }));
-    }
-    if (lookupFailed) throw new Error('Não foi possível conferir a identidade dos títulos');
-    return matches;
+    if (!candidates.length) return { matches, incomplete: false };
+    // Confere cada entrada da semana na própria fonte. O cache de perfis é compartilhado entre semanas e usuários;
+    // títulos traduzidos ou temporadas ausentes de outro índice não podem impedir uma associação por ID.
+    let incomplete = false;
+    let expired = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const deadline = new Promise<void>(resolve => { timer = setTimeout(() => { expired = true; resolve(); }, 30_000); });
+    try {
+      for (let i = 0; i < candidates.length; i += 3) {
+        const batch = candidates.slice(i, i + 3);
+        // A próxima conferência começa depois do lote iniciado: perfis lentos no começo não bloqueiam o resto para sempre.
+        matchCursors.set(cursorKey, (batch[batch.length - 1].index + 1) % routes.length);
+        const pending = Promise.all(batch.map(async ({ route }) => {
+          try { const ids = await identity(route); if (ids.malId && wanted.has(ids.malId)) matches[route] = ids; }
+          catch { incomplete = true; }
+        }));
+        await Promise.race([pending, deadline]);
+        if (expired) { incomplete = true; break; }
+      }
+      // No máximo o lote já iniciado continua preenchendo o cache, sem alterar a resposta devolvida.
+      return { matches: { ...matches }, incomplete };
+    } finally { clearTimeout(timer!); }
   }
   return { get, identity, match };
 }

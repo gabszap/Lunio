@@ -20,7 +20,7 @@ import {
  *   GET meta?type=&id=                        → detalhes (com episódios, inclusive a temporada 0)
  *   GET malscore?id=<id do MyAnimeList>       → nota do anime no MAL (pedida à parte, com tentativas)
  *   GET calendar?date=YYYY-MM-DD&tz=         → semana Sub/Dub da tabela pública do AnimeSchedule
- *   GET calendar-match?date=&tz=&ids=        → liga IDs do MAL às entradas da semana, conferindo a fonte
+ *   GET calendar-match?date=&tz=&ids=        → {matches, incomplete}: IDs da semana conferidos na própria fonte
  *   GET calendar-identity?route=              → IDs publicados na página do anime no AnimeSchedule
  * Respostas servidas do cache antigo (fonte fora do ar) trazem `stale: true`. Nada aqui aceita uma URL do navegador.
  */

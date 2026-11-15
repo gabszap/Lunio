@@ -68,6 +68,11 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   // Um link com `?detail=` abre o título direto; os dados completos vêm do detalhe
   const [selected, setSelected] = useState<CatalogItem | null>(() => (initialDetail ? { id: initialDetail.id, type: initialDetail.type, name: '' } : null));
   const [myList, setMyList] = useState<CatalogItem[]>(() => getMyList());
+  useEffect(() => {
+    const refresh = (event: StorageEvent) => { if (event.key === 'lunio_my_list' || event.key === null) setMyList(getMyList()); };
+    window.addEventListener('storage', refresh);
+    return () => window.removeEventListener('storage', refresh);
+  }, []);
   /** "Continuar assistindo": o que foi tocado pelo catálogo, com o ponto em que parou (só no navegador). */
   const [continueList, setContinueList] = useState<ContinueEntry[]>(() => loadContinue());
   useEffect(() => {

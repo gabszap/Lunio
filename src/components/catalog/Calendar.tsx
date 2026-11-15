@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, RefreshCw, Search, SlidersHorizontal } from 'lucide-react';
 import { apiFetch } from '../../lib/access';
-import { calendarWeek, localDayKey, matchCalendarItem, filterCalendarEvents, parseCalendarFilters, type CalendarData, type CalendarEvent, type CalendarKind, type CalendarFilters } from '../../lib/calendar';
+import { calendarWeek, localDayKey, matchCalendarItem, filterCalendarEvents, parseCalendarFilters, type CalendarData, type CalendarEvent, type CalendarMatches, type CalendarFilters } from '../../lib/calendar';
 import { fetchMeta, type CatalogItem } from '../../lib/catalog';
 import { t, useLang } from '../../lib/i18n';
 import { GhostButton, IconButton, PillTabs, Spinner, TextButton, cx } from '../ui';
@@ -28,7 +28,6 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
   const [onlyMine, setOnlyMine] = useState(false);
-  const [kind, setKind] = useState<'all' | CalendarKind>('all');
   const [filters, setFilters] = useState<CalendarFilters>(loadFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -39,6 +38,7 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
   const [resolved, setResolved] = useState<Record<string, string[]>>({});
   const [checking, setChecking] = useState(false);
   const [mappingFailures, setMappingFailures] = useState(0);
+  const [mappingIncomplete, setMappingIncomplete] = useState(false);
   const [now, setNow] = useState(Date.now());
   const days = useMemo(() => calendarWeek(anchor), [anchor]);
   const weekStart = localDayKey(days[0]);
@@ -74,6 +74,7 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
     let active = true;
     setChecking(true);
     setMappingFailures(0);
+    setMappingIncomplete(false);
     const list = myList.filter(item => item.type !== 'movie');
     void (async () => {
       const ids: Record<string, string[]> = {};
@@ -82,7 +83,7 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
         await Promise.all(list.slice(i, i + 3).map(async item => {
           try {
             const meta = await fetchMeta(item.type, item.id);
-            ids[item.id] = [...new Set([meta.malId, ...Object.values(meta.seasonMalIds ?? {})].filter((id): id is string => !!id))];
+            ids[item.id] = [...new Set([meta.malId, ...(meta.seriesMalIds ?? []), ...Object.values(meta.seasonMalIds ?? {})].filter((id): id is string => !!id))];
           } catch { failures++; }
         }));
         if (active) { setResolved({ ...ids }); setMappingFailures(failures); }
@@ -91,15 +92,18 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
         const malIds = [...new Set([...Object.values(ids).flat(), ...list.filter(item => item.id.startsWith('mal:')).map(item => item.id.slice(4))])].slice(0, 300);
         if (malIds.length) {
           try {
-            const matches = await readJson<Record<string, { malId?: string; anilistId?: number }>>(`calendar-match?${params}&ids=${malIds.join(',')}`);
-            if (active) setIdentities(current => ({ ...current, ...matches }));
-          } catch { if (active) setMappingFailures(failures + 1); }
+            const result = await readJson<CalendarMatches>(`calendar-match?${params}&ids=${malIds.join(',')}`);
+            if (active) {
+              setIdentities(current => ({ ...current, ...result.matches }));
+              setMappingIncomplete(result.incomplete);
+            }
+          } catch { if (active) setMappingIncomplete(true); }
         }
         if (active) setChecking(false);
       }
     })();
     return () => { active = false; };
-  }, [onlyMine, myList, params]);
+  }, [onlyMine, myList, params, attempt]);
 
   const enhancedEvents = useMemo(() => (activeData?.events ?? []).map(event => {
     const target = { ...event, ...(event.route ? identities[event.route] : {}) };
@@ -107,8 +111,8 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
     return { ...target, aliases: [...(event.aliases ?? []), ...(item ? [item.name] : [])] };
   }), [activeData, identities, myList, resolved]);
   const filtered = useMemo(() => filterCalendarEvents(enhancedEvents, filters, query).filter(event =>
-    (kind === 'all' || kind === event.kind) && (!onlyMine || matchCalendarItem(event, myList, resolved))
-  ), [enhancedEvents, filters, query, kind, onlyMine, myList, resolved]);
+    !onlyMine || matchCalendarItem(event, myList, resolved)
+  ), [enhancedEvents, filters, query, onlyMine, myList, resolved]);
   const platforms = useMemo(() => [...new Set((activeData?.events ?? []).flatMap(event => event.platforms ?? []))], [activeData]);
   const buckets = days.map(day => {
     const key = localDayKey(day);
@@ -117,7 +121,7 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
   const count = buckets.reduce((sum, bucket) => sum + bucket.events.length, 0);
   const undated = filtered.filter(event => !event.at && event.delayed);
   const moveWeek = (step: number) => setAnchor(date => new Date(date.getFullYear(), date.getMonth(), date.getDate() + step * 7, 12));
-  const titleFor = (event: CalendarEvent) => matchCalendarItem(event, myList, resolved)?.name ?? event.title;
+  const titleFor = (event: CalendarEvent) => event.title;
   const open = async (event: CalendarEvent) => {
     setOpening(event.key);
     setOpenError(null);
@@ -140,20 +144,20 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-2 py-2 text-[12px] bg-lu-elevated">
         <span className="text-lu-muted tabular">{t('Ep. {episode}', { episode: event.episode })}</span>
         <span className="tabular text-lu-text font-semibold">
-          {opening === event.key ? <Spinner size={14} /> : event.at ? new Date(event.at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false }) : t('Sem data')}
+          {opening === event.key ? <Spinner size={14} /> : event.at ? new Date(event.at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: filters.hour12 }) : t('Sem data')}
         </span>
         <span className={cx('inline-flex items-center justify-center justify-self-end w-fit text-[11px] leading-none font-semibold rounded px-1.5 py-0.5', event.kind === 'sub' ? 'bg-lu-blue/10 text-lu-blue' : 'bg-lu-tint text-lu-accent')}>
           {event.kind === 'sub' ? 'Sub' : 'Dub'}
         </span>
       </div>
-      <div className="relative aspect-[2/3] w-full bg-lu-elevated">
+      {filters.showImages ? <div className="relative aspect-[2/3] w-full bg-lu-elevated">
         <span className="absolute inset-0 flex items-center justify-center text-lu-disabled"><CalendarDays size={36} /></span>
         {event.poster && <img data-calendar-poster src={event.poster} alt="" loading="lazy" referrerPolicy="no-referrer" onError={e => { e.currentTarget.style.display = 'none'; }} className="absolute inset-0 w-full h-full object-cover" />}
         <div className="absolute inset-x-0 bottom-0 pt-16 px-2.5 pb-3 bg-linear-to-t from-black/95 via-black/65 to-transparent">
           <span className="block text-[12px] sm:text-[13px] leading-[1.35] font-semibold text-white line-clamp-4 text-center" title={titleFor(event)}>{titleFor(event)}</span>
         </div>
         {event.delayed && <span className="absolute inset-x-0 top-0 py-1 px-2 bg-lu-warning text-lu-bg text-center text-[11px] font-semibold">{t('Adiado')}</span>}
-      </div>
+      </div> : <div className="p-3"><span className="block text-[13px] font-semibold leading-snug">{titleFor(event)}</span>{event.delayed && <span className="block mt-2 text-[11px] text-lu-warning">{t('Adiado')}</span>}</div>}
     </button>
   );
 
@@ -178,18 +182,15 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
           <TextButton size="sm" onClick={() => setAnchor(new Date())}>{t('Hoje')}</TextButton>
         </div>
         <div className="flex items-center gap-2">
-          <PillTabs label={t('Tipo de lançamento')} size="sm" value={kind} onChange={setKind} options={[{ value: 'all' as const, label: t('Todos') }, { value: 'sub' as const, label: 'Sub' }, { value: 'dub' as const, label: 'Dub' }]} />
+          <PillTabs label={t('Tipo de lançamento')} size="sm" value={filters.kind} onChange={kind => setFilters(current => ({ ...current, kind }))} options={[{ value: 'all' as const, label: t('Todos') }, { value: 'sub' as const, label: 'Sub' }, { value: 'dub' as const, label: 'Dub' }]} />
           <IconButton label={t('Atualizar calendário')} size={36} disabled={loading} onClick={() => setAttempt(n => n + 1)}><RefreshCw size={16} /></IconButton>
           <GhostButton onClick={() => setFiltersOpen(value => !value)} aria-expanded={filtersOpen}><SlidersHorizontal size={16} />{t('Filtros')}</GhostButton>
         </div>
       </div>
       <div className="flex flex-wrap gap-3 items-center justify-between">
         <label className="flex items-center gap-2 h-11 px-3 rounded-[10px] bg-lu-surface border border-lu-border w-full sm:max-w-[400px] text-lu-muted"><Search size={17} /><input aria-label={t('Buscar no calendário')} type="search" placeholder={t('Buscar anime…')} value={query} onChange={e => setQuery(e.target.value)} className="min-w-0 flex-1 bg-transparent outline-none text-lu-text text-[14px]" /></label>
-        <label className="flex items-center gap-2 text-[13px] text-lu-muted">{t('Ordenar por')}
-          <select value={filters.sort} onChange={e => setFilters({ ...filters, sort: e.target.value as CalendarFilters['sort'] })} className="h-10 px-3 rounded-[10px] bg-lu-surface border border-lu-border text-lu-text"><option value="popularity">{t('Popularidade')}</option><option value="time">{t('Horário')}</option><option value="name">{t('Nome')}</option></select>
-        </label>
       </div>
-      {filtersOpen && <CalendarSettings value={filters} onChange={setFilters} platforms={platforms} />}
+      {filtersOpen && <CalendarSettings value={filters} onChange={setFilters} platforms={platforms} onClose={() => setFiltersOpen(false)} />}
       {loading && !activeData && <div role="status" className="flex gap-2 items-center justify-center py-16 text-lu-muted"><Spinner size={18} />{t('Carregando lançamentos…')}</div>}
       {error && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-lu-border p-5 bg-lu-surface"><span>{t('Não foi possível atualizar o calendário.')}</span><GhostButton onClick={() => setAttempt(n => n + 1)}>{t('Tentar de novo')}</GhostButton></div>}
       {openError !== null && <p role="alert" className="m-0 text-[13px] text-lu-warning">{t('Não foi possível ligar este anime ao catálogo.')} {openError && <a href={`https://animeschedule.net/anime/${openError}`} target="_blank" rel="noopener noreferrer" className="underline">{t('Ver na fonte')}</a>}</p>}
@@ -200,13 +201,14 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
         </div>
         {data.stale && <p role="status" className="m-0 text-[13px] text-lu-warning">{t('Parte da agenda não respondeu. Mostrando os dados disponíveis.')}</p>}
         {onlyMine && mappingFailures > 0 && <p role="status" className="m-0 text-[13px] text-lu-warning">{t('{count} títulos da lista não puderam ser conferidos.', { count: mappingFailures })}</p>}
+        {onlyMine && mappingIncomplete && <p role="status" className="m-0 text-[13px] text-lu-warning">{t('Não foi possível conferir toda a agenda. Alguns animes da sua lista podem estar ausentes.')}</p>}
         {onlyMine && !checking && myList.filter(i => i.type !== 'movie').length === 0 && <p className="m-0 text-[14px] text-lu-muted">{t('Adicione animes à Minha lista para acompanhar os lançamentos aqui.')}</p>}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-7 gap-3 items-start">
-          {buckets.map(({ day, key, events }) => <section key={key} aria-label={day.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}
-            className={cx('min-w-0', events.length === 0 && count > 0 && 'hidden xl:block')}>
-            <header className={cx('xl:sticky xl:top-0 z-10 flex flex-col items-center gap-1 px-2 py-4 mb-2 rounded-[10px] border bg-lu-surface', key === today ? 'border-lu-accent/40 text-lu-accent' : 'border-lu-border text-lu-text')}>
-              <span className="text-[12px] text-lu-muted capitalize">{day.toLocaleDateString(locale, { day: 'numeric', month: 'short' })}</span>
-              <span className="text-[16px] font-semibold capitalize">{day.toLocaleDateString(locale, { weekday: 'long' })}</span>
+          {buckets.map(({ day, key, events }) => <section key={key} aria-current={key === today ? 'date' : undefined} aria-label={day.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}
+            className={cx('min-w-0 rounded-[16px] p-1.5', events.length === 0 && count > 0 && key !== today && 'hidden xl:block', key === today ? 'border-2 border-lu-accent/70 bg-lu-tint/40' : 'border border-lu-border-strong bg-lu-bg2/70')}>
+            <header className={cx('xl:sticky xl:top-0 z-10 flex flex-col items-center gap-1 px-2 py-4 mb-2 rounded-[10px]', key === today ? 'bg-lu-accent text-lu-bg' : 'bg-lu-elevated text-lu-text')}>
+              <span className={cx('text-[12px] capitalize', key === today ? 'text-lu-bg/80 font-medium' : 'text-lu-muted')}>{day.toLocaleDateString(locale, { day: 'numeric', month: 'short' })}{key === today && ` · ${t('Hoje')}`}</span>
+              <span className="text-[18px] font-semibold capitalize">{day.toLocaleDateString(locale, { weekday: 'long' })}</span>
             </header>
             <div className="grid grid-cols-2 xl:grid-cols-1 gap-2">{events.length ? events.map(renderEvent) : <p className="col-span-full m-0 text-[12px] text-lu-muted text-center py-5">{t('Sem lançamentos informados')}</p>}</div>
           </section>)}
