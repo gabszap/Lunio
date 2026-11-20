@@ -8,8 +8,9 @@ import { GhostButton, IconButton, PillTabs, Spinner, TextButton, cx } from '../u
 import { CalendarSettings } from './CalendarSettings';
 import { CalendarFilterSummary } from './CalendarFilterSummary';
 
-interface Props { myList: CatalogItem[]; onOpen: (item: CatalogItem) => void; onBack: () => void }
+interface Props { myList: CatalogItem[]; onOpen: (item: CatalogItem, seasonMalId: string) => void; onBack: () => void }
 const PREFS = 'lunio_calendar_filters';
+const ONLY_MINE = 'lunio_calendar_only_mine';
 function loadFilters(): CalendarFilters {
   try { return parseCalendarFilters(JSON.parse(localStorage.getItem(PREFS) || 'null')); } catch { return parseCalendarFilters(null); }
 }
@@ -28,7 +29,9 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
-  const [onlyMine, setOnlyMine] = useState(false);
+  const [onlyMine, setOnlyMine] = useState(() => {
+    try { return localStorage.getItem(ONLY_MINE) === 'true'; } catch { return false; }
+  });
   const [filters, setFilters] = useState<CalendarFilters>(loadFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [identities, setIdentities] = useState<Record<string, { malId?: string; anilistId?: number }>>({});
@@ -62,6 +65,7 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
   }, [attempt, params, weekKey]);
 
   useEffect(() => { try { localStorage.setItem(PREFS, JSON.stringify(filters)); } catch { /* armazenamento indisponível */ } }, [filters]);
+  useEffect(() => { try { localStorage.setItem(ONLY_MINE, String(onlyMine)); } catch { /* armazenamento indisponível */ } }, [onlyMine]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
@@ -132,11 +136,11 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
       const ids = event.route ? await readJson<{ malId?: string; anilistId?: number }>(`calendar-identity?route=${encodeURIComponent(event.route)}`) : event;
       if (event.route) setIdentities(current => ({ ...current, [event.route!]: ids }));
       const target = { ...event, ...ids };
-      const item = matchCalendarItem(target, myList, resolved);
-      // O título abre pelo ID confirmado; a numeração do episódio continua sendo a do catálogo.
-      if (item) onOpen(item);
-      else if (target.malId) onOpen({ id: `mal:${target.malId}`, type: 'series', name: target.title, poster: target.poster });
-      else throw new Error('Sem ID compatível');
+      if (!target.malId) throw new Error('Sem ID compatível');
+      const item = matchCalendarItem(target, myList, resolved) ?? {
+        id: `mal:${target.malId}`, type: 'series', name: target.title, poster: target.poster,
+      };
+      onOpen(item, target.malId);
     } catch { setOpenError(event.route ?? ''); }
     finally { setOpening(null); }
   };

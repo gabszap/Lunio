@@ -17,7 +17,14 @@ test('calendário Sub/Dub: fuso local, lista por temporada, navegação e retorn
     if (action === 'calendar-match') { identityRequests.push('match'); return json({ matches: { 'kusuriya-no-hitorigoto-3rd-season': { malId: '61987', anilistId: 195516 } }, incomplete: false }); }
     if (action === 'calendar-identity') { identityRequests.push('identity'); return json({ malId: '61987', anilistId: 195516 }); }
     if (action === 'manifest') return json({ name: 'Fixture', rows: [], stale: false });
-    if (action === 'meta') return json({ meta: { id: 'tt123', type: 'series', name: 'Diários de uma Apotecária', genres: [], malId: '54492', seasonMalIds: { '1': '54492' }, seriesMalIds: ['54492', '58514', '61987'], episodes: [] } });
+    if (action === 'meta') return json({ meta: {
+      id: 'tt123', type: 'series', name: 'Diários de uma Apotecária', genres: [], malId: '54492',
+      seasonMalIds: { '1': '54492', '3': '61987' }, seriesMalIds: ['54492', '58514', '61987'],
+      episodes: [
+        { id: 'tt123:1:1', season: 1, episode: 1, title: 'Primeira temporada' },
+        { id: 'tt123:3:8', season: 3, episode: 8, title: 'Lançamento da terceira temporada' },
+      ],
+    } });
     if (action === 'malscore') return json({ score: null, failed: false });
     if (action === 'calendar') return json({
       checkedAt: '2026-11-14T20:00:00Z', updatedAt: '2026-11-14T20:00:00Z', stale: false, failedSources: [], rangeStart: '2026-10-01T00:00:00Z', rangeEnd: '2027-02-01T00:00:00Z',
@@ -97,13 +104,21 @@ test('calendário Sub/Dub: fuso local, lista por temporada, navegação e retorn
   await page.getByRole('button', { name: 'Próxima semana', exact: true }).click();
   await expect(page.getByText('1 lançamento na semana')).toBeVisible();
   await page.getByRole('button', { name: /Abrir The Apothecary Diaries Season 3, episódio 8, Sub/ }).click();
-  await expect(page).toHaveURL(/detail\/series\/tt123/);
+  await expect(page).toHaveURL(/detail\/series\/tt123\?season=3$/);
+  await expect(page.getByRole('tab', { name: 'Temporada 3', selected: true })).toBeVisible();
+  await expect(page.getByText('Lançamento da terceira temporada', { exact: false })).toBeVisible();
   await expect(page).not.toHaveURL(/calendar=/);
   await page.getByRole('button', { name: 'Catálogo', exact: true }).first().click();
   await expect(page).toHaveURL(/\/calendar$/);
   await expect(page.getByText('1 lançamento na semana')).toBeVisible();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Calendário', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Minha lista', exact: true, pressed: true })).toBeVisible();
+  await expect(page.getByText('2 lançamentos na semana')).toBeVisible();
+  await page.getByRole('button', { name: 'Minha lista', exact: true }).click();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Minha lista', exact: true, pressed: false })).toBeVisible();
+  await expect(page.getByText('3 lançamentos na semana')).toBeVisible();
   await page.getByRole('button', { name: 'Catálogo', exact: true }).click();
   await expect(page).not.toHaveURL(/calendar=/);
   await expect(page).toHaveURL(/\/catalog$/);
@@ -132,10 +147,13 @@ test('Minha lista reúne temporadas pelo IMDb e preserva somente os lançamentos
     if (action === 'manifest') return json({ name: 'Fixture', rows: [], stale: false });
     if (action === 'meta') {
       const id = url.searchParams.get('id');
-      return json({ meta: { id, type: 'series', name: id === 'mal:21' ? 'One Piece' : 'Diários de uma Apotecária', genres: [], episodes: [],
+      return json({ meta: { id, type: 'series', name: id === 'mal:21' ? 'One Piece' : 'Diários de uma Apotecária', genres: [],
+        episodes: [{ id: `${id}:1:1`, season: 1, episode: 1, title: 'Primeiro episódio' }],
         ...(id === 'mal:21' ? { malId: '21' } : { malId: '54492', seasonMalIds: { '1': '54492' }, seriesMalIds: ['54492', '58514', '61987'] }),
       } });
     }
+    if (action === 'calendar-identity') return json({ malId: '61987' });
+    if (action === 'malscore') return json({ score: null, failed: false });
     if (action === 'calendar-match') {
       const ids = url.searchParams.get('ids')?.split(',') ?? [];
       return json({ matches: { ...(ids.includes('61987') ? { 'kusuriya-no-hitorigoto-zoku-hen': { malId: '61987' } } : {}), ...(ids.includes('21') ? { 'one-piece': { malId: '21' } } : {}) }, incomplete: false });
@@ -158,6 +176,11 @@ test('Minha lista reúne temporadas pelo IMDb e preserva somente os lançamentos
   await expect(page.getByRole('button', { name: /Abrir One Piece,.*Sub/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Abrir Outro anime/ })).toHaveCount(0);
   await expect(page.getByRole('region', { name: /sábado, 14 de novembro/ })).toHaveAttribute('aria-current', 'date');
+  await page.getByRole('button', { name: /Abrir The Apothecary Diaries Season 3, episódio 7, Sub/ }).click();
+  await expect(page).toHaveURL(/detail\/series\/tt26743760\?season=1$/);
+  await expect(page.getByRole('tab', { name: 'Temporada 1', selected: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Catálogo', exact: true }).first().click();
+  await expect(page).toHaveURL(/\/calendar$/);
   // Alteração real do localStorage em outra aba, sem recarregar o calendário atual.
   const otherTab = await page.context().newPage();
   await otherTab.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<html><title>Minha lista</title></html>' }));

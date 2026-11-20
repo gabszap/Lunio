@@ -67,6 +67,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   const [filter, setFilter] = useState<Filter>('all');
   // Um link com `?detail=` abre o título direto; os dados completos vêm do detalhe
   const [selected, setSelected] = useState<CatalogItem | null>(() => (initialDetail ? { id: initialDetail.id, type: initialDetail.type, name: '' } : null));
+  const [calendarSeasonMalId, setCalendarSeasonMalId] = useState<string>();
   const [myList, setMyList] = useState<CatalogItem[]>(() => getMyList());
   useEffect(() => {
     const refresh = (event: StorageEvent) => { if (event.key === 'lunio_my_list' || event.key === null) setMyList(getMyList()); };
@@ -98,6 +99,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   const openContinue = (item: CatalogItem) => {
     const entry = continueList.find((e) => e.type === item.type && e.id === item.id);
     if (discoverOpen) discoverScroll.current = window.scrollY;
+    setCalendarSeasonMalId(undefined);
     setEpisodeId(entry?.videoId ?? null); // abre direto na página do episódio, onde se escolhe o stream de novo
     setSelected(item);
   };
@@ -116,10 +118,11 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   const discoverScroll = useRef(0);
   const [calendarOpen, setCalendarOpen] = useState(readCalendarFromUrl);
   const calendarScroll = useRef(0);
-  const openItem = (item: CatalogItem) => {
+  const openItem = (item: CatalogItem, seasonMalId?: string) => {
     if (discoverOpen) discoverScroll.current = window.scrollY;
     if (calendarOpen) calendarScroll.current = window.scrollY;
     setEpisodeId(null);
+    setCalendarSeasonMalId(seasonMalId);
     setSelected(item);
   };
 
@@ -197,7 +200,8 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
           <Detail
             key={`${selected.type}/${selected.id}`}
             item={selected}
-            initialSeason={fromUrl ? initialSeason : null}
+            initialSeason={fromUrl && !calendarSeasonMalId ? initialSeason : null}
+            calendarSeasonMalId={calendarSeasonMalId}
             episodeId={episodeId}
             onEpisodeChange={setEpisodeId}
             addons={addons}

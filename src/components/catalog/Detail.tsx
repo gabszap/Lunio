@@ -33,6 +33,7 @@ import { BrandBadge } from './BrandBadge';
 interface DetailProps {
   item: CatalogItem;
   initialSeason?: number | null;
+  calendarSeasonMalId?: string;
   /** Episódio aberto (o `videos[].id` do meta); o endereço é do CatalogTab. */
   episodeId: string | null;
   onEpisodeChange: (id: string | null) => void;
@@ -61,7 +62,7 @@ async function fetchMalScoreRetrying(malId: string, cancelled: () => boolean): P
   return null;
 }
 
-export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, onEpisodeChange, addons, onOpenAddons, onBack, onWatch, onPlayStream }) => {
+export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, calendarSeasonMalId, episodeId, onEpisodeChange, addons, onOpenAddons, onBack, onWatch, onPlayStream }) => {
   const [meta, setMeta] = useState<CatalogMeta | null>(null);
   const [error, setError] = useState(false);
   const [season, setSeason] = useState<number>(initialSeason ?? 1);
@@ -105,9 +106,13 @@ export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, epis
         if (cancelled) return;
         setMeta(m);
         const order = seasonOrder(m.episodes.map((e) => e.season));
-        // O episódio do endereço manda na temporada; senão vale a do endereço (se o título a tem); senão, a primeira
+        // A temporada do calendário só vale se o catálogo confirmar um único vínculo e tiver episódios nela.
+        const calendarSeasons = calendarSeasonMalId
+          ? order.filter(season => m.seasonMalIds?.[season] === calendarSeasonMalId)
+          : [];
         const opened = episodeId ? m.episodes.find((e) => e.id === episodeId) : undefined;
         if (opened) setSeason(opened.season);
+        else if (calendarSeasons.length === 1) setSeason(calendarSeasons[0]);
         else if (initialSeason !== null && order.includes(initialSeason)) setSeason(initialSeason);
         else if (order[0] !== undefined) setSeason(order[0]);
         // Episódio que o título não tem: volta à lista
