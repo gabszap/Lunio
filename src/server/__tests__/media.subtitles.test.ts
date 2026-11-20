@@ -13,7 +13,8 @@ vi.mock('../media/fonts', () => ({ warmFonts: vi.fn() }));
 vi.mock('../media/resolver', () => ({ resolveFinalCdnUrl: async (url: string) => url }));
 vi.mock('../media/tracks', () => ({ tracksCache: { get: () => ({ container: 'matroska,webm', subtitles: [{ index: 0, codec: state.codecs }] }) } }));
 vi.mock('../media/uploads', () => ({ isInternalUploadUrl: () => false }));
-vi.mock('../media/ffmpegSpeed', () => ({ ffmpegMbpsFor: () => 0.001, recordFfmpegRead: vi.fn() }));
+// Use a slow FFmpeg speed that stays nonzero after CLI rounding.
+vi.mock('../media/ffmpegSpeed', () => ({ ffmpegMbpsFor: () => 0.1, recordFfmpegRead: vi.fn() }));
 vi.mock('../tools', () => ({
   getTools: () => ({ python: { found: true, command: 'python', args: [] } }),
   ffmpegBin: () => 'ffmpeg',
