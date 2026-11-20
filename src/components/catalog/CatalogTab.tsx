@@ -120,6 +120,12 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   const [discoverOpen, setDiscoverOpen] = useState(initialDiscover !== null);
   const [discoverSel, setDiscoverSel] = useState<DiscoverRef | null>(initialDiscover);
   const discoverScroll = useRef(0);
+  const openDiscover = (ref: DiscoverRef | null) => {
+    discoverScroll.current = 0;
+    window.scrollTo({ top: 0 });
+    setDiscoverSel(ref);
+    setDiscoverOpen(true);
+  };
   const [calendarOpen, setCalendarOpen] = useState(readCalendarFromUrl);
   const calendarScroll = useRef(0);
   const openItem = (item: CatalogItem, seasonMalId?: string) => {
@@ -224,7 +230,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
           <div hidden={Boolean(selected)}>
             <Discover
               manifest={manifest}
-              initial={initialDiscover}
+              initial={discoverSel}
               onChange={setDiscoverSel}
               onOpen={openItem}
               onBack={() => setDiscoverOpen(false)}
@@ -274,12 +280,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
             </IconButton>
           )}
         </div>
-        <GhostButton
-          onClick={() => {
-            setDiscoverSel(null);
-            setDiscoverOpen(true);
-          }}
-        >
+        <GhostButton onClick={() => openDiscover(null)}>
           <Compass size={16} />
           <span>{t('Explorar')}</span>
         </GhostButton>
@@ -400,7 +401,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
             />
           )}
           {myList.length > 0 && <Row title={t('Minha lista')} load={async () => myList} items={myList} onOpen={openItem} />}
-          <HomeRows manifest={manifest} onOpen={openItem} onRetry={() => setManifestTry((n) => n + 1)} onCreateRoom={onCreateRoom} />
+          <HomeRows manifest={manifest} onOpen={openItem} onViewAll={openDiscover} onRetry={() => setManifestTry((n) => n + 1)} onCreateRoom={onCreateRoom} />
         </>
       )}
     </div>

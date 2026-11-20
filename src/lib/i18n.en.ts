@@ -129,6 +129,7 @@ export const EN: Record<string, string> = {
   "Séries": "Series",
   "Animes": "Anime",
   "Explorar": "Explore",
+  "Ver tudo": "View all",
   "Anime": "Anime",
   "Carregando…": "Loading…",
   "Nada para explorar": "Nothing to explore",
