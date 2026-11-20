@@ -44,6 +44,8 @@ test('calendário Sub/Dub: fuso local, lista por temporada, navegação e retorn
   await page.getByRole('button', { name: 'Calendário', exact: true }).click();
   await expect(page).toHaveURL(/\/calendar$/);
   await expect(page.getByText('3 lançamentos na semana')).toBeVisible();
+  // A conferência dos salvos começa com a agenda, antes de o filtro ser acionado.
+  await expect.poll(() => identityRequests.filter(request => request === 'match').length).toBe(1);
   const activeFilters = page.getByRole('region', { name: 'Filtros ativos' });
   await expect(activeFilters.getByText('Sem Donghua', { exact: true })).toBeVisible();
   await expect(activeFilters.getByText('TV', { exact: true })).toBeVisible();
@@ -72,6 +74,7 @@ test('calendário Sub/Dub: fuso local, lista por temporada, navegação e retorn
   await page.reload();
   await expect(page.getByRole('button', { name: /Abrir The Apothecary Diaries Season 3, episódio 7, Sub/ }).getByText(/10:00.*AM/i)).toBeVisible();
   await expect(page.locator('[data-calendar-poster]')).toHaveCount(0);
+  await expect.poll(() => identityRequests.filter(request => request === 'match').length).toBe(2);
   await page.getByRole('button', { name: 'Filtros', exact: true }).click();
   await settings.getByRole('group', { name: 'Capas', exact: true }).getByRole('button', { name: 'Mostrar', exact: true }).click();
   await expect(page.locator('[data-calendar-poster]')).toHaveCount(2);
@@ -95,14 +98,21 @@ test('calendário Sub/Dub: fuso local, lista por temporada, navegação e retorn
   await page.getByRole('button', { name: 'Restaurar filtros', exact: true }).click();
   await settings.getByRole('button', { name: 'Fechar filtros', exact: true }).click();
   await expect(settings).toHaveCount(0);
-  await page.getByRole('button', { name: 'Minha lista', exact: true }).click();
+  const myListFilter = page.getByRole('button', { name: 'Minha lista', exact: true });
+  await myListFilter.click();
   await expect(page.getByText('2 lançamentos na semana')).toBeVisible();
   await expect(page.getByRole('button', { name: /Abrir Outro anime/ })).toHaveCount(0);
+  await myListFilter.click();
+  await expect(page.getByText('3 lançamentos na semana')).toBeVisible();
+  await myListFilter.click();
+  await expect(page.getByText('2 lançamentos na semana')).toBeVisible();
   await page.getByRole('tab', { name: 'Dub', exact: true }).click();
   await expect(page.getByText('1 lançamento na semana')).toBeVisible();
   await page.getByRole('tab', { name: 'Todos', exact: true }).click();
+  expect(identityRequests.filter(request => request === 'match')).toHaveLength(2);
   await page.getByRole('button', { name: 'Próxima semana', exact: true }).click();
   await expect(page.getByText('1 lançamento na semana')).toBeVisible();
+  await expect.poll(() => identityRequests.filter(request => request === 'match').length).toBe(3);
   await page.getByRole('button', { name: /Abrir The Apothecary Diaries Season 3, episódio 8, Sub/ }).click();
   await expect(page).toHaveURL(/detail\/series\/tt123\?season=3$/);
   await expect(page.getByRole('tab', { name: 'Temporada 3', selected: true })).toBeVisible();
@@ -111,6 +121,7 @@ test('calendário Sub/Dub: fuso local, lista por temporada, navegação e retorn
   await page.getByRole('button', { name: 'Catálogo', exact: true }).first().click();
   await expect(page).toHaveURL(/\/calendar$/);
   await expect(page.getByText('1 lançamento na semana')).toBeVisible();
+  expect(identityRequests.filter(request => request === 'match')).toHaveLength(3);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Calendário', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Minha lista', exact: true, pressed: true })).toBeVisible();

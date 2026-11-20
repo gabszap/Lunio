@@ -72,14 +72,20 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
     return () => window.clearInterval(timer);
   }, []);
 
-  // Só resolve os acompanhamentos quando o filtro é usado. Nunca associa uma temporada apenas pelo nome.
+  // Prepara os IDs assim que a semana carrega para que o botão só mude a exibição.
   useEffect(() => {
-    if (!onlyMine) return;
+    const list = myList.filter(item => item.type !== 'movie');
+    if (!activeData?.events.length || list.length === 0) {
+      setChecking(false);
+      setMappingFailures(0);
+      setMappingIncomplete(false);
+      return;
+    }
     let active = true;
+    const controller = new AbortController();
     setChecking(true);
     setMappingFailures(0);
     setMappingIncomplete(false);
-    const list = myList.filter(item => item.type !== 'movie');
     void (async () => {
       const ids: Record<string, string[]> = {};
       let failures = 0;
@@ -96,7 +102,7 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
         const malIds = [...new Set([...Object.values(ids).flat(), ...list.filter(item => item.id.startsWith('mal:')).map(item => item.id.slice(4))])].slice(0, 300);
         if (malIds.length) {
           try {
-            const result = await readJson<CalendarMatches>(`calendar-match?${params}&ids=${malIds.join(',')}`);
+            const result = await readJson<CalendarMatches>(`calendar-match?${params}&ids=${malIds.join(',')}`, controller.signal);
             if (active) {
               setIdentities(current => ({ ...current, ...result.matches }));
               setMappingIncomplete(result.incomplete);
@@ -106,8 +112,8 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
         if (active) setChecking(false);
       }
     })();
-    return () => { active = false; };
-  }, [onlyMine, myList, params, attempt]);
+    return () => { active = false; controller.abort(); };
+  }, [activeData, myList, params]);
 
   const enhancedEvents = useMemo(() => (activeData?.events ?? []).map(event => {
     const target = { ...event, ...(event.route ? identities[event.route] : {}) };

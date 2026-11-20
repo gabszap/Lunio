@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, Compass, Puzzle, Search, SearchX, Users, X } from 'lucide-react';
 import {
   CatalogItem,
@@ -69,11 +69,15 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   const [selected, setSelected] = useState<CatalogItem | null>(() => (initialDetail ? { id: initialDetail.id, type: initialDetail.type, name: '' } : null));
   const [calendarSeasonMalId, setCalendarSeasonMalId] = useState<string>();
   const [myList, setMyList] = useState<CatalogItem[]>(() => getMyList());
+  const refreshMyList = useCallback(() => {
+    const saved = getMyList();
+    setMyList(current => JSON.stringify(current) === JSON.stringify(saved) ? current : saved);
+  }, []);
   useEffect(() => {
-    const refresh = (event: StorageEvent) => { if (event.key === 'lunio_my_list' || event.key === null) setMyList(getMyList()); };
+    const refresh = (event: StorageEvent) => { if (event.key === 'lunio_my_list' || event.key === null) refreshMyList(); };
     window.addEventListener('storage', refresh);
     return () => window.removeEventListener('storage', refresh);
-  }, []);
+  }, [refreshMyList]);
   /** "Continuar assistindo": o que foi tocado pelo catálogo, com o ponto em que parou (só no navegador). */
   const [continueList, setContinueList] = useState<ContinueEntry[]>(() => loadContinue());
   useEffect(() => {
@@ -185,7 +189,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   }, [debounced]);
 
   useEffect(() => {
-    if (!selected) setMyList(getMyList());
+    if (!selected) refreshMyList();
     window.scrollTo({ top: !selected && discoverOpen ? discoverScroll.current : !selected && calendarOpen ? calendarScroll.current : 0 });
     // só ao abrir ou fechar um título
     // eslint-disable-next-line react-hooks/exhaustive-deps
