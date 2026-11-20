@@ -459,7 +459,11 @@ class TestSrtOverHttp(unittest.TestCase):
                     with tempfile.TemporaryDirectory() as tmp:
                         try:
                             os.chdir(tmp)
-                            result = extractor.extract_remote_subtitle(f"http://127.0.0.1:{server.server_port}/m.mkv", timeout=5, auto_output=True)
+                            # Keep the HTTP requests real while making the FFmpeg cost comparison deterministic.
+                            with mock.patch.object(extractor, "measure_rtt", return_value=0.001):
+                                result = extractor.extract_remote_subtitle(
+                                    f"http://127.0.0.1:{server.server_port}/m.mkv", timeout=5, auto_output=True
+                                )
                             self.assertEqual(result["output_file"], "Episódio 01.srt")
                             self.assertEqual(Path(result["output_file"]).read_bytes(), result["content"].encode("utf-8"))
                         finally:
