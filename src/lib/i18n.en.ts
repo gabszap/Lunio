@@ -497,6 +497,7 @@ export const EN: Record<string, string> = {
   "Sala:": "Room:",
   "Salvar": "Save",
   "Salvar na lista": "Save to list",
+  "Salve filmes e séries pelos detalhes de cada título.": "Save movies and series from their title details.",
   "Se deixar vazio, geramos um nome de visitante para você.": "If left empty, we'll generate a guest name for you.",
   "Seção de ajustes": "Settings section",
   "Selecionar tudo": "Select all",

@@ -93,6 +93,27 @@ export function writeDetailToUrl(ref: DetailRef | null) {
   if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.replaceState(null, '', next);
 }
 
+// ───────────── Minha lista ─────────────
+
+const MY_LIST_PATH = '/my-list';
+
+export function isMyListPath(pathname: string): boolean {
+  return pathname.replace(/\/+$/, '') === MY_LIST_PATH;
+}
+
+export function writeMyListToUrl(open: boolean) {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  if (open) {
+    url.pathname = MY_LIST_PATH;
+    url.searchParams.delete(PARAM);
+  } else if (isMyListPath(url.pathname)) {
+    url.pathname = '/catalog';
+  }
+  const next = url.pathname + url.search + url.hash;
+  if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.replaceState(null, '', next);
+}
+
 // ───────────── calendário ─────────────
 
 /** Aceita a rota própria e os links do protótipo antigo. */

@@ -39,6 +39,7 @@ interface DetailProps {
   onEpisodeChange: (id: string | null) => void;
   addons: VideoAddon[];
   onOpenAddons: () => void;
+  backLabel?: string;
   onBack: () => void;
   onWatch: (intent: WatchIntent) => void;
   /** Filme: sem contexto de série, mas com o título (para o "continuar assistindo"). */
@@ -62,7 +63,7 @@ async function fetchMalScoreRetrying(malId: string, cancelled: () => boolean): P
   return null;
 }
 
-export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, calendarSeasonMalId, episodeId, onEpisodeChange, addons, onOpenAddons, onBack, onWatch, onPlayStream }) => {
+export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, calendarSeasonMalId, episodeId, onEpisodeChange, addons, onOpenAddons, backLabel, onBack, onWatch, onPlayStream }) => {
   const [meta, setMeta] = useState<CatalogMeta | null>(null);
   const [error, setError] = useState(false);
   const [season, setSeason] = useState<number>(initialSeason ?? 1);
@@ -265,7 +266,7 @@ export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, cale
         <div className="relative">
           <TextButton onClick={onBack} className="!pl-2 -ml-2">
             <ChevronLeft size={18} />
-            <span>{t('Catálogo')}</span>
+            <span>{backLabel ?? t('Catálogo')}</span>
           </TextButton>
           <div className="flex flex-col sm:flex-row gap-6 sm:gap-10 mt-4 sm:items-end">
             <Poster item={{ ...data, poster: activePoster }} iconSize={48} className="w-[160px] sm:w-[240px] aspect-[2/3]" />
