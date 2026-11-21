@@ -4,7 +4,9 @@ Cliente HTTP especializado em Range Requests e multipart/byteranges.
 
 import http.client
 import ipaddress
+import os
 import socket
+import sys
 from contextvars import ContextVar
 from functools import wraps
 import re
@@ -21,10 +23,54 @@ from email.utils import collapse_rfc2231_value
 from .errors import HttpRangeError, UrlBlockedError
 
 
+def _default_ssl_context() -> ssl.SSLContext:
+    """Cria contexto TLS verificado, evitando o store CA expirado do Windows."""
+    if sys.platform != "win32" or os.environ.get("SSL_CERT_FILE") or os.environ.get("SSL_CERT_DIR"):
+        return ssl.create_default_context()
+
+    # No Windows, load_default_certs() carrega os stores "CA" e "ROOT". O store "CA" acumula
+    # intermediários cross-signed expirados (ex.: ISRG Root X2 vencido em 2025), que o OpenSSL
+    # prioriza sobre a cadeia válida enviada pelo servidor. Carregar apenas "ROOT" (e certifi
+    # quando disponível) mantém a verificação estrita sem envenenar o trust store.
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.check_hostname = True
+    loaded = False
+    if hasattr(ssl, "enum_certificates"):
+        certs = bytearray()
+        try:
+            for cert, encoding, trust in ssl.enum_certificates("ROOT"):
+                if encoding == "x509_asn" and (trust is True or ssl.Purpose.SERVER_AUTH.oid in trust):
+                    certs.extend(cert)
+        except PermissionError:
+            pass
+        if certs:
+            context.load_verify_locations(cadata=bytes(certs))
+            loaded = True
+    try:
+        import certifi
+    except ImportError:
+        certifi = None
+    if certifi is not None:
+        context.load_verify_locations(cafile=certifi.where())
+        loaded = True
+    if loaded:
+        context.set_default_verify_paths()
+    else:
+        context.load_default_certs(ssl.Purpose.SERVER_AUTH)
+    return context
+
+
 def get_ssl_context() -> ssl.SSLContext:
     """Valida HTTPS com as CAs do sistema ou um contexto fornecido pela operação."""
     session = _active_session.get()
-    return session.ssl_context if session and session.ssl_context else ssl.create_default_context()
+    if session and session.ssl_context:
+        return session.ssl_context
+    if session is not None:
+        if session._default_ssl_context is None:
+            session._default_ssl_context = _default_ssl_context()
+        return session._default_ssl_context
+    return _default_ssl_context()
 
 
 _active_session: ContextVar = ContextVar("mkv_range_session", default=None)
@@ -35,6 +81,7 @@ class RangeSession:
     """Recursos, validadores e métricas pertencem a uma operação, não ao host global."""
     def __init__(self, *, ssl_context=None, verify_version=True, public_only=False, allowed_origins=(), coalesce_gap_bytes=0, coalesce_extra_bytes=65536, max_boundary_headers=4096):
         self.ssl_context = ssl_context
+        self._default_ssl_context = None
         self.verify_version = verify_version
         self.public_only = public_only
         self.allowed_origins = {origin.rstrip("/") for origin in allowed_origins}
@@ -147,15 +194,27 @@ def _new_connection(parts, timeout, **kwargs):
 
 
 class _PolicyHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, current_url=None):
+        super().__init__()
+        self._current_url = current_url
+
     def http_open(self, request):
         _state().requests += 1
+        if self._current_url is not None:
+            self._current_url[0] = request.full_url
         parts = _validate_url(request.full_url)
         return self.do_open(lambda host, timeout, **kw: _new_connection(parts, timeout, **kw), request)
 
 
 class _PolicyHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, current_url=None):
+        super().__init__()
+        self._current_url = current_url
+
     def https_open(self, request):
         _state().requests += 1
+        if self._current_url is not None:
+            self._current_url[0] = request.full_url
         parts = _validate_url(request.full_url)
         return self.do_open(lambda host, timeout, **kw: _new_connection(parts, timeout, **kw), request)
 
@@ -252,17 +311,36 @@ def _retry_after_seconds(headers) -> int | None:
     return int(value) if value and value.strip().isdigit() else None
 
 
+def _transport_error(url: str, exc: BaseException) -> HttpRangeError:
+    """Formata falhas de transporte/TLS preservando o motivo seguro sem expor tokens ou caminhos."""
+    cause = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+    if isinstance(cause, ssl.SSLCertVerificationError):
+        detail = getattr(cause, "verify_message", None) or getattr(cause, "reason", None)
+        suffix = f"{type(cause).__name__} ({detail})" if detail else type(cause).__name__
+        return HttpRangeError(f"Falha de conexão HTTP com {safe_url(url)}: {suffix}", reason="tls_verification_error")
+    if isinstance(exc, urllib.error.URLError):
+        label = f"URLError ({type(cause).__name__})" if isinstance(cause, BaseException) else "URLError"
+        return HttpRangeError(f"Falha de conexão HTTP com {safe_url(url)}: {label}", reason="http_transport_error")
+    return HttpRangeError(f"Falha de conexão HTTP com {safe_url(url)}: {type(exc).__name__}", reason="http_transport_error")
+
+
 def open_http(url: str, headers: dict, timeout: int = 60):
     """Executa requisição HTTP utilizando urllib."""
     _validate_url(url)
     request = urllib.request.Request(url, headers=headers)
+    current = [url]
     try:
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _PolicyHTTPHandler(), _PolicyHTTPSHandler(), _PolicyRedirectHandler())
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            _PolicyHTTPHandler(current),
+            _PolicyHTTPSHandler(current),
+            _PolicyRedirectHandler(),
+        )
         return opener.open(request, timeout=timeout)
     except urllib.error.HTTPError as exc:
         # O servidor respondeu com erro: o status importa (429 = esperar, não insistir)
         raise HttpRangeError(
-            f"HTTP {exc.code} de {safe_url(url)}",
+            f"HTTP {exc.code} de {safe_url(current[0])}",
             status=exc.code,
             retry_after=_retry_after_seconds(exc.headers),
         ) from exc
@@ -271,9 +349,9 @@ def open_http(url: str, headers: dict, timeout: int = 60):
     except urllib.error.URLError as exc:
         if isinstance(exc.reason, HttpRangeError):
             raise exc.reason
-        raise HttpRangeError(f"Falha de conexão HTTP com {safe_url(url)}: URLError", reason="http_transport_error") from exc
+        raise _transport_error(current[0], exc) from exc
     except Exception as exc:
-        raise HttpRangeError(f"Falha de conexão HTTP com {safe_url(url)}: {type(exc).__name__}", reason="http_transport_error") from exc
+        raise _transport_error(current[0], exc) from exc
 
 
 def resolve_url(url: str, timeout: int = 60, verbose: bool = False, metadata: dict[str, str] | None = None) -> tuple[str, int]:
@@ -375,6 +453,9 @@ def _fetch_range(url: str, start: int, end: int, timeout: int) -> bytes | None:
         except HttpRangeError:
             _drop_connection(parts)
             raise
+        except ssl.SSLCertVerificationError as exc:
+            _drop_connection(parts)
+            raise _transport_error(url, exc) from exc
         except (http.client.HTTPException, OSError) as exc:
             last_exc = exc
             _drop_connection(parts)
@@ -396,9 +477,9 @@ def _fetch_range(url: str, start: int, end: int, timeout: int) -> bytes | None:
             _drop_connection(parts)
         return data
 
-    raise HttpRangeError(
-        f"Falha de conexão HTTP com {safe_url(url)}: {type(last_exc).__name__ if last_exc else 'desconhecida'}", reason="http_transport_error"
-    )
+    if last_exc is not None:
+        raise _transport_error(url, last_exc) from last_exc
+    raise HttpRangeError(f"Falha de conexão HTTP com {safe_url(url)}: desconhecida", reason="http_transport_error")
 
 
 def supports_multirange(url: str, timeout: int = 30) -> bool:
