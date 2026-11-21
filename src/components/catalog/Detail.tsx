@@ -14,7 +14,8 @@ import {
   toggleMyList,
   useWatchedEpisodes,
 } from '../../lib/catalog';
-import { GhostButton, PillTabs, PrimaryButton, Spinner, TextButton, cx } from '../ui';
+import { GhostButton, PrimaryButton, Spinner, TextButton, cx } from '../ui';
+import { SeasonTabs } from './SeasonTabs';
 import { t } from '../../lib/i18n';
 import { writeSeasonToUrl } from '../../lib/searchUrl';
 import { ImdbIcon, MalIcon } from './BrandIcons';
@@ -32,6 +33,7 @@ import { BrandBadge } from './BrandBadge';
 interface DetailProps {
   item: CatalogItem;
   initialSeason?: number | null;
+  calendarSeasonMalId?: string;
   /** Episódio aberto (o `videos[].id` do meta); o endereço é do CatalogTab. */
   episodeId: string | null;
   onEpisodeChange: (id: string | null) => void;
@@ -60,7 +62,7 @@ async function fetchMalScoreRetrying(malId: string, cancelled: () => boolean): P
   return null;
 }
 
-export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, episodeId, onEpisodeChange, addons, onOpenAddons, onBack, onWatch, onPlayStream }) => {
+export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, calendarSeasonMalId, episodeId, onEpisodeChange, addons, onOpenAddons, onBack, onWatch, onPlayStream }) => {
   const [meta, setMeta] = useState<CatalogMeta | null>(null);
   const [error, setError] = useState(false);
   const [season, setSeason] = useState<number>(initialSeason ?? 1);
@@ -104,9 +106,13 @@ export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, epis
         if (cancelled) return;
         setMeta(m);
         const order = seasonOrder(m.episodes.map((e) => e.season));
-        // O episódio do endereço manda na temporada; senão vale a do endereço (se o título a tem); senão, a primeira
+        // A temporada do calendário só vale se o catálogo confirmar um único vínculo e tiver episódios nela.
+        const calendarSeasons = calendarSeasonMalId
+          ? order.filter(season => m.seasonMalIds?.[season] === calendarSeasonMalId)
+          : [];
         const opened = episodeId ? m.episodes.find((e) => e.id === episodeId) : undefined;
         if (opened) setSeason(opened.season);
+        else if (calendarSeasons.length === 1) setSeason(calendarSeasons[0]);
         else if (initialSeason !== null && order.includes(initialSeason)) setSeason(initialSeason);
         else if (order[0] !== undefined) setSeason(order[0]);
         // Episódio que o título não tem: volta à lista
@@ -239,7 +245,7 @@ export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, epis
   ].filter(Boolean);
 
   return (
-    <div className="-mx-4 sm:-mx-12 -mt-6 flex flex-col">
+    <div className="-mx-4 sm:-mx-12 -mt-6 min-w-0 flex flex-col">
       <section className="relative px-4 sm:px-12 pt-2 pb-10">
         <div
           aria-hidden="true"
@@ -381,7 +387,7 @@ export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, epis
 
       {isSeries && !openEpisode && seasons.length > 0 && (
         <section aria-label={t('Episódios')} className="px-4 sm:px-12 pt-2 flex flex-col gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col items-start gap-3 min-w-0">
             <div className="flex flex-wrap items-center gap-3">
               <h2 className="m-0 text-[18px] font-semibold">{t('Episódios')}</h2>
               {episodes.length > 0 && (
@@ -405,15 +411,7 @@ export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, epis
                 </TextButton>
               )}
             </div>
-            <div className="max-w-full overflow-x-auto no-scrollbar">
-              <PillTabs
-                label={t('Temporadas')}
-                size="sm"
-                value={String(season)}
-                onChange={(v) => setSeason(Number(v))}
-                options={seasons.map((s) => ({ value: String(s), label: s === 0 ? t('Especiais') : t('Temporada {s}', { s }) }))}
-              />
-            </div>
+            <SeasonTabs seasons={seasons} value={season} onChange={setSeason} />
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {episodes.map((ep) => {

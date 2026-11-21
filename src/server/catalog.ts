@@ -389,6 +389,8 @@ export interface CatalogEpisode {
 }
 
 export interface CatalogMeta extends CatalogItem {
+  /** Todas as entradas MAL que a fonte liga ao mesmo IMDb, inclusive sem episódios no catálogo ainda. */
+  seriesMalIds?: string[];
   description?: string;
   genres: string[];
   runtime?: string;
@@ -493,6 +495,7 @@ function looksLikeAnime(m: any, genres: string[]): boolean {
 
 interface ResolvedMalInfo {
   malId?: string;
+  seriesMalIds?: string[];
   /** Temporada do IMDb ("1", "2"…) -> id do MyAnimeList da entrada que a representa. */
   seasonMalIds?: Record<string, string>;
   /** Meta da fonte do anime no MAL (arte ocidental da TheTVDB; já lida aqui para as capas, sem outro pedido). */
@@ -550,17 +553,26 @@ async function resolveMalInfo(type: string, name: string, imdbId: string, season
     const wanted = type === 'movie' ? 'movie' : 'series';
     const manifest = await getManifest();
     const catalogs = manifest.searchCatalogs.filter((c) => c.type.startsWith('anime') && (c.type === 'anime' || c.type.includes(wanted))).slice(0, 2);
-    const entries: Array<{ id: string; year?: number }> = [];
+    const entries: Array<{ id: string; year?: number; name: string }> = [];
     // O meta de um `mal:` traz o nome da série com o ano ("Série (2012)"), que não acha as outras temporadas na busca
     const query = name.replace(/\s*\(\d{4}\)\s*$/, '').slice(0, 100) || name.slice(0, 100);
 
     for (const c of catalogs) {
-      const { data } = await fetchCatalogJson(`/catalog/${c.type}/${encodeURIComponent(c.id)}/search=${encodeURIComponent(query)}.json`, 'search');
-      for (const raw of Array.isArray(data?.metas) ? data.metas : []) {
-        const item = toItem(raw, c.type);
-        if (item?.imdbId === imdbId && item.id.startsWith('mal:') && /^\d{1,10}$/.test(item.id.slice(4)) && !entries.some((e) => e.id === item.id.slice(4))) {
-          entries.push({ id: item.id.slice(4), year: startYearOf(raw) });
+      const collect = (data: any) => {
+        for (const raw of Array.isArray(data?.metas) ? data.metas : []) {
+          const item = toItem(raw, c.type);
+          if (item?.imdbId === imdbId && item.id.startsWith('mal:') && /^\d{1,10}$/.test(item.id.slice(4)) && !entries.some((e) => e.id === item.id.slice(4))) {
+            entries.push({ id: item.id.slice(4), year: startYearOf(raw), name: item.name });
+          }
         }
+      };
+      const path = (q: string) => `/catalog/${c.type}/${encodeURIComponent(c.id)}/search=${encodeURIComponent(q)}.json`;
+      collect((await fetchCatalogJson(path(query), 'search')).data);
+      // A tradução pode omitir temporadas novas. Reconsulta uma vez pelo nome canônico de uma entrada já ligada pelo IMDb.
+      const canonical = [...entries].sort((a, b) => (a.year ?? Infinity) - (b.year ?? Infinity) || Number(a.id) - Number(b.id))[0]?.name.replace(/\s*\(\d{4}\)\s*$/, '').slice(0, 100);
+      if (canonical && canonical.toLowerCase() !== query.toLowerCase()) {
+        try { collect((await fetchCatalogJson(path(canonical), 'search')).data); }
+        catch { /* as associações confirmadas na primeira busca continuam válidas */ }
       }
       if (entries.length > 0) break;
     }
@@ -577,7 +589,7 @@ async function resolveMalInfo(type: string, name: string, imdbId: string, season
     } catch {
       // sem o meta do MAL só ficam as capas do próprio item
     }
-    return { malId, seasonMalIds: firstSeason !== undefined ? mapped : undefined, meta };
+    return { malId, seriesMalIds: entries.map(entry => entry.id), seasonMalIds: firstSeason !== undefined ? mapped : undefined, meta };
   } catch {
     return {}; // sem o id do MAL o detalhe só fica sem a nota
   }
@@ -605,6 +617,7 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
   const genres = (Array.isArray(m?.genres) ? m.genres : Array.isArray(m?.genre) ? m.genre : []).filter((g: unknown) => typeof g === 'string').slice(0, 30);
   let malId = malIdOf(m, item.id);
   let seasonMalIds: Record<string, string> | undefined;
+  let seriesMalIds: string[] | undefined;
   let malMeta: any;
 
   // Anime com IMDb: descobre o MyAnimeList de cada temporada. Vale também para o item `mal:`: a fonte devolve a série inteira
@@ -621,6 +634,7 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
     const resolved = await resolveMalInfo(type, item.name, item.imdbId, seasonYears);
     if (!malId && resolved.malId) malId = resolved.malId;
     seasonMalIds = resolved.seasonMalIds;
+    seriesMalIds = resolved.seriesMalIds;
     malMeta = resolved.meta;
   }
 
@@ -657,6 +671,7 @@ export async function getMeta(type: string, id: string): Promise<{ meta: Catalog
       background: httpUrl(m?.background),
       imdbRating: str(m?.imdbRating, 10) || undefined,
       malId,
+      seriesMalIds,
       malScore: stats?.score,
       malScoredBy: stats?.scoredBy,
       malRank: stats?.rank,

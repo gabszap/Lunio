@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, Compass, Puzzle, Search, SearchX, Users, X } from 'lucide-react';
 import {
   CatalogItem,
@@ -14,10 +14,11 @@ import {
 } from '../../lib/catalog';
 import { GhostButton, IconButton, PillTabs, PrimaryButton, Spinner } from '../ui';
 import { t } from '../../lib/i18n';
-import { DetailRef, DiscoverRef, discoverFromUrl, writeDetailToUrl, writeDiscoverToUrl, writeSearchToUrl } from '../../lib/searchUrl';
+import { DetailRef, DiscoverRef, discoverFromUrl, writeDetailToUrl, writeDiscoverToUrl, writeSearchToUrl, readCalendarFromUrl, writeCalendarToUrl } from '../../lib/searchUrl';
 import { AddonsPanel } from './AddonsPanel';
 import { Detail } from './Detail';
 import { Discover } from './Discover';
+import { Calendar } from './Calendar';
 import { HomeRows } from './HomeRows';
 import { PosterCard } from './Poster';
 import { Row } from './Row';
@@ -66,7 +67,17 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   const [filter, setFilter] = useState<Filter>('all');
   // Um link com `?detail=` abre o título direto; os dados completos vêm do detalhe
   const [selected, setSelected] = useState<CatalogItem | null>(() => (initialDetail ? { id: initialDetail.id, type: initialDetail.type, name: '' } : null));
+  const [calendarSeasonMalId, setCalendarSeasonMalId] = useState<string>();
   const [myList, setMyList] = useState<CatalogItem[]>(() => getMyList());
+  const refreshMyList = useCallback(() => {
+    const saved = getMyList();
+    setMyList(current => JSON.stringify(current) === JSON.stringify(saved) ? current : saved);
+  }, []);
+  useEffect(() => {
+    const refresh = (event: StorageEvent) => { if (event.key === 'lunio_my_list' || event.key === null) refreshMyList(); };
+    window.addEventListener('storage', refresh);
+    return () => window.removeEventListener('storage', refresh);
+  }, [refreshMyList]);
   /** "Continuar assistindo": o que foi tocado pelo catálogo, com o ponto em que parou (só no navegador). */
   const [continueList, setContinueList] = useState<ContinueEntry[]>(() => loadContinue());
   useEffect(() => {
@@ -92,6 +103,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   const openContinue = (item: CatalogItem) => {
     const entry = continueList.find((e) => e.type === item.type && e.id === item.id);
     if (discoverOpen) discoverScroll.current = window.scrollY;
+    setCalendarSeasonMalId(undefined);
     setEpisodeId(entry?.videoId ?? null); // abre direto na página do episódio, onde se escolhe o stream de novo
     setSelected(item);
   };
@@ -108,9 +120,13 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   const [discoverOpen, setDiscoverOpen] = useState(initialDiscover !== null);
   const [discoverSel, setDiscoverSel] = useState<DiscoverRef | null>(initialDiscover);
   const discoverScroll = useRef(0);
-  const openItem = (item: CatalogItem) => {
+  const [calendarOpen, setCalendarOpen] = useState(readCalendarFromUrl);
+  const calendarScroll = useRef(0);
+  const openItem = (item: CatalogItem, seasonMalId?: string) => {
     if (discoverOpen) discoverScroll.current = window.scrollY;
+    if (calendarOpen) calendarScroll.current = window.scrollY;
     setEpisodeId(null);
+    setCalendarSeasonMalId(seasonMalId);
     setSelected(item);
   };
 
@@ -133,8 +149,8 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   // A busca vai para o endereço (e sai dele quando a aba fecha). Com um título aberto a rota é só /detail/…: a busca volta
   // ao endereço quando o título fecha (ela continua aqui, no estado)
   useEffect(() => {
-    writeSearchToUrl(selected ? '' : debounced);
-  }, [debounced, selected]);
+    writeSearchToUrl(selected || calendarOpen ? '' : debounced);
+  }, [debounced, selected, calendarOpen]);
   useEffect(() => () => writeSearchToUrl(''), []);
   // O título aberto também vai para o endereço
   useEffect(() => {
@@ -149,6 +165,11 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
     else if (discoverSel) writeDiscoverToUrl(discoverSel);
   }, [selected, discoverOpen, discoverSel]);
   useEffect(() => () => writeDiscoverToUrl(null), []);
+
+  useEffect(() => {
+    writeCalendarToUrl(calendarOpen && !selected);
+  }, [calendarOpen, selected]);
+  useEffect(() => () => writeCalendarToUrl(false), []);
 
   useEffect(() => {
     if (!debounced) {
@@ -168,13 +189,13 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   }, [debounced]);
 
   useEffect(() => {
-    if (!selected) setMyList(getMyList());
-    window.scrollTo({ top: !selected && discoverOpen ? discoverScroll.current : 0 });
+    if (!selected) refreshMyList();
+    window.scrollTo({ top: !selected && discoverOpen ? discoverScroll.current : !selected && calendarOpen ? calendarScroll.current : 0 });
     // só ao abrir ou fechar um título
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
-  if (selected || discoverOpen) {
+  if (selected || discoverOpen || calendarOpen) {
     const fromUrl = selected && initialDetail && initialDetail.id === selected.id && initialDetail.type === selected.type;
     // O Explorar fica no mesmo lugar da árvore com ou sem título aberto (escondido por baixo dele), então não perde a grade nem a posição
     return (
@@ -183,7 +204,8 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
           <Detail
             key={`${selected.type}/${selected.id}`}
             item={selected}
-            initialSeason={fromUrl ? initialSeason : null}
+            initialSeason={fromUrl && !calendarSeasonMalId ? initialSeason : null}
+            calendarSeasonMalId={calendarSeasonMalId}
             episodeId={episodeId}
             onEpisodeChange={setEpisodeId}
             addons={addons}
@@ -197,6 +219,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
           />
         )}
         {selected && <AddonsPanel open={addonsOpen} onClose={() => setAddonsOpen(false)} onChange={setAddons} />}
+        {calendarOpen && <div hidden={Boolean(selected)}><Calendar myList={myList} onOpen={openItem} onBack={() => setCalendarOpen(false)} /></div>}
         {discoverOpen && (
           <div hidden={Boolean(selected)}>
             <Discover
@@ -264,7 +287,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
           <Puzzle size={16} />
           <span>{t('Addons')}</span>
         </GhostButton>
-        <GhostButton disabled title={t('Em breve')}>
+        <GhostButton onClick={() => setCalendarOpen(true)}>
           <CalendarDays size={16} />
           <span>{t('Calendário')}</span>
         </GhostButton>

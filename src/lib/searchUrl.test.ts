@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { detailFromPath, detailPath, discoverFromUrl, discoverPath, writeDiscoverToUrl, readDetailFromUrl, readSearchFromUrl, readSeasonFromUrl, writeDetailToUrl, writeSearchToUrl, writeSeasonToUrl } from './searchUrl';
+import { detailFromPath, detailPath, discoverFromUrl, discoverPath, writeDiscoverToUrl, readDetailFromUrl, readSearchFromUrl, readSeasonFromUrl, writeDetailToUrl, writeSearchToUrl, writeSeasonToUrl, readCalendarFromUrl, writeCalendarToUrl } from './searchUrl';
 
 describe('readSearchFromUrl', () => {
   it('lê a busca (com acento, dois-pontos e espaço, nas duas formas de codificar)', () => {
@@ -127,6 +127,12 @@ describe('título aberto (/detail/<tipo>/<id>)', () => {
       expect(current).toBe('/catalog?season=6');
     });
 
+    it('o detalhe remove a flag antiga do calendário, preservando temporada e hash', () => {
+      current = '/catalog?calendar=1&season=1#episodios';
+      writeDetailToUrl({ type: 'series', id: 'mal:61987' });
+      expect(current).toBe('/detail/series/mal%3A61987?season=1#episodios');
+    });
+
     it('troca o link antigo (?detail=) pelo caminho e não mexe numa rota que não é de título', () => {
       current = '/?detail=series/tt1&room=ABC';
       writeDetailToUrl({ type: 'series', id: 'tt1' });
@@ -135,6 +141,42 @@ describe('título aberto (/detail/<tipo>/<id>)', () => {
       writeDetailToUrl(null);
       expect(current).toBe('/status');
     });
+  });
+});
+
+describe('rota do calendário', () => {
+  let current = '/catalog?calendar=1';
+  beforeEach(() => {
+    current = '/catalog?calendar=1';
+    vi.stubGlobal('window', {
+      get location() { const url = new URL(current, 'https://lunio.test'); return { href: url.href, pathname: url.pathname, search: url.search, hash: url.hash }; },
+      history: { replaceState: (_s: unknown, _t: string, url: string) => { current = url; } },
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('reconhece /calendar e os links antigos com calendar=1', () => {
+    expect(readCalendarFromUrl('/calendar', '')).toBe(true);
+    expect(readCalendarFromUrl('/calendar/', '')).toBe(true);
+    expect(readCalendarFromUrl('/catalog', '?calendar=1')).toBe(true);
+    expect(readCalendarFromUrl('/catalog', '?calendar=0')).toBe(false);
+  });
+
+  it('usa /calendar, remove flags e parâmetros de busca/temporada, e fecha em /catalog', () => {
+    current = '/catalog?calendar=1&season=1&search=anime';
+    writeCalendarToUrl(true);
+    expect(current).toBe('/calendar');
+    writeCalendarToUrl(false);
+    expect(current).toBe('/catalog');
+  });
+
+  it('limpa links antigos do detalhe sem reescrever a rota do título nem de outras abas', () => {
+    current = '/detail/series/mal%3A61987?calendar=1&season=1';
+    writeCalendarToUrl(false);
+    expect(current).toBe('/detail/series/mal%3A61987?season=1');
+    current = '/status';
+    writeCalendarToUrl(false);
+    expect(current).toBe('/status');
   });
 });
 

@@ -85,7 +85,33 @@ export function writeDetailToUrl(ref: DetailRef | null) {
   if (ref) {
     url.pathname = detailPath(ref);
     url.searchParams.delete(PARAM);
+    url.searchParams.delete('calendar');
   } else if (detailFromPath(url.pathname)) {
+    url.pathname = '/catalog';
+  }
+  const next = url.pathname + url.search + url.hash;
+  if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.replaceState(null, '', next);
+}
+
+// ───────────── calendário ─────────────
+
+/** Aceita a rota própria e os links do protótipo antigo. */
+export function readCalendarFromUrl(
+  pathname = typeof window === 'undefined' ? '' : window.location.pathname,
+  search = typeof window === 'undefined' ? '' : window.location.search
+): boolean {
+  return pathname.replace(/\/+$/, '') === '/calendar' || new URLSearchParams(search).get('calendar') === '1';
+}
+
+/** A tela usa /calendar; a origem do detalhe fica no estado da aba, sem acompanhar sua URL. */
+export function writeCalendarToUrl(open: boolean) {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  url.searchParams.delete('calendar');
+  if (open) {
+    url.pathname = '/calendar';
+    for (const key of ['search', 'detail', 'season', 'genre']) url.searchParams.delete(key);
+  } else if (url.pathname.replace(/\/+$/, '') === '/calendar') {
     url.pathname = '/catalog';
   }
   const next = url.pathname + url.search + url.hash;
