@@ -26,7 +26,7 @@ const META = {
   ],
 };
 
-async function mockCatalog(page: Page, opts: { manifestStatus?: number; malFailures?: number } = {}) {
+async function mockCatalog(page: Page, opts: { manifestStatus?: number; malFailures?: number; searchCount?: number } = {}) {
   let malFailures = opts.malFailures ?? 0;
   const rowRequests: string[] = [];
   await page.route('**/api/catalog/**', async (route) => {
@@ -43,6 +43,10 @@ async function mockCatalog(page: Page, opts: { manifestStatus?: number; malFailu
     // A nota do MyAnimeList vem à parte (o detalhe nunca espera por ela); `failed: true` simula a API do MAL sem responder
     if (action === 'malscore') return malFailures-- > 0 ? json({ score: null, failed: true }) : json({ score: 8.25, scoredBy: 1607019, rank: 400, failed: false });
     if (action === 'search') {
+      if (opts.searchCount) {
+        const metas = Array.from({ length: opts.searchCount }, (_, i) => ({ id: `tt10000${i}`, type: 'series', name: `Resultado ${i + 1}` }));
+        return json({ groups: [{ type: 'series', id: 'search.series', name: 'Series Search', metas }], stale: false });
+      }
       const q = url.searchParams.get('q');
       return json({
         groups: [
@@ -136,6 +140,37 @@ test.describe('Catálogo (fonte configurada no servidor)', () => {
     await expect(page.getByText('Anime de re: zero')).toBeVisible();
     await expect(page.getByText('2 resultados')).toBeVisible();
     await page.close();
+  });
+
+  test('arrastar rola a fileira da busca por grupos e a página da busca unificada', async ({ page }) => {
+    await mockCatalog(page, { searchCount: 32 });
+    await page.goto('/catalog?search=anime');
+    const first = page.getByRole('button', { name: /^Resultado 1\b/ });
+    await expect(first).toBeVisible();
+
+    const drag = async (dx: number, dy: number) => {
+      const box = (await first.boundingBox())!;
+      const x = box.x + box.width * 0.85;
+      const y = box.y + box.height * 0.65;
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x + dx, y + dy, { steps: 8 });
+      await page.mouse.up();
+      return box;
+    };
+
+    const before = await drag(-115, 0);
+    await expect.poll(() => first.evaluate((card) => card.getBoundingClientRect().x), { timeout: 4000 }).toBeLessThan(before.x - 60);
+    await expect(page).toHaveURL(/\/catalog\?search=anime$/);
+
+    await page.getByRole('tab', { name: 'Unificada' }).click();
+    const top = await page.evaluate(() => window.scrollY);
+    await drag(0, -180);
+    await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 4000 }).toBeGreaterThan(top + 120);
+    await expect(page).toHaveURL(/\/catalog\?search=anime$/);
+
+    await page.getByRole('button', { name: /^Resultado 9\b/ }).click();
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/detail/series/tt100008');
   });
 
   test('o título aberto vai para o endereço (/detail/tipo/id), um link com ele abre direto e fechar volta a /catalog', async ({ browser }) => {

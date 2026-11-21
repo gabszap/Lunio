@@ -26,6 +26,7 @@ import { HomeRows } from './HomeRows';
 import { MyList } from './MyList';
 import { PosterCard } from './Poster';
 import { Row } from './Row';
+import { dragScrollClass, useDragScroll } from './useDragScroll';
 import { loadAddons, type VideoAddon } from '../../lib/addons';
 import type { StreamOption } from '../../lib/streams';
 import type { CatalogSeriesContext } from '../../types/media';
@@ -61,6 +62,7 @@ function readSearchMode(): SearchMode {
 }
 
 export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initialDetail = null, initialSeason = null, onWatch, onPlayStream, onCreateRoom }) => {
+  const searchDragScroll = useDragScroll('vertical');
   const [query, setQuery] = useState(initialQuery);
   const [debounced, setDebounced] = useState(initialQuery.trim());
   /** Um grupo por catálogo de busca da fonte (como no Stremio). */
@@ -235,7 +237,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
             onEpisodeChange={setEpisodeId}
             addons={addons}
             onOpenAddons={() => setAddonsOpen(true)}
-            backLabel={myListOpen ? t('Minha lista') : undefined}
+            backLabel={myListOpen ? t('Biblioteca') : undefined}
             onBack={() => {
               setEpisodeId(null);
               setSelected(null);
@@ -307,7 +309,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
         </GhostButton>
         <GhostButton onClick={openMyList}>
           <Bookmark size={16} aria-hidden="true" />
-          <span>{t('Minha lista')}</span>
+          <span>{t('Biblioteca')}</span>
         </GhostButton>
         <GhostButton onClick={() => setAddonsOpen(true)}>
           <Puzzle size={16} />
@@ -390,7 +392,10 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
                 <Row key={`${group.type}:${group.id}`} title={groupTitles[i]} load={async () => group.metas} items={group.metas} onOpen={openItem} />
               ))
             ) : (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(152px,1fr))] gap-x-4 gap-y-6">
+              <div
+                {...searchDragScroll}
+                className={`grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(152px,1fr))] gap-x-4 gap-y-6 ${dragScrollClass}`}
+              >
                 {shown.map((item) => (
                   <PosterCard key={`${item.type}-${item.id}`} item={item} onOpen={openItem} showType fluid />
                 ))}
@@ -425,7 +430,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
               }}
             />
           )}
-          {myList.length > 0 && <Row title={t('Minha lista')} load={async () => myList} items={myList} onOpen={openItem} onViewAll={openMyList} />}
+          {myList.length > 0 && <Row title={t('Biblioteca')} load={async () => myList} items={myList} onOpen={openItem} onViewAll={openMyList} />}
           <HomeRows manifest={manifest} onOpen={openItem} onViewAll={openDiscover} onRetry={() => setManifestTry((n) => n + 1)} onCreateRoom={onCreateRoom} />
         </>
       )}

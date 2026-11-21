@@ -401,6 +401,7 @@ export const EN: Record<string, string> = {
   "Membros banidos ({n})": "Banned members ({n})",
   "Mensagem": "Message",
   "Minha lista": "My list",
+  "Biblioteca": "Library",
   "Mistério": "Mystery",
   "MKV, MP4 e mais · até 50 GB": "MKV, MP4 and more · up to 50 GB",
   "Modo Solo": "Solo mode",
