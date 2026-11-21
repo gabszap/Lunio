@@ -4,9 +4,10 @@ import type { CatalogItem } from '../../lib/catalog';
 import { IconButton, TextButton } from '../ui';
 import { t } from '../../lib/i18n';
 import { PosterCard } from './Poster';
-import { dragScrollClass, useDragScroll } from './useDragScroll';
 
 // ───────────────────────── Fileira com rolagem ─────────────────────────
+
+const DRAG_THRESHOLD = 6;
 
 export const Row: React.FC<{
   title: string;
@@ -24,7 +25,8 @@ export const Row: React.FC<{
   const [visible, setVisible] = useState(!lazy);
   const scroller = useRef<HTMLDivElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
-  const dragScroll = useDragScroll('horizontal');
+  const drag = useRef<{ pointerId: number; startX: number; startLeft: number; active: boolean } | null>(null);
+  const suppressClick = useRef(false);
 
   useEffect(() => {
     if (visible) return;
@@ -66,6 +68,34 @@ export const Row: React.FC<{
     if (el) el.scrollBy({ left: dir * el.clientWidth * 0.85, behavior: 'smooth' });
   };
 
+  const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    suppressClick.current = false;
+    const el = event.currentTarget;
+    if (event.pointerType !== 'mouse' || event.button !== 0 || el.scrollWidth <= el.clientWidth) return;
+    drag.current = { pointerId: event.pointerId, startX: event.clientX, startLeft: el.scrollLeft, active: false };
+  };
+
+  const moveDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const gesture = drag.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const el = event.currentTarget;
+    const delta = event.clientX - gesture.startX;
+    if (!gesture.active) {
+      if (Math.abs(delta) < DRAG_THRESHOLD) return;
+      el.setPointerCapture(event.pointerId);
+      el.dataset.dragging = 'true';
+      gesture.active = true;
+      suppressClick.current = true;
+    }
+    el.scrollLeft = gesture.startLeft - delta;
+  };
+
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (drag.current?.pointerId !== event.pointerId) return;
+    drag.current = null;
+    delete event.currentTarget.dataset.dragging;
+  };
+
   return (
     <section ref={sectionRef} aria-label={title} className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2 min-h-11">
@@ -98,8 +128,20 @@ export const Row: React.FC<{
       ) : (
         <div
           ref={scroller}
-          {...dragScroll}
-          className={`flex gap-4 overflow-x-auto no-scrollbar snap-x scroll-px-1 -mx-1 px-1 pb-1 data-[dragging=true]:snap-none ${dragScrollClass}`}
+          onPointerDown={startDrag}
+          onPointerMove={moveDrag}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          onLostPointerCapture={endDrag}
+          onPointerLeave={(event) => { if (!drag.current?.active) endDrag(event); }}
+          onDragStart={(event) => event.preventDefault()}
+          onClickCapture={(event) => {
+            if (!suppressClick.current || event.detail === 0) return;
+            suppressClick.current = false;
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          className="flex gap-4 overflow-x-auto no-scrollbar snap-x scroll-px-1 -mx-1 px-1 pb-1 select-none cursor-grab [&_button]:cursor-grab data-[dragging=true]:snap-none data-[dragging=true]:cursor-grabbing data-[dragging=true]:[&_button]:cursor-grabbing"
         >
           {items
             ? items.map((item) => (

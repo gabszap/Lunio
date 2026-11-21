@@ -15,8 +15,8 @@ import {
 import { GhostButton, IconButton, PillTabs, PrimaryButton, Spinner } from '../ui';
 import { t } from '../../lib/i18n';
 import {
-  type DetailRef, type DiscoverRef, discoverFromUrl, isMyListPath, readCalendarFromUrl,
-  writeCalendarToUrl, writeDetailToUrl, writeDiscoverToUrl, writeMyListToUrl, writeSearchToUrl,
+  type DetailRef, type DiscoverRef, discoverFromUrl, isLibraryPath, readCalendarFromUrl,
+  writeCalendarToUrl, writeDetailToUrl, writeDiscoverToUrl, writeLibraryToUrl, writeSearchToUrl,
 } from '../../lib/searchUrl';
 import { AddonsPanel } from './AddonsPanel';
 import { Detail } from './Detail';
@@ -26,7 +26,6 @@ import { HomeRows } from './HomeRows';
 import { MyList } from './MyList';
 import { PosterCard } from './Poster';
 import { Row } from './Row';
-import { dragScrollClass, useDragScroll } from './useDragScroll';
 import { loadAddons, type VideoAddon } from '../../lib/addons';
 import type { StreamOption } from '../../lib/streams';
 import type { CatalogSeriesContext } from '../../types/media';
@@ -62,7 +61,6 @@ function readSearchMode(): SearchMode {
 }
 
 export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initialDetail = null, initialSeason = null, onWatch, onPlayStream, onCreateRoom }) => {
-  const searchDragScroll = useDragScroll('vertical');
   const [query, setQuery] = useState(initialQuery);
   const [debounced, setDebounced] = useState(initialQuery.trim());
   /** Um grupo por catálogo de busca da fonte (como no Stremio). */
@@ -75,7 +73,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   const [selected, setSelected] = useState<CatalogItem | null>(() => (initialDetail ? { id: initialDetail.id, type: initialDetail.type, name: '' } : null));
   const [calendarSeasonMalId, setCalendarSeasonMalId] = useState<string>();
   const [myList, setMyList] = useState<CatalogItem[]>(() => getMyList());
-  const [myListOpen, setMyListOpen] = useState(() => isMyListPath(window.location.pathname));
+  const [myListOpen, setMyListOpen] = useState(() => isLibraryPath(window.location.pathname));
   const myListScroll = useRef(0);
   const openMyList = () => {
     myListScroll.current = 0;
@@ -192,9 +190,9 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   useEffect(() => () => writeCalendarToUrl(false), []);
 
   useEffect(() => {
-    writeMyListToUrl(myListOpen && !selected);
+    writeLibraryToUrl(myListOpen && !selected);
   }, [myListOpen, selected]);
-  useEffect(() => () => writeMyListToUrl(false), []);
+  useEffect(() => () => writeLibraryToUrl(false), []);
 
   useEffect(() => {
     if (!debounced) {
@@ -392,10 +390,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
                 <Row key={`${group.type}:${group.id}`} title={groupTitles[i]} load={async () => group.metas} items={group.metas} onOpen={openItem} />
               ))
             ) : (
-              <div
-                {...searchDragScroll}
-                className={`grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(152px,1fr))] gap-x-4 gap-y-6 ${dragScrollClass}`}
-              >
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(152px,1fr))] gap-x-4 gap-y-6">
                 {shown.map((item) => (
                   <PosterCard key={`${item.type}-${item.id}`} item={item} onOpen={openItem} showType fluid />
                 ))}

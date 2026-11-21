@@ -98,8 +98,9 @@ test('calendário Sub/Dub: fuso local, lista por temporada, navegação e retorn
   await page.getByRole('button', { name: 'Restaurar filtros', exact: true }).click();
   await settings.getByRole('button', { name: 'Fechar filtros', exact: true }).click();
   await expect(settings).toHaveCount(0);
-  const myListFilter = page.getByRole('button', { name: 'Minha lista', exact: true });
+  const myListFilter = page.getByRole('button', { name: 'Biblioteca', exact: true });
   await myListFilter.click();
+  await expect(activeFilters.getByText('Biblioteca', { exact: true })).toBeVisible();
   await expect(page.getByText('2 lançamentos na semana')).toBeVisible();
   await expect(page.getByRole('button', { name: /Abrir Outro anime/ })).toHaveCount(0);
   await myListFilter.click();
@@ -124,11 +125,11 @@ test('calendário Sub/Dub: fuso local, lista por temporada, navegação e retorn
   expect(identityRequests.filter(request => request === 'match')).toHaveLength(3);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Calendário', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Minha lista', exact: true, pressed: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Biblioteca', exact: true, pressed: true })).toBeVisible();
   await expect(page.getByText('2 lançamentos na semana')).toBeVisible();
-  await page.getByRole('button', { name: 'Minha lista', exact: true }).click();
+  await myListFilter.click();
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Minha lista', exact: true, pressed: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Biblioteca', exact: true, pressed: false })).toBeVisible();
   await expect(page.getByText('3 lançamentos na semana')).toBeVisible();
   await page.getByRole('button', { name: 'Catálogo', exact: true }).click();
   await expect(page).not.toHaveURL(/calendar=/);
@@ -142,7 +143,7 @@ test('calendário Sub/Dub: fuso local, lista por temporada, navegação e retorn
   await expect(page).not.toHaveURL(/calendar=/);
 });
 
-test('Minha lista reúne temporadas pelo IMDb e preserva somente os lançamentos publicados na fonte', async ({ page }) => {
+test('Biblioteca reúne temporadas pelo IMDb e preserva somente os lançamentos publicados na fonte', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-11-14T20:00:00Z'));
   await page.addInitScript(() => {
     localStorage.setItem('lunio_lang', 'pt');
@@ -179,7 +180,7 @@ test('Minha lista reúne temporadas pelo IMDb e preserva somente os lançamentos
   });
   await page.goto('/calendar');
   await expect(page.getByText('4 lançamentos na semana')).toBeVisible();
-  await page.getByRole('button', { name: 'Minha lista', exact: true }).click();
+  await page.getByRole('button', { name: 'Biblioteca', exact: true }).click({ timeout: 5000 });
   await expect(page.getByText('3 lançamentos na semana')).toBeVisible();
   await expect(page.getByRole('button', { name: /Abrir The Apothecary Diaries Season 3, episódio 7, Sub/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Abrir The Apothecary Diaries Season 3, episódio 5, Dub/ })).toBeVisible();
@@ -194,7 +195,7 @@ test('Minha lista reúne temporadas pelo IMDb e preserva somente os lançamentos
   await expect(page).toHaveURL(/\/calendar$/);
   // Alteração real do localStorage em outra aba, sem recarregar o calendário atual.
   const otherTab = await page.context().newPage();
-  await otherTab.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<html><title>Minha lista</title></html>' }));
+  await otherTab.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<html><title>Biblioteca</title></html>' }));
   await otherTab.goto('/list-test');
   await otherTab.evaluate(() => localStorage.setItem('lunio_my_list', JSON.stringify([{ id: 'mal:21', type: 'series', name: 'One Piece' }])));
   await expect(page.getByText('1 lançamento na semana')).toBeVisible();

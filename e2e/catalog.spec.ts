@@ -142,7 +142,7 @@ test.describe('Catálogo (fonte configurada no servidor)', () => {
     await page.close();
   });
 
-  test('arrastar rola a fileira da busca por grupos e a página da busca unificada', async ({ page }) => {
+  test('a busca por grupos usa arraste e a busca unificada rola com a roda do mouse', async ({ page }) => {
     await mockCatalog(page, { searchCount: 32 });
     await page.goto('/catalog?search=anime');
     const first = page.getByRole('button', { name: /^Resultado 1\b/ });
@@ -165,9 +165,13 @@ test.describe('Catálogo (fonte configurada no servidor)', () => {
 
     await page.getByRole('tab', { name: 'Unificada' }).click();
     const top = await page.evaluate(() => window.scrollY);
-    await drag(0, -180);
-    await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 4000 }).toBeGreaterThan(top + 120);
+    await drag(0, -220);
+    expect(await page.evaluate(() => window.scrollY)).toBe(top);
     await expect(page).toHaveURL(/\/catalog\?search=anime$/);
+
+    await first.hover();
+    await page.mouse.wheel(0, 180);
+    await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 4000 }).toBeGreaterThan(top + 120);
 
     await page.getByRole('button', { name: /^Resultado 9\b/ }).click();
     await expect.poll(() => new URL(page.url()).pathname).toBe('/detail/series/tt100008');

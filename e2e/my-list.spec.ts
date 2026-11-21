@@ -23,14 +23,14 @@ test('Ver tudo abre a Biblioteca inteira em uma página que pode ser recarregada
   const shelf = page.getByRole('region', { name: 'Biblioteca', exact: true });
   await shelf.getByRole('button', { name: 'Ver tudo', exact: true }).click({ timeout: 5000 });
 
-  await expect(page).toHaveURL(/\/my-list$/);
+  await expect(page).toHaveURL(/\/library$/, { timeout: 5000 });
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Biblioteca', exact: true })).toBeVisible();
   const last = page.getByRole('button', { name: 'Anime salvo 30', exact: true });
   await last.click();
   await expect(page).toHaveURL(/\/detail\/series\/mal%3A30$/);
   await page.getByRole('button', { name: 'Biblioteca', exact: true }).click();
-  await expect(page).toHaveURL(/\/my-list$/);
+  await expect(page).toHaveURL(/\/library$/);
   await expect(last).toBeVisible();
 });
 
@@ -38,8 +38,12 @@ test('o atalho do catálogo abre a Biblioteca mesmo sem títulos salvos', async 
   await page.goto('/catalog');
   await page.getByRole('button', { name: 'Biblioteca', exact: true }).click({ timeout: 5000 });
 
-  await expect(page).toHaveURL(/\/my-list$/);
+  await expect(page).toHaveURL(/\/library$/);
   await expect(page.getByText('Salve filmes e séries pelos detalhes de cada título.')).toBeVisible();
   await page.getByRole('button', { name: 'Catálogo', exact: true }).click();
   await expect(page).toHaveURL(/\/catalog$/);
+
+  await page.goto('/my-list/');
+  await expect(page).toHaveURL(/\/library$/);
+  await expect(page.getByRole('heading', { name: 'Biblioteca', exact: true })).toBeVisible();
 });

@@ -93,21 +93,22 @@ export function writeDetailToUrl(ref: DetailRef | null) {
   if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.replaceState(null, '', next);
 }
 
-// ───────────── Minha lista ─────────────
+// ───────────── Biblioteca ─────────────
 
-const MY_LIST_PATH = '/my-list';
+const LIBRARY_PATH = '/library';
 
-export function isMyListPath(pathname: string): boolean {
-  return pathname.replace(/\/+$/, '') === MY_LIST_PATH;
+export function isLibraryPath(pathname: string): boolean {
+  const path = pathname.replace(/\/+$/, '');
+  return path === LIBRARY_PATH || path === '/my-list';
 }
 
-export function writeMyListToUrl(open: boolean) {
+export function writeLibraryToUrl(open: boolean) {
   if (typeof window === 'undefined') return;
   const url = new URL(window.location.href);
   if (open) {
-    url.pathname = MY_LIST_PATH;
+    url.pathname = LIBRARY_PATH;
     url.searchParams.delete(PARAM);
-  } else if (isMyListPath(url.pathname)) {
+  } else if (isLibraryPath(url.pathname)) {
     url.pathname = '/catalog';
   }
   const next = url.pathname + url.search + url.hash;
