@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 /** Vídeo servido pelo fixture (e2e/fixture-server.mjs): MKV de 2 min com 2 faixas de áudio. */
@@ -8,7 +9,12 @@ export const SUBTITLES_URL = 'http://127.0.0.1:3101/legendas.mkv';
 export const CHAPTERS_URL = 'http://127.0.0.1:3101/capitulos.mkv';
 
 export async function newUser(browser: Browser): Promise<{ context: BrowserContext; page: Page }> {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  // Cada usuário tem seu próprio IP na cota do servidor E2E, mesmo com todos os browsers no loopback.
+  const suffix = randomBytes(8).toString('hex').match(/.{4}/g)!.join(':');
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 720 },
+    extraHTTPHeaders: { 'X-Forwarded-For': `2001:db8::${suffix}` },
+  });
   const page = await context.newPage();
   page.on('dialog', (d) => void d.accept()); // confirmações de expulsar/banir
   return { context, page };
