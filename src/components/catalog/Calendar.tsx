@@ -197,7 +197,7 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
       </div>
       <div className="flex flex-wrap gap-3 items-center">
         <div className="flex items-center gap-2 shrink-0">
-          <GhostButton aria-pressed={onlyMine} onClick={() => setOnlyMine(value => !value)} className={onlyMine ? '!bg-lu-tint !border-lu-accent/40 !text-lu-accent' : undefined}><Bookmark size={16} />{t('Minha lista')}</GhostButton>
+          <GhostButton aria-pressed={onlyMine} onClick={() => setOnlyMine(value => !value)} className={onlyMine ? '!bg-lu-tint !border-lu-accent/40 !text-lu-accent' : undefined}><Bookmark size={16} />{t('Biblioteca')}</GhostButton>
           <GhostButton onClick={() => setFiltersOpen(value => !value)} aria-expanded={filtersOpen}><SlidersHorizontal size={16} />{t('Filtros')}</GhostButton>
         </div>
         <CalendarFilterSummary filters={filters} onlyMine={onlyMine} />
@@ -209,7 +209,7 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
       {activeData && <>
         <section aria-label={t('Informações da agenda')} className="flex flex-wrap items-center justify-between gap-3 text-[12px] text-lu-muted">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <span>{count === 1 ? t('1 lançamento na semana') : t('{count} lançamentos na semana', { count })}{onlyMine && checking && <span role="status"> · {t('Conferindo sua lista…')}</span>}</span>
+            <span>{count === 1 ? t('1 lançamento na semana') : t('{count} lançamentos na semana', { count })}{onlyMine && checking && <span role="status"> · {t('Conferindo a Biblioteca…')}</span>}</span>
             <span>{t('Horários no seu fuso')} · {timezone}</span>
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -218,9 +218,9 @@ export function Calendar({ myList, onOpen, onBack }: Props) {
           </div>
         </section>
         {data.stale && <p role="status" className="m-0 text-[13px] text-lu-warning">{t('Parte da agenda não respondeu. Mostrando os dados disponíveis.')}</p>}
-        {onlyMine && mappingFailures > 0 && <p role="status" className="m-0 text-[13px] text-lu-warning">{t('{count} títulos da lista não puderam ser conferidos.', { count: mappingFailures })}</p>}
+        {onlyMine && mappingFailures > 0 && <p role="status" className="m-0 text-[13px] text-lu-warning">{t('{count} títulos da Biblioteca não puderam ser conferidos.', { count: mappingFailures })}</p>}
         {onlyMine && mappingIncomplete && <p role="status" className="m-0 text-[13px] text-lu-warning">{t('Não foi possível conferir toda a agenda. Alguns animes da sua lista podem estar ausentes.')}</p>}
-        {onlyMine && !checking && myList.filter(i => i.type !== 'movie').length === 0 && <p className="m-0 text-[14px] text-lu-muted">{t('Adicione animes à Minha lista para acompanhar os lançamentos aqui.')}</p>}
+        {onlyMine && !checking && myList.filter(i => i.type !== 'movie').length === 0 && <p className="m-0 text-[14px] text-lu-muted">{t('Adicione animes à Biblioteca para acompanhar os lançamentos aqui.')}</p>}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-7 gap-3 items-start">
           {buckets.map(({ day, key, events }) => <section key={key} aria-current={key === today ? 'date' : undefined} aria-label={day.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}
             className={cx('min-w-0 rounded-[16px] p-1.5', events.length === 0 && count > 0 && key !== today && 'hidden xl:block', key === today ? 'border-2 border-lu-accent/70 bg-lu-tint/40' : 'border border-lu-border-strong bg-lu-bg2/70')}>

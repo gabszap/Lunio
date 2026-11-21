@@ -7,7 +7,7 @@ import { StreamingIcon } from './StreamingIcon';
 
 export function CalendarFilterSummary({ filters, onlyMine }: { filters: CalendarFilters; onlyMine: boolean }) {
   const chips: Array<{ key: string; label: string; platform?: string }> = [];
-  if (onlyMine) chips.push({ key: 'list', label: t('Minha lista') });
+  if (onlyMine) chips.push({ key: 'list', label: t('Biblioteca') });
   if (filters.kind !== 'all') chips.push({ key: 'kind', label: filters.kind === 'sub' ? 'Sub' : 'Dub' });
   if (!filters.showDonghua) chips.push({ key: 'donghua', label: t('Sem Donghua') });
   if (filters.formats.length < CALENDAR_FORMATS.length) {

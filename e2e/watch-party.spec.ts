@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { SUBTITLES_URL, createRoom, joinRoom, newUser, openParticipants, state, togglePlay, trackHls, video, waitReady } from './helpers';
+import { SUBTITLES_URL, createRoom, joinRoom, newUser, openParticipants, state, submitName, togglePlay, trackHls, video, waitReady } from './helpers';
 
 const pickPortugueseAudio = async (page: import('@playwright/test').Page) => {
   await page.getByRole('button', { name: 'Faixas de áudio' }).click();
@@ -258,11 +258,15 @@ test('banido não consegue voltar abrindo o link de novo (nem em outra aba)', as
   await openParticipants(host.page);
   await host.page.getByRole('button', { name: 'Banir da sala' }).click();
   await expect(guest.page).not.toHaveURL(/room=/, { timeout: 15_000 });
-  await guest.page.goto(`/?room=${code}`);
-  const dialog = guest.page.getByRole('dialog');
-  if (await dialog.isVisible({ timeout: 3000 }).catch(() => false)) await dialog.locator('form button[type="submit"]').click();
-  await expect(guest.page.getByText(/banid/i).first()).toBeVisible({ timeout: 15_000 });
-  await expect(guest.page.locator('video')).toHaveCount(0);
+  const secondTab = await guest.context.newPage();
+  for (const page of [guest.page, secondTab]) {
+    await page.goto(`/?room=${code}`);
+    await submitName(page, 'Bia');
+    await expect(page.getByText('Você está banido desta sala', { exact: true })).toBeVisible();
+    await expect(page.locator('video')).toHaveCount(0);
+  }
+  await host.context.close();
+  await guest.context.close();
 });
 
 test('a mesma pessoa em duas abas aparece nas duas e o ban derruba as duas', async ({ browser }) => {
@@ -392,12 +396,7 @@ test.describe('Player', () => {
     const pausedAt = (await state(host.page)).t;
 
     await host.page.reload();
-    // volta como o mesmo usuário (ID mantido no reload): pode pedir o apelido de novo
-    const dialog = host.page.getByRole('dialog');
-    if (await dialog.isVisible({ timeout: 4000 }).catch(() => false)) {
-      await dialog.getByLabel('Seu apelido na sala').fill('Ana');
-      await dialog.locator('form button[type="submit"]').click();
-    }
+    await submitName(host.page, 'Ana');
     await expect(host.page.locator('video')).toBeAttached();
     await waitReady(host.page);
     await expect.poll(async () => (await state(host.page)).t, { timeout: 20_000 }).toBeGreaterThan(pausedAt - 3);

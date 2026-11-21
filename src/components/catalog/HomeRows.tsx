@@ -3,12 +3,12 @@ import { SearchX, Users, RefreshCw } from 'lucide-react';
 import {
   CatalogItem,
   CatalogManifest,
-  CatalogRow,
   fetchRow,
   rowTitles,
 } from '../../lib/catalog';
 import { GhostButton, PrimaryButton } from '../ui';
 import { t } from '../../lib/i18n';
+import type { DiscoverRef } from '../../lib/searchUrl';
 import { Row } from './Row';
 
 // ───────────────────────── Fileiras da Home (do manifesto da fonte) ─────────────────────────
@@ -16,9 +16,10 @@ import { Row } from './Row';
 export const HomeRows: React.FC<{
   manifest: CatalogManifest | null | 'error';
   onOpen: (item: CatalogItem) => void;
+  onViewAll: (ref: DiscoverRef) => void;
   onRetry: () => void;
   onCreateRoom: () => void;
-}> = ({ manifest, onOpen, onRetry, onCreateRoom }) => {
+}> = ({ manifest, onOpen, onViewAll, onRetry, onCreateRoom }) => {
   if (manifest === null) {
     return (
       <>
@@ -60,9 +61,19 @@ export const HomeRows: React.FC<{
       {manifest.stale && (
         <p className="m-0 text-[13px] text-lu-muted text-center">{t('O catálogo está fora do ar; mostrando o último conteúdo guardado.')}</p>
       )}
-      {manifest.rows.map((row: CatalogRow, i) => (
-        <Row key={`${row.type}:${row.id}`} title={titles[i]} load={() => fetchRow(row)} onOpen={onOpen} lazy />
-      ))}
+      {manifest.rows.map((row, i) => {
+        const canExplore = manifest.discover?.some((entry) => entry.type === row.type && entry.id === row.id);
+        return (
+          <Row
+            key={`${row.type}:${row.id}`}
+            title={titles[i]}
+            load={() => fetchRow(row)}
+            onOpen={onOpen}
+            onViewAll={canExplore ? () => onViewAll({ type: row.type, id: row.id, genre: row.fixedGenre }) : undefined}
+            lazy
+          />
+        );
+      })}
     </>
   );
 };

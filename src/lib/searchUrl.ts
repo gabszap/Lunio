@@ -93,6 +93,28 @@ export function writeDetailToUrl(ref: DetailRef | null) {
   if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.replaceState(null, '', next);
 }
 
+// ───────────── Biblioteca ─────────────
+
+const LIBRARY_PATH = '/library';
+
+export function isLibraryPath(pathname: string): boolean {
+  const path = pathname.replace(/\/+$/, '');
+  return path === LIBRARY_PATH || path === '/my-list';
+}
+
+export function writeLibraryToUrl(open: boolean) {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  if (open) {
+    url.pathname = LIBRARY_PATH;
+    url.searchParams.delete(PARAM);
+  } else if (isLibraryPath(url.pathname)) {
+    url.pathname = '/catalog';
+  }
+  const next = url.pathname + url.search + url.hash;
+  if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.replaceState(null, '', next);
+}
+
 // ───────────── calendário ─────────────
 
 /** Aceita a rota própria e os links do protótipo antigo. */

@@ -36,6 +36,7 @@ export default defineConfig({
       env: {
         PORT: String(PORT),
         HOST: '127.0.0.1',
+        TRUST_PROXY: '1', // o helper newUser dá um IP de teste a cada contexto do navegador
         ALLOW_PRIVATE_URLS: '1', // só aqui: o proxy precisa alcançar o fixture em 127.0.0.1
         SESSION_SECRET: 'segredo-e2e',
         UPLOAD_CHUNK_MB: '0.0625', // pedaços de 64 KiB: o envio de teste passa por vários pedidos

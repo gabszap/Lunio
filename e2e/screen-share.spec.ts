@@ -1,5 +1,5 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
-import { createRoom, joinRoom, newUser, openParticipants, submitName, video, waitReady } from './helpers';
+import { createRoom, joinRoom, newUser, openParticipants, submitName, testClientHeaders, video, waitReady } from './helpers';
 
 /**
  * Transmissão de tela, de ponta a ponta com o motor FALSO: servidor, WebSocket, token, chaves, interface e ciclo de
@@ -126,7 +126,7 @@ const canvas = (p: Page) => p.locator('canvas[aria-hidden="true"]');
 const log = (p: Page) => p.evaluate(() => (window as unknown as { __screenLog: FakeLog }).__screenLog);
 // /api/status tem limite de pedidos por minuto (por IP): uma resposta recusada vale -1 (nunca é o valor esperado) e o poll espera
 const live = async (p: Page) => {
-  const res = await p.request.get('/api/status');
+  const res = await p.request.get('/api/status', { headers: testClientHeaders(p.context()) });
   if (!res.ok()) return -1;
   return ((await res.json()).screen?.live ?? -1) as number;
 };

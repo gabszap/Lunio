@@ -1,4 +1,5 @@
-import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { randomBytes } from 'node:crypto';
+import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 /** Vídeo servido pelo fixture (e2e/fixture-server.mjs): MKV de 2 min com 2 faixas de áudio. */
 export const FIXTURE_URL = 'http://127.0.0.1:3101/teste.mkv';
@@ -7,8 +8,24 @@ export const SUBTITLES_URL = 'http://127.0.0.1:3101/legendas.mkv';
 /** Vídeo de 40 s com capítulos: cena inicial (0-5 s), "OP" (5-15 s), episódio (15-35 s) e "ED" (35-40 s). */
 export const CHAPTERS_URL = 'http://127.0.0.1:3101/capitulos.mkv';
 
+const clientHeadersByContext = new WeakMap<BrowserContext, Record<string, string>>();
+
+/** O APIRequestContext do Playwright não passa pelo roteamento do navegador. */
+export function testClientHeaders(context: BrowserContext): Record<string, string> | undefined {
+  return clientHeadersByContext.get(context);
+}
+
 export async function newUser(browser: Browser): Promise<{ context: BrowserContext; page: Page }> {
+  // Cada usuário tem seu próprio IP na cota do servidor E2E, mesmo com todos os browsers no loopback.
+  const suffix = randomBytes(8).toString('hex').match(/.{4}/g)!.join(':');
+  const clientHeaders = { 'x-forwarded-for': `2001:db8::${suffix}` };
+  const appOrigin = new URL(test.info().project.use.baseURL!).origin;
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  clientHeadersByContext.set(context, clientHeaders);
+  // O IP simulado só vai para a API do Lunio. Recursos externos têm suas próprias regras de CORS.
+  await context.route((url) => url.origin === appOrigin && url.pathname.startsWith('/api/'), async (route) => {
+    await route.fallback({ headers: { ...await route.request().allHeaders(), ...clientHeaders } });
+  });
   const page = await context.newPage();
   page.on('dialog', (d) => void d.accept()); // confirmações de expulsar/banir
   return { context, page };
