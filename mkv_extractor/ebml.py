@@ -9,7 +9,7 @@ from .errors import EbmlParseError
 
 def read_id(data: bytes, pos: int) -> tuple[int, int]:
     """Lê um ID de elemento EBML a partir de pos. Retorna (element_id, width_in_bytes)."""
-    if pos >= len(data):
+    if pos < 0 or pos >= len(data):
         raise EbmlParseError("Fim de dados inesperado ao tentar ler EBML ID.")
 
     first = data[pos]
@@ -35,7 +35,7 @@ def read_id(data: bytes, pos: int) -> tuple[int, int]:
 
 def read_vint(data: bytes, pos: int) -> tuple[int, int]:
     """Lê um inteiro de tamanho variável (VINT) EBML a partir de pos. Retorna (value, width_in_bytes)."""
-    if pos >= len(data):
+    if pos < 0 or pos >= len(data):
         raise EbmlParseError("Fim de dados inesperado ao tentar ler VINT.")
 
     first = data[pos]
@@ -88,6 +88,8 @@ def read_element(data: bytes, pos: int = 0) -> dict[str, Any]:
     content_start = pos + header["header_size"]
 
     if header["unknown_size"]:
+        if header["id"] not in (0x18538067, 0x1F43B675):
+            raise EbmlParseError("Tamanho desconhecido não permitido neste elemento.")
         content_end = len(data)
     else:
         content_end = content_start + header["size"]
@@ -110,8 +112,12 @@ def iter_elements(data: bytes, start: int, end: int) -> Generator[dict[str, Any]
     Itera sobre elementos irmãos em uma região [start, end].
     """
     pos = start
+    if not 0 <= start <= end <= len(data):
+        raise EbmlParseError("Limites de elementos inválidos.")
     while pos < end:
         element = read_element(data, pos)
+        if element["content_end"] > end:
+            raise EbmlParseError("Elemento ultrapassa os limites do pai.")
         yield element
 
         if element["content_end"] <= pos:

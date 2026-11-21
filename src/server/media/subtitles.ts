@@ -11,6 +11,7 @@ import { getMediaFingerprint } from './fingerprint';
 import { SUB_CACHE_DIR } from './paths';
 import { resolveFinalCdnUrl } from './resolver';
 import { tracksCache } from './tracks';
+import { isInternalUploadUrl } from './uploads';
 import { cooldownRemainingMs, hostOf, noteRateLimited, runOnHost } from './upstreamGate';
 
 const pendingSubtitleExtractions = new Map<string, Promise<string>>();
@@ -52,7 +53,8 @@ async function extractRemoteMkvSubtitle(
   track: string,
   outputFile: string,
   extractionKey: string,
-  ffmpegMbps: number
+  ffmpegMbps: number,
+  format: 'ass' | 'srt'
 ): Promise<string> {
   const args = [
     '-u',
@@ -64,7 +66,12 @@ async function extractRemoteMkvSubtitle(
     '--stream-index', String(track),
     '-o', outputFile,
     '--json',
+    '--strict',
   ];
+  if (!config.allowPrivateUrls) {
+    args.push('--public-only');
+    if (isInternalUploadUrl(new URL(streamUrl))) args.push('--allow-origin', new URL(streamUrl).origin);
+  }
 
   return await new Promise<string>((resolve, reject) => {
     const py = getTools().python;
@@ -109,6 +116,10 @@ async function extractRemoteMkvSubtitle(
       if (code === 0 && fs.existsSync(outputFile) && fs.statSync(outputFile).size > 50) {
         try {
           const content = fs.readFileSync(outputFile, 'utf-8');
+          const metadata = JSON.parse(stdout);
+          if (metadata.format !== format || metadata.coverage !== 'verified' || path.resolve(metadata.output_file) !== path.resolve(outputFile)) {
+            throw new Error('Formato, cobertura ou caminho de saída inconsistente no mkv_extractor.');
+          }
           resolve(content);
         } catch (err: any) {
           reject(err);
@@ -116,6 +127,8 @@ async function extractRemoteMkvSubtitle(
       } else {
         const errMsg = (stderr || stdout || '').trim();
         const err: any = new Error(`mkv_extractor finalizou com código ${code}: ${errMsg.slice(-300)}`);
+        err.fallbackReason = /\[FallbackReason\] ([a-z_]+)/.exec(errMsg)?.[1];
+        err.nonRetryable = Boolean(err.fallbackReason && err.fallbackReason !== 'http_transport_error');
         // O extrator avisa (código 4) quando a conta de requisições sai mais cara que ler o arquivo com o FFmpeg
         if (code === 4 || /\[PreferFfmpeg\]/.test(errMsg)) {
           err.preferFfmpeg = true;
@@ -125,9 +138,39 @@ async function extractRemoteMkvSubtitle(
         if (http) {
           err.httpStatus = http.status;
           err.retryAfter = http.retryAfter;
+          if (http.status === 429) err.nonRetryable = false;
         }
         reject(err);
       }
+    });
+  });
+}
+
+
+async function convertLocalSrt(input: string, output: string, extractionKey: string): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    const proc = spawnLimited(ffmpegBin(), [
+      '-nostdin', '-v', 'error', '-protocol_whitelist', 'file,pipe',
+      '-i', input, '-c:s', 'ass', '-f', 'ass', '-y', output,
+    ]);
+    if (!proc) {
+      reject(Object.assign(new Error('Servidor ocupado (limite de processos).'), { code: 'busy' }));
+      return;
+    }
+    let stderr = '';
+    proc.stderr?.on('data', d => stderr += d.toString());
+    const timer = setTimeout(() => { killTree(proc); reject(new Error('Tempo limite na conversão local SRT → ASS.')); }, 30_000);
+    activeSubtitleProcesses.set(extractionKey, () => killTree(proc));
+    proc.on('error', err => { clearTimeout(timer); reject(err); });
+    proc.on('close', code => {
+      clearTimeout(timer);
+      activeSubtitleProcesses.delete(extractionKey);
+      if (code !== 0) { reject(new Error(`Falha na conversão local SRT → ASS: ${stderr.slice(-300)}`)); return; }
+      try {
+        const content = fs.readFileSync(output, 'utf-8');
+        if (!content.includes('[Events]')) throw new Error('ASS local inválido.');
+        resolve(content);
+      } catch (err) { reject(err); }
     });
   });
 }
@@ -180,24 +223,27 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
       // Uma extração por vez por host do CDN (limite de conexões do TorBox); as pedidas pelo usuário passam as pré-extrações
       const host = hostOf(streamUrl);
       const gated = runOnHost(host, prefetch && !interactiveWanted.has(extractionKey) ? 'prefetch' : 'interactive', async () => {
-      const tmpFile = path.join(SUB_CACHE_DIR, `${hash}_track${track}_${Date.now()}.tmp`);
+      const tmpFile = path.join(SUB_CACHE_DIR, `${hash}_track${track}_${Date.now()}.tmp.ass`);
+      const nativeFormat: 'ass' | 'srt' | null = /ass|ssa/.test(subCodec) ? 'ass' : /subrip|srt|s_text\/utf8/.test(subCodec) ? 'srt' : null;
+      const nativeFile = nativeFormat === 'srt' ? tmpFile.replace(/\.ass$/, '.srt') : tmpFile;
 
       // 1. Tenta primeiro extração remota ultrarrápida via HTTP Range (módulo mkv_extractor)
       const isCandidateMkv = targetUrl.toLowerCase().includes('.mkv') ||
                              streamUrl.toLowerCase().includes('.mkv') ||
+                             cachedTracks?.container?.includes('matroska') ||
                              subCodec.includes('ass') ||
                              subCodec.includes('ssa');
 
       // Tamanho do arquivo quando o extrator preferiu o FFmpeg: serve para medir a velocidade dessa leitura
       let fileSizeForSpeed: number | null = null;
-      if (isCandidateMkv) {
+      if (isCandidateMkv && nativeFormat) {
         try {
           console.log(`[Subtitle] 🚀 Tentando extração remota ultrarrápida (HTTP Range / EBML) para faixa ${trackLabel}...`);
           const t0 = Date.now();
           let content = '';
           for (let attempt = 1; ; attempt++) {
             try {
-              content = await extractRemoteMkvSubtitle(streamUrl, track, tmpFile, extractionKey, ffmpegMbpsFor(host));
+              content = await extractRemoteMkvSubtitle(streamUrl, track, nativeFile, extractionKey, ffmpegMbpsFor(host), nativeFormat);
               break;
             } catch (attemptErr: any) {
               // Sem Python, servidor ocupado ou estouro de tempo não melhora tentando de novo: o retry é para falha de
@@ -208,19 +254,28 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
                 attemptErr?.code === 'busy' ||
                 /Python 3\.10\+ não encontrado/.test(attemptErr?.message || '') ||
                 /^Tempo limite/.test(attemptErr?.message || '') ||
-                attemptErr?.preferFfmpeg
+                attemptErr?.preferFfmpeg || attemptErr?.nonRetryable
               ) throw attemptErr;
               const limited = attemptErr?.httpStatus === 429;
               if (limited) noteRateLimited(host, attemptErr.retryAfter);
               console.warn(`[Subtitle] ↻ Tentativa ${attempt}/${REMOTE_ATTEMPTS} falhou na faixa ${trackLabel} (${attemptErr.message?.slice(0, 100)}). ${limited ? 'CDN pediu para esperar' : 'Tentando de novo'}…`);
               try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
+              try { if (nativeFile !== tmpFile && fs.existsSync(nativeFile)) fs.unlinkSync(nativeFile); } catch {}
               // Depois de um 429 o portão espera o cooldown; nos outros erros, o recuo curto de antes
               await new Promise((r) => setTimeout(r, limited ? Math.max(cooldownRemainingMs(host), REMOTE_RETRY_DELAY_MS) : REMOTE_RETRY_DELAY_MS * attempt));
             }
           }
 
+          if (nativeFormat === 'srt') {
+            try {
+              content = await convertLocalSrt(nativeFile, tmpFile, extractionKey);
+            } catch (error: any) {
+              if (error?.code !== 'busy') error.code = 'LOCAL_SUBTITLE_CONVERSION_FAILED';
+              throw error;
+            }
+            fs.unlinkSync(nativeFile);
+          }
           if (fs.existsSync(tmpFile)) {
-            if (fs.existsSync(cacheFile)) fs.unlinkSync(cacheFile);
             fs.renameSync(tmpFile, cacheFile);
           }
           const elapsedSec = ((Date.now() - t0) / 1000).toFixed(1);
@@ -228,6 +283,13 @@ async function extractSubtitleTrack(targetUrl: string, track: string, customFing
           return content;
         } catch (mkvErr: any) {
           try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
+          try { if (nativeFile !== tmpFile && fs.existsSync(nativeFile)) fs.unlinkSync(nativeFile); } catch {}
+          if (mkvErr?.fallbackReason === 'url_blocked') {
+            mkvErr.code = 'url_blocked';
+            throw mkvErr;
+          }
+          if (mkvErr?.code === 'LOCAL_SUBTITLE_CONVERSION_FAILED') throw mkvErr;
+          if (mkvErr?.code === 'busy') throw mkvErr;
           if (mkvErr?.httpStatus === 429) {
             noteRateLimited(host, mkvErr.retryAfter);
             console.warn(`[Subtitle] ⏳ CDN limitou as requisições na faixa ${trackLabel}; sem fallback FFmpeg (abriria outra conexão). Host em espera por ${Math.ceil(cooldownRemainingMs(host) / 1000)}s.`);
