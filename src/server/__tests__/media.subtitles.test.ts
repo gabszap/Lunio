@@ -82,7 +82,8 @@ describe('native subtitle extraction through the real Python CLI', () => {
     expect(python[python.indexOf('-o') + 1]).toMatch(/\.tmp\.ass$/);
     expect(state.calls).toHaveLength(1);
     expect(fs.readdirSync(state.cache)).toHaveLength(1);
-    expect(fs.readdirSync(state.cache)[0]).toMatch(/_s0\.ass$/);
+    expect(fs.readdirSync(state.cache)[0]).toMatch(/_s0_v2\.json$/);
+    expect(JSON.parse(fs.readFileSync(path.join(state.cache, fs.readdirSync(state.cache)[0]), 'utf8'))).toMatchObject({ version: 2, format: 'ass', producer: 'native-ass', content });
   });
 
   it('extracts SRT from confirmed MKV with an opaque URL and converts only the local file to ASS', async () => {
@@ -97,7 +98,7 @@ describe('native subtitle extraction through the real Python CLI', () => {
     const ffmpeg = state.calls[1];
     expect(ffmpeg[ffmpeg.indexOf('-i') + 1]).toMatch(/\.tmp\.srt$/);
     expect(ffmpeg[ffmpeg.indexOf('-i') + 1]).not.toMatch(/^https?:/);
-    expect(fs.readdirSync(state.cache).every(name => name.endsWith('.ass') && !name.includes('.tmp'))).toBe(true);
+    expect(fs.readdirSync(state.cache).every(name => name.endsWith('_v2.json'))).toBe(true);
   });
 
   it('propagates url_blocked without a remote FFmpeg fallback or retry', async () => {

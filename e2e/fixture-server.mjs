@@ -12,6 +12,13 @@ const file = path.join(dir, 'teste.mkv');
 // v2: com duas fontes anexadas (o nome novo evita reaproveitar o arquivo antigo, sem anexos, de quem já rodou os testes)
 const subsFile = path.join(dir, 'legendas.mkv');
 const subsStamp = path.join(dir, 'legendas.v2');
+const srtFile = path.join(dir, 'externa.srt');
+const vttFile = path.join(dir, 'externa.vtt');
+const srtMkvFile = path.join(dir, 'legendas-srt.mkv');
+
+// Mesmos cues nos dois formatos: tempos literais para conferir sincronia no navegador.
+fs.writeFileSync(srtFile, '1\n00:00:00,500 --> 00:00:08,000\nLegenda SRT para o teste do Lunio\n\n2\n00:00:10,000 --> 00:00:18,000\nSegunda legenda SRT\n');
+fs.writeFileSync(vttFile, 'WEBVTT\n\n00:00:00.500 --> 00:00:08.000\nLegenda VTT para o teste do Lunio\n\n00:00:10.000 --> 00:00:18.000\nSegunda legenda VTT\n');
 
 if (!fs.existsSync(file)) {
   const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg';
@@ -95,6 +102,26 @@ Dialogue: 0,0:00:00.50,0:00:15.00,Default,,0,0,0,,${text}
   fs.writeFileSync(subsStamp, 'ok');
 }
 
+// Reaproveita vídeo/áudios já gerados; só troca as legendas ASS por uma faixa SubRip
+// portuguesa (índice global 3). O endpoint do player deve entregá-la convertida em ASS.
+if (!fs.existsSync(srtMkvFile)) {
+  const r = spawnSync(
+    process.env.FFMPEG_PATH || 'ffmpeg',
+    [
+      '-hide_banner', '-v', 'error', '-y', '-i', subsFile, '-i', srtFile,
+      '-map', '0:v:0', '-map', '0:a', '-map', '1:s:0', '-c', 'copy',
+      '-metadata:s:s:0', 'language=por', '-metadata:s:s:0', 'title=Português SRT',
+      srtMkvFile,
+    ],
+    { encoding: 'utf-8' }
+  );
+  if (r.status !== 0) {
+    fs.rmSync(srtMkvFile, { force: true });
+    console.error('Não consegui gerar legendas-srt.mkv:', r.stderr || r.error);
+    process.exit(1);
+  }
+}
+
 // Vídeo de 40 s com capítulos: cena inicial (0-5 s), "OP" (5-15 s), episódio (15-35 s) e "ED" (35-40 s), para testar pular abertura/encerramento.
 const chaptersFile = path.join(dir, 'capitulos.mkv');
 if (!fs.existsSync(chaptersFile)) {
@@ -154,16 +181,18 @@ http
     const name = path.basename((req.url || '').split('?')[0]);
     const codecFile = codecFiles[name] ? path.join(dir, name) : null;
     if (codecFile && !fs.existsSync(codecFile)) return void res.writeHead(404).end();
-    const served = codecFile || (name === 'legendas.mkv' ? subsFile : name === 'capitulos.mkv' ? chaptersFile : file);
+    const served = codecFile || ({ 'legendas.mkv': subsFile, 'legendas-srt.mkv': srtMkvFile, 'externa.srt': srtFile, 'externa.vtt': vttFile, 'capitulos.mkv': chaptersFile }[name] || file);
+    const contentType = name === 'externa.srt' ? 'application/x-subrip; charset=utf-8' : name === 'externa.vtt' ? 'text/vtt; charset=utf-8' : 'video/x-matroska';
+    res.setHeader('Access-Control-Allow-Origin', '*');
     const st = fs.statSync(served);
     const m = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
     if (m) {
       const start = m[1] ? +m[1] : Math.max(0, st.size - +m[2]);
       const end = m[1] && m[2] ? Math.min(+m[2], st.size - 1) : st.size - 1;
-      res.writeHead(206, { 'Content-Type': 'video/x-matroska', 'Content-Range': `bytes ${start}-${end}/${st.size}`, 'Content-Length': end - start + 1, 'Accept-Ranges': 'bytes' });
+      res.writeHead(206, { 'Content-Type': contentType, 'Content-Range': `bytes ${start}-${end}/${st.size}`, 'Content-Length': end - start + 1, 'Accept-Ranges': 'bytes' });
       return void fs.createReadStream(served, { start, end }).pipe(res);
     }
-    res.writeHead(200, { 'Content-Type': 'video/x-matroska', 'Content-Length': st.size, 'Accept-Ranges': 'bytes' });
+    res.writeHead(200, { 'Content-Type': contentType, 'Content-Length': st.size, 'Accept-Ranges': 'bytes' });
     fs.createReadStream(served).pipe(res);
   })
   .listen(3101, '127.0.0.1', () => console.log('fixture em http://127.0.0.1:3101/teste.mkv'));

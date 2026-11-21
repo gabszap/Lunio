@@ -1,6 +1,6 @@
 import type React from 'react';
 import { TriangleAlert, RefreshCw, RotateCcw, X, FastForward, Film, Users, MessageSquare, Pause, Crown, Plus, ChevronLeft } from 'lucide-react';
-import type { SubtitleTrack } from '../../types/media';
+import type { SubtitleTrack, SubtitlePreparationStatus } from '../../types/media';
 import { formatTime } from '../../lib/chapters';
 import { Avatar, Dot, GhostButton, IconButton, Kbd, PrimaryButton, Spinner } from '../ui';
 import { WatchPartyPanel } from '../WatchPartyPanel';
@@ -67,7 +67,15 @@ export function StandbyScreen(props: {
   );
 }
 
-export function SubtitlePreparingBadge({ label }: { label?: string }) {
+export function SubtitlePreparingBadge({ label, status }: { label?: string; status?: SubtitlePreparationStatus }) {
+  const stage = status?.stage;
+  const message = stage === 'extracting' ? t('Extraindo legenda')
+    : stage === 'waiting_cdn' ? t('Aguardando o servidor de origem')
+    : stage === 'converting' ? t('Convertendo legenda')
+    : stage === 'loading_fonts' ? t('Carregando fontes da legenda')
+    : stage === 'initializing_renderer' ? t('Preparando exibição da legenda')
+    : stage === 'queued' ? t('Legenda na fila')
+    : t('Sincronizando legenda');
   return (
     <div
       role="status"
@@ -75,7 +83,7 @@ export function SubtitlePreparingBadge({ label }: { label?: string }) {
     >
       <Spinner size={16} className="text-lu-accent" />
       <span>
-        {t('Sincronizando legenda')} <strong className="font-semibold text-lu-accent">{label}</strong>…
+        {message} <strong className="font-semibold text-lu-accent">{label}</strong>…
       </span>
     </div>
   );
