@@ -127,7 +127,94 @@ class TestStrictRanges(unittest.TestCase):
 
     def test_tls_verifies_certificates_by_default(self):
         import ssl
-        self.assertEqual(http.get_ssl_context().verify_mode, ssl.CERT_REQUIRED)
+        ctx = http.get_ssl_context()
+        self.assertEqual(ctx.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(ctx.check_hostname)
+
+    def test_windows_default_ssl_context_skips_ca_store_and_respects_env(self):
+        import os
+        import ssl
+        import sys
+
+        stores_read = []
+
+        def fake_enum(store):
+            stores_read.append(store)
+            return []
+
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SSL_CERT_FILE", None)
+            os.environ.pop("SSL_CERT_DIR", None)
+            with (
+                mock.patch.object(sys, "platform", "win32"),
+                mock.patch.object(ssl, "enum_certificates", side_effect=fake_enum, create=True),
+                mock.patch.object(ssl.SSLContext, "load_verify_locations"),
+                mock.patch.object(ssl.SSLContext, "load_default_certs"),
+                mock.patch.object(ssl.SSLContext, "set_default_verify_paths"),
+            ):
+                with http.RangeSession():
+                    ctx = http.get_ssl_context()
+                    self.assertEqual(ctx.verify_mode, ssl.CERT_REQUIRED)
+                    self.assertTrue(ctx.check_hostname)
+        self.assertEqual(stores_read, ["ROOT"])
+
+        sentinel = object()
+        with (
+            mock.patch.dict(os.environ, {"SSL_CERT_FILE": "/tmp/custom-ca.pem"}, clear=False),
+            mock.patch.object(sys, "platform", "win32"),
+            mock.patch.object(ssl, "create_default_context", return_value=sentinel) as create_default,
+        ):
+            with http.RangeSession():
+                self.assertIs(http.get_ssl_context(), sentinel)
+            create_default.assert_called_once_with()
+
+    def test_redirect_tls_error_reports_final_host_and_verify_reason_without_token(self):
+        from email.message import Message
+        import io
+        import ssl
+        import urllib.error
+        import urllib.response
+
+        tls_err = ssl.SSLCertVerificationError(1, "certificate has expired")
+        tls_err.verify_message = "certificate has expired"
+
+        def fake_do_open(handler_self, http_class, request):
+            if "origin.test" in request.full_url:
+                headers = Message()
+                headers["Location"] = "https://cdn.test/dld/SEGREDO123/video.mkv"
+                resp = urllib.response.addinfourl(io.BytesIO(b""), headers, request.full_url, code=302)
+                resp.msg = "Found"
+                return resp
+            raise urllib.error.URLError(tls_err)
+
+        with mock.patch.object(http._PolicyHTTPSHandler, "do_open", fake_do_open):
+            with self.assertRaises(HttpRangeError) as ctx:
+                http.open_http("https://origin.test/resolve/TOKEN999", {"Range": "bytes=0-0"}, timeout=2)
+
+        err = ctx.exception
+        self.assertEqual(err.fallback_reason, "tls_verification_error")
+        self.assertIn("https://cdn.test/…", str(err))
+        self.assertNotIn("origin.test", str(err))
+        self.assertNotIn("TOKEN999", str(err))
+        self.assertNotIn("SEGREDO123", str(err))
+        self.assertIn("SSLCertVerificationError", str(err))
+        self.assertIn("certificate has expired", str(err))
+
+    def test_url_error_reports_transport_cause_without_token(self):
+        import urllib.error
+
+        def fake_do_open(handler_self, http_class, request):
+            raise urllib.error.URLError(TimeoutError("timed out"))
+
+        with mock.patch.object(http._PolicyHTTPSHandler, "do_open", fake_do_open):
+            with self.assertRaises(HttpRangeError) as ctx:
+                http.open_http("https://cdn.test/dld/SEGREDO123", {"Range": "bytes=0-0"}, timeout=2)
+
+        err = ctx.exception
+        self.assertEqual(err.fallback_reason, "http_transport_error")
+        self.assertIn("https://cdn.test/…", str(err))
+        self.assertIn("URLError (TimeoutError)", str(err))
+        self.assertNotIn("SEGREDO123", str(err))
 
     def test_public_only_blocks_loopback_and_does_not_reuse_local_policy(self):
         with http.RangeSession(public_only=True), self.assertRaises(HttpRangeError):

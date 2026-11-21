@@ -186,6 +186,7 @@ def _extract_single_track_data(
     fallback_duration_ms: int | None = 3500,
     cluster_cache=None,
     measure_multipart_cost: bool = False,
+    verify_block_boundaries: bool = False,
 ) -> dict[str, Any]:
     """
     Extrai e reconstrói ASS ou SRT usando as Cues já indexadas.
@@ -235,6 +236,7 @@ def _extract_single_track_data(
         batch_size=batch_size,
         timeout=timeout,
         verbose=verbose,
+        verify_block_boundaries=verify_block_boundaries,
     )
 
     events = []
@@ -341,6 +343,7 @@ def extract_remote_subtitle(
     coalesce_extra_bytes: int = 65536,
     measure_multipart_cost: bool = False,
     max_boundary_headers: int = 4096,
+    verify_block_boundaries: bool = False,
 ) -> dict[str, Any] | list[dict[str, Any]]:
     """
     Extrai legendas ASS/SSA e SRT de MKV remoto via HTTP Range sem transferir o vídeo.
@@ -446,6 +449,7 @@ def extract_remote_subtitle(
             fallback_duration_ms=fallback_duration_ms,
             cluster_cache=cluster_cache,
             measure_multipart_cost=measure_multipart_cost,
+            verify_block_boundaries=verify_block_boundaries,
         )
         results.append(res)
 
@@ -568,7 +572,8 @@ def main():
     parser.add_argument("--coalesce-gap-bytes", type=int, default=0, help="Coalescer ranges separados por até N bytes (padrão: desabilitado)")
     parser.add_argument("--coalesce-extra-bytes", type=int, default=65536, help="Limite total de bytes extras transferidos por coalescência")
     parser.add_argument("--measure-multipart-cost", action="store_true", help="Medir RTT e comparar custo mesmo quando multipart está disponível")
-    parser.add_argument("--max-boundary-headers", type=int, default=4096, help="Limite de leituras extras para validar posições dos blocos")
+    parser.add_argument("--verify-block-boundaries", action="store_true", help="Comprovar posições de blocos caminhando pelos filhos do Cluster (faz muitas requisições Range extras)")
+    parser.add_argument("--max-boundary-headers", type=int, default=4096, help="Limite de leituras extras ao usar --verify-block-boundaries")
     parser.add_argument("--fallback-duration-ms", type=int, default=3500, help="Estimativa de duração do último evento quando ausente (padrão: 3500 ms)")
     parser.add_argument("--no-duration-estimates", action="store_true", help="Recusar último evento sem duração em vez de estimar")
     parser.add_argument("-v", "--verbose", action="store_true", help="Logs detalhados")
@@ -605,6 +610,7 @@ def main():
             coalesce_extra_bytes=args.coalesce_extra_bytes,
             measure_multipart_cost=args.measure_multipart_cost,
             max_boundary_headers=args.max_boundary_headers,
+            verify_block_boundaries=args.verify_block_boundaries,
             verbose=args.verbose,
             ffmpeg_bytes_per_s=(args.ffmpeg_mbps * 1_000_000 if args.ffmpeg_mbps and args.ffmpeg_mbps > 0 else FFMPEG_THROUGHPUT_BYTES_PER_S),
         )
