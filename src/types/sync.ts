@@ -15,6 +15,8 @@ export interface RoomMember {
   ping: number;
   /** Está assistindo à transmissão de tela agora (informado pelo servidor a todos; vale só durante a transmissão). */
   watchingScreen?: boolean;
+  /** Quanto este membro está atrás do Host (ms; negativo = adiantado), medido pelo servidor. Só com a sala tocando. */
+  behindMs?: number;
 }
 
 export interface RoomMedia {
@@ -165,6 +167,8 @@ export type ClientMessage =
       clientTime: number;
       currentTime: number;
       state: MemberPlaybackState;
+      /** Ida e volta até o servidor medida por quem envia (ms); só vai depois da primeira medição. */
+      rtt?: number;
     }
   | {
       type: 'room:transfer_host';

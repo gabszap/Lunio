@@ -38,6 +38,10 @@ interface ClientSession {
   state: MemberPlaybackState;
   currentTime: number;
   lastPing: number;
+  /** Quanto está atrás do Host (ms, negativo = adiantado), medido no último heartbeat. */
+  behindMs?: number;
+  /** O valor de `behindMs` que a sala viu na última lista de membros enviada. */
+  behindShownMs?: number;
   /** O Host expulsou ou baniu: a chave da transmissão já foi pedida, a saída de vez não pede de novo. */
   removedByHost?: boolean;
 }
@@ -53,6 +57,8 @@ interface RoomInternal {
     rate: number;
     updatedAt: number;
   };
+  /** Quando a lista de membros foi reenviada por mudança de atraso (limita a frequência). */
+  behindBroadcastAt?: number;
   clients: Map<WebSocket, ClientSession>;
   chatHistory: ChatMessage[];
   cleanupTimer?: NodeJS.Timeout;
@@ -88,6 +94,9 @@ export const baseUserId = (id: string) => id.replace(/_tab\d{4}$/, '');
 
 /** Quanto tempo uma sala sem ninguém continua existindo (dá tempo de recarregar a página e voltar). */
 const EMPTY_ROOM_TTL_MS = 30 * 1000;
+/** O atraso de um membro só reenvia a lista de membros quando muda tanto assim, e no máximo com este intervalo. */
+const BEHIND_CHANGE_MS = 1000;
+const BEHIND_BROADCAST_GAP_MS = 2000;
 
 /** Mensagens que mudam o que o Redis guarda (Host, banidos, fila, vídeo e posição). */
 const PERSISTED_MESSAGES = new Set<string>([
@@ -247,6 +256,33 @@ export class RoomManager {
     return this.closedRooms.get(roomId);
   }
 
+  /**
+   * Quanto este membro está atrás do Host agora, pela posição que ele acabou de informar. A informação chega com
+   * um atraso de rede, então ele já está um pouco além do que disse. Quando a diferença muda o bastante, a lista
+   * de membros é reenviada para todos (no máximo a cada 2 s).
+   */
+  private updateBehind(room: RoomInternal, c: ClientSession, now: number) {
+    const gapOk = now - (room.behindBroadcastAt ?? 0) >= BEHIND_BROADCAST_GAP_MS;
+    if (c.userId === room.hostId || !room.playback.playing || !c.ready) {
+      // Quem estava apontado como atrasado deixa de estar (sala pausada, vídeo recarregando): limpa na lista de todos
+      const wasShown = c.behindShownMs !== undefined;
+      c.behindMs = undefined;
+      if (wasShown && gapOk) {
+        room.behindBroadcastAt = now;
+        this.broadcastMembersUpdate(room);
+      }
+      return;
+    }
+    const expected = this.calculateCurrentPosition(room.playback);
+    const reported = c.currentTime + (c.lastPing / 1000) * room.playback.rate;
+    c.behindMs = Math.round((expected - reported) * 1000);
+    const changed = c.behindShownMs === undefined || Math.abs(c.behindMs - c.behindShownMs) >= BEHIND_CHANGE_MS;
+    if (changed && gapOk) {
+      room.behindBroadcastAt = now;
+      this.broadcastMembersUpdate(room);
+    }
+  }
+
   private calculateCurrentPosition(playback: RoomInternal['playback']): number {
     if (!playback.playing) {
       return Math.max(0, playback.position);
@@ -305,6 +341,7 @@ export class RoomManager {
       currentTime: c.currentTime,
       ping: c.lastPing,
       watchingScreen: room.screen?.viewers.has(baseUserId(c.userId)) ? true : undefined,
+      behindMs: room.playback.playing && c.userId !== room.hostId && c.ready ? c.behindMs : undefined,
     }));
 
     return {
@@ -769,7 +806,9 @@ export class RoomManager {
       currentTime: c.currentTime,
       ping: c.lastPing,
       watchingScreen: room.screen?.viewers.has(baseUserId(c.userId)) ? true : undefined,
+      behindMs: room.playback.playing && c.userId !== room.hostId && c.ready ? c.behindMs : undefined,
     }));
+    for (const c of uniqueClientsMap.values()) c.behindShownMs = c.behindMs;
 
     this.broadcast(room, {
       type: 'members:update',
@@ -1104,9 +1143,12 @@ export class RoomManager {
 
       case 'client:heartbeat': {
         const now = Date.now();
-        clientSession.lastPing = Math.max(0, now - msg.clientTime);
+        // O cliente mede a ida e volta com a própria hora; `now - clientTime` só serve antes disso (e erra se os relógios diferem)
+        clientSession.lastPing =
+          typeof msg.rtt === 'number' && msg.rtt >= 0 && msg.rtt < 60_000 ? Math.round(msg.rtt / 2) : Math.max(0, now - msg.clientTime);
         clientSession.currentTime = msg.currentTime;
         clientSession.state = msg.state;
+        this.updateBehind(currentRoom, clientSession, now);
 
         this.send(ws, {
           type: 'server:heartbeat_ack',

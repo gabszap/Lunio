@@ -39,6 +39,14 @@ interface WatchPartyPanelProps {
 }
 
 /** O Host que está com a transmissão de tela ao vivo. */
+/** "Atrasado 1:23" / "Adiantado 0:05" quando o servidor mede 2 s ou mais de diferença para o Host. */
+const behindLabel = (member: { isHost: boolean; behindMs?: number }, room: RoomState | null): { text: string } | null => {
+  const ms = member.behindMs;
+  // Com a sala pausada o número de antes não vale mais (o servidor limpa no próximo heartbeat)
+  if (member.isHost || ms === undefined || !room?.playback.playing || Math.abs(ms) < 2000) return null;
+  const time = formatTime(Math.abs(ms) / 1000);
+  return { text: ms > 0 ? t('Atrasado {time}', { time }) : t('Adiantado {time}', { time }) };
+};
 const memberTransmitting = (member: { id: string }, room: RoomState | null) => Boolean(room?.screen?.live && room.screen.hostId === member.id);
 
 export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClose, onOpenRoomLobby, onLeaveRoom }) => {
@@ -500,6 +508,12 @@ export const WatchPartyPanel: React.FC<WatchPartyPanelProps> = ({ isOpen, onClos
                                   ? 'Sincronizado'
                                   : 'Aguardando'}
                           </span>
+                          {behindLabel(member, roomState) && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="text-lu-warning font-medium tabular">{behindLabel(member, roomState)!.text}</span>
+                            </>
+                          )}
                           <span aria-hidden="true">·</span>
                           <span>{member.platform === 'discord' ? 'Discord' : 'Navegador'}</span>
                         </div>
