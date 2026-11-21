@@ -25,7 +25,7 @@ def uint(eid, value):
 ASS_HEADER = b"[Script Info]\nTitle: Test\n[V4+ Styles]\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
 
 
-def fixture(codec="S_TEXT/UTF8", samples=None, scale=1_000_000, prefix=b"", private=None, extra_codec=None, padding_size=2 * 1024 * 1024, track_name=None, cue_offset=0, statistics_frames=None, cue_relative_position=None):
+def fixture(codec="S_TEXT/UTF8", samples=None, scale=1_000_000, prefix=b"", after_timestamp=b"", private=None, extra_codec=None, padding_size=2 * 1024 * 1024, track_name=None, cue_offset=0, statistics_frames=None, cue_relative_position=None):
     # Actual block starts are 900 and 2500; Cues must match their Blocks.
     if samples is None:
         samples = [(1000, -100, 700, 99, "Olá, mundo!\nSegunda linha"),
@@ -55,7 +55,7 @@ def fixture(codec="S_TEXT/UTF8", samples=None, scale=1_000_000, prefix=b"", priv
     # Put Clusters beyond the initial scan so tests prove direct Range access.
     padding = el(0xEC, b"x" * padding_size)
     for index, (cluster_time, relative, duration, cue_duration, text) in enumerate(samples):
-        cluster_prefix = prefix + uint(0xE7, cluster_time)
+        cluster_prefix = prefix + uint(0xE7, cluster_time) + after_timestamp
         payload = b"\x87" + relative.to_bytes(2, "big", signed=True) + b"\x00" + text.encode("utf-8")
         block = el(0xA3, payload) if duration is None else el(0xA0, el(0xA1, payload) + uint(0x9B, duration))
         position = len(info + tracks + tags + padding + clusters)
@@ -295,11 +295,19 @@ class TestNativeSubtitles(unittest.TestCase):
         with self.assertRaises(RemoteMkvError):
             self.extract(fixture(statistics_frames=3))
 
-    def test_strict_rejects_cue_to_fake_block_inside_void_payload(self):
+    def test_verify_block_boundaries_rejects_cue_to_fake_block_inside_void_payload(self):
         fake = el(0xA3, b"\x87\x00\x00\x00FAKE SUBTITLE")
         blob = fixture(samples=[(1000, 0, 1000, None, "REAL SUBTITLE")], prefix=el(0xEC, fake), statistics_frames=1, cue_relative_position=9)
         with self.assertRaises(RemoteMkvError):
-            self.extract(blob, strict=True)
+            self.extract(blob, strict=True, verify_block_boundaries=True)
+
+    def test_strict_skips_remote_boundary_probes_by_default(self):
+        filler = b"".join(el(0xA3, b"\x81\x00\x00\x00" + b"v" * 128) for _ in range(5))
+        blob = fixture(samples=[(1000, 0, 1000, None, "REAL SUBTITLE")], after_timestamp=filler, statistics_frames=1)
+        default_res = self.extract(blob, strict=True)
+        self.assertEqual(default_res["http_metrics"]["boundary_probes"], 0)
+        verified_res = self.extract(blob, strict=True, verify_block_boundaries=True)
+        self.assertGreater(verified_res["http_metrics"]["boundary_probes"], 0)
 
     def test_auto_all_tracks_cannot_create_directories_from_track_names(self):
         with self.working_directory() as folder, self.remote(fixture(extra_codec="S_TEXT/ASS", track_name="Portuguese/../other-track")):

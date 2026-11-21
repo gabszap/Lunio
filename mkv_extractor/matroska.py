@@ -594,6 +594,7 @@ def fetch_and_parse_blocks(
     batch_size: int = 50,
     timeout: int = 60,
     verbose: bool = False,
+    verify_block_boundaries: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Para cada Cue da track, calcula o offset direto do bloco e busca os payloads em lote.
@@ -622,7 +623,8 @@ def fetch_and_parse_blocks(
             "cluster_end": cluster_end,
         })
 
-    _validate_block_boundaries(url, located, cluster_headers, timeout)
+    if verify_block_boundaries:
+        _validate_block_boundaries(url, located, cluster_headers, timeout)
     results = []
     total_batches = (len(located) + batch_size - 1) // batch_size
 

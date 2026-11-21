@@ -71,10 +71,11 @@ A descoberta de Cues prioriza SeekHead; sem ele, pula filhos top-level por seus
 tamanhos, com limite de 512 cabeçalhos. Não procura mais IDs dentro de payloads
 do vídeo. Cues, blocos e samples descomprimidos têm limites; recursos não
 suportados geram `[FallbackReason]` com motivo estável e sem executar FFmpeg.
-As posições dos blocos são comprovadas por saltos entre filhos reais dos Clusters,
-com orçamento de 4096 leituras extras (`--max-boundary-headers`). Blocos aparentes
-dentro de um payload não são aceitos como filhos. Se o orçamento acabar, a
-extração para explicitamente; validar fontes densas pode adicionar RTT.
+Com `--verify-block-boundaries` (opt-in), as posições dos blocos também podem
+ser comprovadas por saltos entre filhos reais dos Clusters, com orçamento de
+4096 leituras extras (`--max-boundary-headers`). Por padrão essa caminhada fica
+desabilitada para não disparar rajadas de requisições Range sobre frames de
+vídeo/áudio em CDNs sensíveis a rate-limit.
 Há suporte a lacing com tempo por frame, zlib, bzlib e header stripping;
 criptografia/LZO e casos sem tempo por frame são recusados explicitamente.
 
