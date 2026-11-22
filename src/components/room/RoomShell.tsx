@@ -150,13 +150,13 @@ export const RoomShell: React.FC<RoomShellProps> = ({
         if (sidebarOpen) onSidebarTabChange('queue');
         return null;
       }
+      if (requests.length >= REQUESTS_MAX_ITEMS) return t('A lista de pedidos está cheia.');
       const res = await prepareMediaLink(
         raw,
         [...requests.map((r) => r.url), ...playlist.map((p) => p.url)],
-        REQUESTS_MAX_ITEMS + playlist.length
+        Number.POSITIVE_INFINITY
       );
       if ('error' in res) return res.error;
-      if (requests.length >= REQUESTS_MAX_ITEMS) return t('A lista de pedidos está cheia.');
       syncManager.emitRequestAdd(res.item);
       if (sidebarOpen) onSidebarTabChange('requests');
       return null;
@@ -212,7 +212,7 @@ export const RoomShell: React.FC<RoomShellProps> = ({
       <div className="flex-1 min-h-0 flex gap-3">
         {/* Coluna esquerda: Palco (Telas 2/4 ou Tela 3 16:9) + MemberStrip (Tela 3) + RoomDock */}
         <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-2.5">
-          <div className="flex-1 min-h-0 relative z-0 flex items-center justify-center [container-type:size]">
+          <div className="room-stage-container flex-1 min-h-0 relative z-0 flex items-center justify-center [container-type:size]">
             {renderPlayer({
               roomState,
               onSelectMember: handleSelectMember,
@@ -240,6 +240,7 @@ export const RoomShell: React.FC<RoomShellProps> = ({
       <MediaPickerModal
         open={mediaPickerOpen}
         onClose={() => setMediaPickerOpen(false)}
+        inRoom={room.connected}
         recentStreams={recentStreams}
         onRemoveRecent={onRemoveRecent}
         onClearRecent={onClearRecent}

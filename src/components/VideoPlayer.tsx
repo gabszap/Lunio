@@ -417,15 +417,26 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const currentUser = syncManager.getUser();
     const screenActive =
       screenShare.host.status === 'live' || screenShare.host.status === 'starting' || screenShare.covering;
+    const isNativeFsStandby = typeof document !== 'undefined' && !!document.fullscreenElement;
+    const isWindowFsStandby = isFullscreen && !isNativeFsStandby;
 
     if (screenActive) {
       return (
         <div
           id="video-player-standby"
-          className="relative w-[min(100cqw,calc(100cqh*16/9))] aspect-video rounded-[18px] lu-video-bg border border-lu-border overflow-hidden flex items-center justify-center select-none"
+          ref={containerRef}
+          className={`${
+            isWindowFsStandby
+              ? 'fixed inset-0 z-50 w-screen h-screen max-w-none max-h-none window-fullscreen bg-black'
+              : isFullscreen
+              ? 'relative w-full h-full rounded-none border-0 bg-black'
+              : 'relative w-[min(100cqw,calc(100cqh*16/9))] aspect-video rounded-[18px] lu-video-bg border border-lu-border'
+          } overflow-hidden flex items-center justify-center select-none`}
         >
           <ScreenStage />
           {syncStatus.reconnecting && <ReconnectingBanner />}
+          {isFullscreen && fullscreenDock}
+          {isFullscreen && fullscreenSidebar}
         </div>
       );
     }
@@ -433,7 +444,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return (
       <div
         id="video-player-standby"
-        className="relative w-full h-full min-h-0 flex items-center justify-center select-none"
+        ref={containerRef}
+        className={`${
+          isWindowFsStandby
+            ? 'fixed inset-0 z-50 w-screen h-screen max-w-none max-h-none window-fullscreen bg-black'
+            : 'relative w-full h-full min-h-0'
+        } flex items-center justify-center select-none`}
       >
         <MemberGrid
           members={liveRoomState?.members ?? []}
@@ -444,6 +460,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         />
         <ScreenStage />
         {syncStatus.reconnecting && <ReconnectingBanner />}
+        {isFullscreen && fullscreenDock}
+        {isFullscreen && fullscreenSidebar}
       </div>
     );
   }

@@ -22,6 +22,8 @@ interface StreamStepProps {
   /** Título vindo do catálogo ("Série · S01E02"). */
   intentTitle?: string;
   preferSolo?: boolean;
+  /** Quando `true` (dentro de uma sala conectada), oculta "Assistir sozinho" para não desconectar o Host. */
+  inRoom?: boolean;
   pendingSubtitles: number;
   onAddSubtitle: () => void;
   onBack: () => void;
@@ -34,6 +36,7 @@ export const StreamStep: React.FC<StreamStepProps> = ({
   onClearRecent,
   intentTitle,
   preferSolo,
+  inRoom,
   pendingSubtitles,
   onAddSubtitle,
   onBack,
@@ -101,7 +104,7 @@ export const StreamStep: React.FC<StreamStepProps> = ({
     );
   };
 
-  const primaryMode: CommitMode = preferSolo ? 'solo' : 'room';
+  const primaryMode: CommitMode = inRoom ? 'room' : preferSolo ? 'solo' : 'room';
 
   return (
     <HomeCard wide>
@@ -231,7 +234,12 @@ export const StreamStep: React.FC<StreamStepProps> = ({
               <Captions size={18} />
               <span>{t('Legenda')}{pendingSubtitles > 0 ? ` (${pendingSubtitles})` : ''}</span>
             </GhostButton>
-            {primaryMode === 'room' ? (
+            {inRoom ? (
+              <PrimaryButton type="submit">
+                <Play size={16} />
+                <span>{t('Tocar na sala')}</span>
+              </PrimaryButton>
+            ) : primaryMode === 'room' ? (
               <>
                 <GhostButton onClick={() => commit('solo')}>
                   <Play size={16} />

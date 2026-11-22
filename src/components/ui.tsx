@@ -589,7 +589,11 @@ export const Modal: React.FC<{
     );
     first?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && onClose) onClose();
+      if (e.key !== 'Escape' || !onClose) return;
+      // Quando há modais aninhados (ex.: SubtitleModal sobre MediaPickerModal), apenas o modal do topo responde ao Escape
+      const dialogs = document.querySelectorAll('[role="dialog"], [role="alertdialog"]');
+      if (dialogs.length > 0 && dialogs[dialogs.length - 1] !== dialogRef.current) return;
+      onClose();
     };
     document.addEventListener('keydown', onKey);
     return () => {

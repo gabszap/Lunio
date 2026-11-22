@@ -259,13 +259,24 @@ export const RoomDock: React.FC<RoomDockProps> = ({
 
   if (isFullscreen) {
     return (
-      <div
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        className="fixed inset-x-0 bottom-0 h-16 z-40 flex items-end justify-center pb-3 pointer-events-auto"
-      >
-        {pill}
-      </div>
+      <>
+        {!revealDock && (
+          <div
+            aria-hidden="true"
+            onMouseEnter={() => setHovered(true)}
+            className="fixed inset-x-0 bottom-0 h-2 z-40 pointer-events-auto"
+          />
+        )}
+        <div className="fixed inset-x-0 bottom-0 z-40 flex items-end justify-center pointer-events-none">
+          <div
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
+            className={cx('pb-3 px-2', revealDock ? 'pointer-events-auto' : 'pointer-events-none')}
+          >
+            {pill}
+          </div>
+        </div>
+      </>
     );
   }
 

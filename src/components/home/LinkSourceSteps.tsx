@@ -10,12 +10,15 @@ import { t } from '../../lib/i18n';
 interface LinkStepProps {
   onBack: () => void;
   onCommit: SourceCommit;
+  /** Quando `true` (dentro de uma sala conectada), oculta "Assistir sozinho" para não desconectar o Host. */
+  inRoom?: boolean;
 }
 
-const StepActions: React.FC<{ onBack: () => void; onCommit: (mode: CommitMode) => void; disabled?: boolean }> = ({
+const StepActions: React.FC<{ onBack: () => void; onCommit: (mode: CommitMode) => void; disabled?: boolean; inRoom?: boolean }> = ({
   onBack,
   onCommit,
   disabled,
+  inRoom,
 }) => (
   <CardFooter>
     <TextButton onClick={onBack} className="!pl-2">
@@ -23,13 +26,15 @@ const StepActions: React.FC<{ onBack: () => void; onCommit: (mode: CommitMode) =
       <span>{t('Voltar')}</span>
     </TextButton>
     <div className="flex flex-wrap gap-2 justify-end">
-      <GhostButton disabled={disabled} onClick={() => onCommit('solo')}>
-        <Play size={16} />
-        <span>{t('Assistir sozinho')}</span>
-      </GhostButton>
+      {!inRoom && (
+        <GhostButton disabled={disabled} onClick={() => onCommit('solo')}>
+          <Play size={16} />
+          <span>{t('Assistir sozinho')}</span>
+        </GhostButton>
+      )}
       <PrimaryButton disabled={disabled} onClick={() => onCommit('room')}>
-        <Users size={18} />
-        <span>{t('Criar sala')}</span>
+        {inRoom ? <Play size={16} /> : <Users size={18} />}
+        <span>{inRoom ? t('Tocar na sala') : t('Criar sala')}</span>
       </PrimaryButton>
     </div>
   </CardFooter>
@@ -42,7 +47,7 @@ interface YouTubeInfo {
   author: string;
 }
 
-export const YouTubeStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
+export const YouTubeStep: React.FC<LinkStepProps> = ({ onBack, onCommit, inRoom }) => {
   const [link, setLink] = useState('');
   const [info, setInfo] = useState<YouTubeInfo | null>(null);
   const [loading, setLoading] = useState(false);
@@ -144,7 +149,7 @@ export const YouTubeStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
           </div>
         )}
 
-        <StepActions onBack={onBack} onCommit={commit} disabled={!videoId} />
+        <StepActions onBack={onBack} onCommit={commit} disabled={!videoId} inRoom={inRoom} />
       </form>
     </HomeCard>
   );
@@ -167,7 +172,7 @@ type DriveState =
   | { kind: 'invalid' }
   | { kind: 'error'; message: string };
 
-export const DriveStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
+export const DriveStep: React.FC<LinkStepProps> = ({ onBack, onCommit, inRoom }) => {
   const [link, setLink] = useState('');
   const [state, setState] = useState<DriveState>({ kind: 'idle' });
   const [attempt, setAttempt] = useState(0);
@@ -330,7 +335,7 @@ export const DriveStep: React.FC<LinkStepProps> = ({ onBack, onCommit }) => {
             </div>
           </CardFooter>
         ) : (
-          <StepActions onBack={onBack} onCommit={commit} disabled={state.kind !== 'ok'} />
+          <StepActions onBack={onBack} onCommit={commit} disabled={state.kind !== 'ok'} inRoom={inRoom} />
         )}
       </form>
     </HomeCard>

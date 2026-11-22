@@ -20,6 +20,7 @@ export type PickerTab = 'catalog' | 'stream' | 'upload' | 'youtube' | 'drive';
 interface MediaPickerModalProps {
   open: boolean;
   onClose: () => void;
+  inRoom?: boolean;
   initialTab?: PickerTab;
   recentStreams: RecentStream[];
   onRemoveRecent: (url: string) => void;
@@ -49,10 +50,11 @@ const TABS: Array<{ value: PickerTab; label: string; icon: React.ReactNode }> = 
  * Modal de escolha/troca de vídeo dentro da própria sala (sem sair nem desconectar).
  * Reaproveita o Catálogo e os formulários de fonte existentes da Home.
  */
-export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
-  open,
+const MediaPickerContent: React.FC<Omit<MediaPickerModalProps, 'open'> & { onTabChange: (tab: PickerTab) => void }> = ({
   onClose,
+  inRoom,
   initialTab = 'catalog',
+  onTabChange,
   recentStreams,
   onRemoveRecent,
   onClearRecent,
@@ -66,12 +68,17 @@ export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
   const [tab, setTab] = useState<PickerTab>(initialTab);
   const [watchIntent, setWatchIntent] = useState<WatchIntent | null>(null);
 
+  const selectTab = (next: PickerTab) => {
+    setTab(next);
+    onTabChange(next);
+  };
+
   const handleCommit = (
     payload: MediaPayload,
     mode: CommitMode,
     options?: CommitOptions
   ) => {
-    onCommit(payload, mode, options);
+    onCommit(payload, inRoom ? 'room' : mode, options);
     setWatchIntent(null);
     onClose();
   };
@@ -89,18 +96,12 @@ export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
 
   const handlePickStep = (step: SourceStep) => {
     if (step === 'stream' || step === 'upload' || step === 'youtube' || step === 'drive') {
-      setTab(step);
+      selectTab(step);
     }
   };
 
   return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      label={t('Escolher vídeo')}
-      width={tab === 'catalog' ? 980 : 660}
-      className="!p-5 !gap-4"
-    >
+    <>
       <ModalHeader
         title={t('Escolher vídeo')}
         description={t('Troque o vídeo ou explore o catálogo sem sair da sala.')}
@@ -111,7 +112,7 @@ export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
         <PillTabs
           value={tab}
           onChange={(next) => {
-            setTab(next);
+            selectTab(next);
             setWatchIntent(null);
           }}
           size="sm"
@@ -131,12 +132,13 @@ export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
               }
             >
               <CatalogTab
+                syncUrl={false}
                 onWatch={(intent) => {
                   setWatchIntent(intent);
-                  setTab('stream');
+                  selectTab('stream');
                 }}
                 onPlayStream={handlePlayStream}
-                onCreateRoom={() => setTab('stream')}
+                onCreateRoom={() => selectTab('stream')}
               />
             </Suspense>
           </div>
@@ -149,9 +151,10 @@ export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
             onClearRecent={onClearRecent}
             intentTitle={watchIntent?.title}
             preferSolo={watchIntent?.preferSolo}
+            inRoom={inRoom}
             pendingSubtitles={pendingSubtitles}
             onAddSubtitle={onAddSubtitle}
-            onBack={() => (watchIntent ? setTab('catalog') : onClose())}
+            onBack={() => (watchIntent ? selectTab('catalog') : onClose())}
             onCommit={handleCommit}
           />
         )}
@@ -166,10 +169,39 @@ export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
           />
         )}
 
-        {tab === 'youtube' && <YouTubeStep onBack={onClose} onCommit={handleCommit} />}
+        {tab === 'youtube' && <YouTubeStep onBack={onClose} onCommit={handleCommit} inRoom={inRoom} />}
 
-        {tab === 'drive' && <DriveStep onBack={onClose} onCommit={handleCommit} />}
+        {tab === 'drive' && <DriveStep onBack={onClose} onCommit={handleCommit} inRoom={inRoom} />}
       </div>
+    </>
+  );
+};
+
+export const MediaPickerModal: React.FC<MediaPickerModalProps> = (props) => {
+  const { open, onClose, initialTab = 'catalog' } = props;
+  const [activeTab, setActiveTab] = useState<PickerTab>(initialTab);
+
+  return (
+    <Modal
+      open={open}
+      onClose={() => {
+        setActiveTab(initialTab);
+        onClose();
+      }}
+      label={t('Escolher vídeo')}
+      width={activeTab === 'catalog' ? 980 : 660}
+      className="!p-5 !gap-4"
+    >
+      {open && (
+        <MediaPickerContent
+          {...props}
+          onClose={() => {
+            setActiveTab(initialTab);
+            onClose();
+          }}
+          onTabChange={setActiveTab}
+        />
+      )}
     </Modal>
   );
 };

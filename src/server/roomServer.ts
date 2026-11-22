@@ -12,7 +12,7 @@ import { roomStore, type PersistedRoom, type RoomStore } from './roomStore';
 import { isValidScreenEpoch, isValidScreenKey, newScreenSession, sanitizeUsageBytes, screenShareEnabled } from './screenShare';
 import { recordScreenUsage } from './screenUsage';
 import { screenQuality, type RoomScreen } from '../types/screen';
-import { isLinkId, linksOf, resolveLinkId, scrubFor, type LinkEntry } from './links';
+import { isExemptFromOpaque, isLinkId, linkIdFor, linksOf, resolveLinkId, scrubFor, type LinkEntry } from './links';
 import type {
   ClientMessage,
   ServerMessage,
@@ -1057,21 +1057,32 @@ export class RoomManager {
         if (!req) return;
         if (msg.playNow) {
           // Guarda em takenLinks antes de remover de requests para que o envio ao Host e o media:set seguinte usem lk_…
-          currentRoom.takenLinks = [
-            ...this.linksFor(currentRoom).filter((l) => l.url === req.url).map((l) => ({ ...l, at: Date.now() })),
-            ...currentRoom.takenLinks,
-          ].slice(0, 5);
+          const exempt = isExemptFromOpaque(req.url);
+          const opaqueId = exempt ? req.url : linkIdFor(currentRoom.roomId, req.url);
+          if (!exempt) {
+            const taken = { id: opaqueId, url: req.url, ownerId: req.addedById, at: Date.now() };
+            currentRoom.takenLinks = [
+              taken,
+              ...currentRoom.takenLinks.filter((l) => l.id !== opaqueId),
+            ].slice(0, 5);
+          }
           currentRoom.requests = currentRoom.requests.filter((i) => i.id !== req.id);
           this.broadcast(currentRoom, { type: 'requests:update', requests: currentRoom.requests });
-          this.send(ws, { type: 'request:play', item: req });
+          const hostSeesReal = exempt || baseUserId(req.addedById) === baseUserId(clientSession.userId);
+          this.send(ws, {
+            type: 'request:play',
+            item: hostSeesReal ? req : { ...req, url: opaqueId },
+          });
           break;
         }
-        currentRoom.requests = currentRoom.requests.filter((i) => i.id !== req.id);
         const key = playlistUrlKey(req.url);
-        if (
-          currentRoom.playlist.length < PLAYLIST_MAX_ITEMS &&
-          !currentRoom.playlist.some((i) => playlistUrlKey(i.url) === key)
-        ) {
+        const alreadyInPlaylist = currentRoom.playlist.some((i) => playlistUrlKey(i.url) === key);
+        if (!alreadyInPlaylist && currentRoom.playlist.length >= PLAYLIST_MAX_ITEMS) {
+          this.send(ws, { type: 'error', message: 'A fila está cheia.' });
+          return;
+        }
+        currentRoom.requests = currentRoom.requests.filter((i) => i.id !== req.id);
+        if (!alreadyInPlaylist) {
           currentRoom.playlist.push({ ...req });
           if (!/youtube/i.test(req.mimeType || '')) warmUpMedia(req.url);
           this.sendSystemChat(currentRoom, `➕ ${clientSession.username} aprovou para a fila: "${req.title}"`);

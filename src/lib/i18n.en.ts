@@ -707,4 +707,5 @@ export const EN: Record<string, string> = {
   "Chat": "Chat",
   "Membros": "Members",
   "A lista de pedidos está cheia.": "The request list is full.",
+  "Tocar na sala": "Play in room",
 };

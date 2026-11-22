@@ -3,7 +3,7 @@ import type { WebSocket } from 'ws';
 import { RoomManager } from '../roomServer';
 import { parsePersistedRoom, type PersistedRoom, type RoomStore } from '../roomStore';
 import { linkIdFor } from '../links';
-import { REQUESTS_MAX_ITEMS } from '../../types/sync';
+import { PLAYLIST_MAX_ITEMS, REQUESTS_MAX_ITEMS } from '../../types/sync';
 
 vi.mock('../media/resolver', () => ({ warmUpMedia: vi.fn() }));
 
@@ -224,5 +224,56 @@ describe('pedidos (requests) e regra da fila', () => {
     expect(stateOf('REQ6').media?.ownerId).toBe('g');
     expect(host.last('media:sync').media.url).toBe(opaqueId);
     expect(guest.last('media:sync').media.url).toBe(secretUrl);
+  });
+
+  it('não descarta pedido ao aprovar quando a fila já atingiu o limite', () => {
+    const host = connect('REQ7', 'h', 'Host');
+    const guest = connect('REQ7', 'g', 'Gui');
+
+    for (let i = 1; i <= PLAYLIST_MAX_ITEMS; i++) {
+      send(host, {
+        type: 'playlist:add',
+        url: `https://cdn.example/queue-${i}.mp4`,
+        title: `Fila ${i}`,
+      });
+    }
+    expect(stateOf('REQ7').playlist).toHaveLength(PLAYLIST_MAX_ITEMS);
+
+    send(guest, reqMsg(99));
+    const [req] = stateOf('REQ7').requests!;
+    host.clear();
+
+    send(host, { type: 'request:approve', itemId: req.id });
+    expect(stateOf('REQ7').requests).toHaveLength(1);
+    expect(stateOf('REQ7').playlist).toHaveLength(PLAYLIST_MAX_ITEMS);
+    expect(host.last('error')).toMatchObject({ type: 'error' });
+  });
+
+  it('aprovar com playNow: true envia id opaco limpo mesmo quando o pedido tem #fragment sobre link base já em media', () => {
+    const host = connect('REQ8', 'h', 'Host');
+    const guest1 = connect('REQ8', 'g1', 'Ana');
+    const guest2 = connect('REQ8', 'g2', 'Gui');
+    const baseUrl = 'https://debrid.secret.test/token-xyz/ep10.mkv';
+    const fragUrl = `${baseUrl}#t=30`;
+    const opaqueId = linkIdFor('REQ8', baseUrl);
+
+    // guest1 coloca baseUrl como mídia atual (Host não é o dono)
+    send(guest1, { type: 'request:add', url: baseUrl, title: 'Ep 10' });
+    const [req1] = stateOf('REQ8').requests!;
+    send(host, { type: 'request:approve', itemId: req1.id, playNow: true });
+    send(host, { type: 'media:set', media: { url: host.last('request:play').item.url, title: 'Ep 10', duration: 120 } });
+
+    // guest2 pede o mesmo link com #fragment; request:play deve chegar como lk_… limpo (sem #t=30)
+    send(guest2, { type: 'request:add', url: fragUrl, title: 'Ep 10 (30s)' });
+    const [req2] = stateOf('REQ8').requests!;
+    send(host, { type: 'request:approve', itemId: req2.id, playNow: true });
+    const playMsg = host.last('request:play');
+    expect(playMsg).toBeDefined();
+    expect(playMsg.item.url).toBe(opaqueId);
+
+    // Host consegue carregar media:set com o id limpo sem vazar URL
+    send(host, { type: 'media:set', media: { url: playMsg.item.url, title: playMsg.item.title, duration: 120 } });
+    expect(stateOf('REQ8').media?.url).toBe(baseUrl);
+    expect(host.last('media:sync').media.url).toBe(opaqueId);
   });
 });
