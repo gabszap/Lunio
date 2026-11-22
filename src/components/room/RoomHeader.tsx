@@ -75,8 +75,8 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
   const urlPlaceholder = isHost ? t('Colar link de vídeo ou YouTube…') : t('Sugerir link de vídeo ou YouTube…');
 
   return (
-    <header className="flex-none relative z-30 grid grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_340px] items-center gap-3 min-h-11">
-      <div className="flex items-center justify-between gap-3 min-w-0">
+    <header className="flex-none relative z-30 flex flex-wrap items-center justify-between gap-2 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_360px] sm:gap-3 min-h-11">
+      <div className="flex items-center justify-between gap-3 min-w-0 flex-1 sm:flex-initial">
         <Logo onClick={onLogoClick} size={28} />
 
         <div className="flex items-center gap-2.5 min-w-0 mx-auto">
@@ -107,7 +107,24 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
         <div className="hidden lg:block w-8 flex-none" aria-hidden="true" />
       </div>
 
-      <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center gap-2 min-w-0 w-full sm:w-auto">
+        <IconButton
+          label={sidebarOpen ? t('Recolher barra lateral') : t('Abrir barra lateral')}
+          size={40}
+          tone="muted"
+          active={sidebarOpen}
+          aria-pressed={sidebarOpen}
+          onClick={onToggleSidebar}
+          className="border border-lu-border bg-lu-bg2"
+        >
+          {sidebarOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+          {!sidebarOpen && unreadChat > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 box-border rounded-full bg-lu-error text-lu-bg text-[10px] font-bold leading-[18px] text-center">
+              {unreadChat > 9 ? '9+' : unreadChat}
+            </span>
+          )}
+        </IconButton>
+
         {connected && (
           <form onSubmit={handleSubmit} className="relative flex-1 min-w-0">
             <input
@@ -145,23 +162,6 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
             )}
           </form>
         )}
-
-        <IconButton
-          label={sidebarOpen ? t('Recolher barra lateral') : t('Abrir barra lateral')}
-          size={40}
-          tone="muted"
-          active={sidebarOpen}
-          aria-pressed={sidebarOpen}
-          onClick={onToggleSidebar}
-          className="border border-lu-border bg-lu-bg2"
-        >
-          {sidebarOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
-          {!sidebarOpen && unreadChat > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 box-border rounded-full bg-lu-error text-lu-bg text-[10px] font-bold leading-[18px] text-center">
-              {unreadChat > 9 ? '9+' : unreadChat}
-            </span>
-          )}
-        </IconButton>
       </div>
     </header>
   );

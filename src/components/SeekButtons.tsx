@@ -56,7 +56,7 @@ export const SeekButtons: React.FC<SeekButtonsProps> = ({ currentTime, duration,
         title={t('Pular abertura (N)')}
         disabled={disabled}
         onClick={seekBy(90, t('Pular 90 s'))}
-        className={`${seekBtn} hidden md:inline-flex bg-lu-tint text-lu-accent hover:bg-lu-accent/20`}
+        className={`${seekBtn} hidden md:inline-flex text-lu-text hover:bg-white/8`}
       >
         <FastForward size={18} />
         <span>+90 s</span>

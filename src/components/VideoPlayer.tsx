@@ -430,7 +430,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               ? 'fixed inset-0 z-50 w-screen h-screen max-w-none max-h-none window-fullscreen bg-black'
               : isFullscreen
               ? 'relative w-full h-full rounded-none border-0 bg-black'
-              : 'relative w-[min(100cqw,calc(100cqh*16/9))] aspect-video rounded-[18px] lu-video-bg border border-lu-border'
+              : 'relative w-full h-full rounded-[18px] lu-video-bg border border-lu-border'
           } overflow-hidden flex items-center justify-center select-none`}
         >
           <ScreenStage />
@@ -506,7 +506,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           ? `fixed inset-0 z-50 w-screen h-screen max-w-none max-h-none window-fullscreen bg-black aspect-${aspectMode}`
           : isFullscreen
           ? `h-full aspect-auto rounded-none bg-black aspect-${aspectMode}`
-          : `relative w-[min(100cqw,calc(100cqh*16/9))] aspect-video lu-video-bg aspect-${aspectMode}`
+          : `relative w-full h-full lu-video-bg aspect-${aspectMode}`
       } overflow-hidden select-none group text-lu-text ${isCursorHidden ? 'hide-cursor cursor-none' : ''} ${screenCovering ? 'screen-covering' : ''}`}
     >
       {/* Vidstack Media Player Core */}
@@ -694,7 +694,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           watchPartyMembersCount={syncStatus.membersCount}
           isWatchPartyConnected={syncStatus.isConnected}
           isHost={syncStatus.isHost}
-          unreadChatCount={room.unreadChatCount}
           onBack={isFullscreen ? undefined : onBack}
           onAddSubtitle={onAddSubtitle}
           seriesContext={seriesContext}

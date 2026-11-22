@@ -90,7 +90,7 @@ export const RoomSidebar: React.FC<RoomSidebarProps> = ({
         'rounded-2xl bg-lu-bg2 border border-lu-border flex flex-col min-h-0 overflow-hidden text-lu-text cursor-auto',
         isFullscreen
           ? 'fixed inset-y-3 right-3 z-50 w-[min(360px,calc(100vw-24px))] shadow-[0_24px_64px_rgba(0,0,0,0.6)]'
-          : 'w-[340px] flex-none max-lg:fixed max-lg:inset-y-3 max-lg:right-3 max-lg:z-50 max-lg:w-[min(360px,calc(100vw-24px))] max-lg:shadow-[0_24px_64px_rgba(0,0,0,0.6)]'
+          : 'w-[360px] flex-none max-lg:fixed max-lg:inset-y-3 max-lg:right-3 max-lg:z-50 max-lg:w-[min(360px,calc(100vw-24px))] max-lg:shadow-[0_24px_64px_rgba(0,0,0,0.6)]'
       )}
     >
       {/* Cabeçalho compacto com botão de fechar quando em tela cheia ou drawer (< lg) */}
@@ -125,7 +125,7 @@ export const RoomSidebar: React.FC<RoomSidebarProps> = ({
       ) : (
         <>
           <div className="p-2 border-b border-lu-border flex-none">
-            <div role="tablist" aria-label={t('Watch Party')} className="grid grid-cols-4 gap-1 p-1 rounded-[12px] bg-lu-bg">
+            <div role="tablist" aria-label={t('Watch Party')} className="flex items-center gap-1 p-1 rounded-[12px] bg-lu-bg">
               {tabs.map((tab) => {
                 const selected = activeTab === tab.id;
                 return (
@@ -136,13 +136,13 @@ export const RoomSidebar: React.FC<RoomSidebarProps> = ({
                     aria-selected={selected}
                     onClick={() => onTabChange(tab.id)}
                     className={cx(
-                      'appearance-none inline-flex items-center justify-center gap-1 h-8 px-1.5 rounded-[8px] text-[12px] font-[inherit] whitespace-nowrap transition-colors min-w-0',
+                      'appearance-none flex-auto inline-flex items-center justify-center gap-1.5 h-8 px-2 rounded-[8px] text-[12px] font-[inherit] whitespace-nowrap transition-colors',
                       selected
                         ? 'bg-lu-tint text-lu-accent font-semibold'
                         : 'bg-transparent text-lu-muted font-medium hover:bg-white/6 hover:text-lu-text'
                     )}
                   >
-                    <span className="truncate">{tab.label}</span>
+                    <span>{tab.label}</span>
                     {tab.count !== undefined && (
                       <span
                         className={cx(
@@ -173,14 +173,15 @@ export const RoomSidebar: React.FC<RoomSidebarProps> = ({
 
           {activeTab === 'queue' && <QueueTab onPlayItem={onPlayQueueItem} />}
 
-          {activeTab === 'chat' && (
+          {/* Mantém ChatTab montado quando oculto para preservar o rascunho digitado ao trocar de aba */}
+          <div className={activeTab === 'chat' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
             <ChatTab
               messages={chatMessages}
               members={members}
               currentUserId={currentUser.id}
               active={open && activeTab === 'chat'}
             />
-          )}
+          </div>
 
           {activeTab === 'members' && (
             <MembersTab

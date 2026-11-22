@@ -21,7 +21,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({ messages, members, currentUser
 
   const chatListRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
-  const prevCountRef = useRef(messages.length);
+  const lastMsgIdRef = useRef<string | null>(messages.at(-1)?.id ?? null);
   const wasActiveRef = useRef(active);
 
   const handleChatScroll = () => {
@@ -58,10 +58,10 @@ export const ChatTab: React.FC<ChatTabProps> = ({ messages, members, currentUser
           setNewMessagesWhileScrolled(0);
         }
       });
-      prevCountRef.current = messages.length;
+      lastMsgIdRef.current = messages.at(-1)?.id ?? null;
     }
     wasActiveRef.current = active;
-  }, [active, messages.length]);
+  }, [active, messages]);
 
   // Montagem inicial com a aba já ativa: garante posição no final.
   useEffect(() => {
@@ -75,11 +75,16 @@ export const ChatTab: React.FC<ChatTabProps> = ({ messages, members, currentUser
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Acompanha mensagens novas automaticamente se o usuário estiver no fim; caso contrário conta não lidas.
+  // Acompanha mensagens novas automaticamente (funciona mesmo quando o histórico atinge o teto de 100 itens).
   useEffect(() => {
-    const delta = messages.length - prevCountRef.current;
-    prevCountRef.current = messages.length;
-    if (!active || delta <= 0) return;
+    const newestId = messages.at(-1)?.id ?? null;
+    const prevId = lastMsgIdRef.current;
+    lastMsgIdRef.current = newestId;
+    if (!active || !newestId || newestId === prevId) return;
+
+    const prevIdx = prevId ? messages.findIndex((m) => m.id === prevId) : -1;
+    const delta = prevIdx >= 0 ? messages.length - 1 - prevIdx : 1;
+    if (delta <= 0) return;
 
     if (followingRef.current) {
       requestAnimationFrame(() => {
@@ -90,7 +95,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({ messages, members, currentUser
     } else {
       setNewMessagesWhileScrolled((prev) => prev + delta);
     }
-  }, [messages.length, active]);
+  }, [messages, active]);
 
   const hostId = members.find((m) => m.isHost)?.id;
   // Nome atual de cada pessoa: quem trocou de apelido aparece com o nome novo também nas mensagens antigas.

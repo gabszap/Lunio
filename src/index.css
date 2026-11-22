@@ -286,10 +286,13 @@ body.is-fullscreen::-webkit-scrollbar,
   height: 0 !important;
 }
 
-/* Em tela cheia (inclusive .window-fullscreen no iframe/fallback), solta o stacking context e containment do palco */
+/* Em tela cheia (inclusive .window-fullscreen no iframe/fallback), solta o stacking context do palco e amplia menus */
 html.is-fullscreen .room-stage-container {
   z-index: auto !important;
-  container-type: normal !important;
+}
+
+html.is-fullscreen .player-menu-panel {
+  max-height: min(72dvh, 560px);
 }
 
 /* Estilização Moderna e Personalizável para Legendas Nativas (VTT / SRT) */

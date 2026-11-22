@@ -36,6 +36,7 @@ import {
   MenuPanel,
   MenuSection,
   Spinner,
+  cx,
   useDismiss,
 } from './ui';
 
@@ -438,8 +439,11 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                 id="btn-subtitles-toggle"
                 label={t('Legendas (C)')}
                 aria-expanded={openMenu === 'subs'}
-                active={Boolean(activeSubtitle) || openMenu === 'subs'}
                 onClick={() => toggleMenu('subs')}
+                className={cx(
+                  openMenu === 'subs' && 'bg-white/10',
+                  (Boolean(activeSubtitle) || openMenu === 'subs') && '!text-lu-accent'
+                )}
               >
                 <Captions size={20} />
               </IconButton>

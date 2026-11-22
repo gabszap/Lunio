@@ -1,7 +1,8 @@
 import React, { useRef, useState } from 'react';
-import { Check, ChevronUp, Clock, Film, Keyboard, Link2, LogOut, Share2, Terminal, Users } from 'lucide-react';
+import { Check, ChevronUp, Clock, Compass, Keyboard, Link2, LogOut, Share2, Terminal, Users } from 'lucide-react';
 import { formatTime } from '../../lib/chapters';
 import { t, msg } from '../../lib/i18n';
+import { copyText } from '../../lib/recent';
 import { syncManager } from '../../lib/sync';
 import { ScreenShareControl } from '../player/ScreenShare';
 import { Kbd, cx, useDismiss } from '../ui';
@@ -82,15 +83,16 @@ export const RoomDock: React.FC<RoomDockProps> = ({
   const anyMenuOpen = shareOpen || shortcutsOpen || screenOpen;
   const revealDock = !isFullscreen || hovered || anyMenuOpen;
 
-  const copyRoomLink = (atSeconds?: number) => {
+  const copyRoomLink = async (atSeconds?: number) => {
     const url = new URL('/', window.location.origin);
     url.searchParams.set('room', roomCode);
     if (atSeconds === undefined) url.searchParams.delete('t');
     else url.searchParams.set('t', String(Math.floor(atSeconds)));
-    navigator.clipboard.writeText(url.toString()).catch(() => {});
     setShareOpen(false);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
+    if (await copyText(url.toString())) {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    }
   };
 
   const pill = (
@@ -109,10 +111,13 @@ export const RoomDock: React.FC<RoomDockProps> = ({
           id="btn-dock-choose-media"
           type="button"
           onClick={onOpenMediaPicker}
-          className={cx(dockBtnBase, 'bg-lu-tint text-lu-accent hover:bg-lu-accent/20 font-semibold')}
+          className={cx(
+            dockBtnBase,
+            'bg-lu-accent text-lu-bg hover:bg-lu-accent-hover font-semibold shadow-[0_4px_14px_rgba(167,139,250,0.22)]'
+          )}
         >
-          <Film size={16} />
-          <span className="hidden sm:inline">{t('Escolher vídeo')}</span>
+          <Compass size={16} />
+          <span className="hidden sm:inline">{t('Catálogo')}</span>
         </button>
       )}
 
@@ -238,7 +243,7 @@ export const RoomDock: React.FC<RoomDockProps> = ({
               onLeaveRoom();
             }
           }}
-          className={cx(dockBtnBase, 'bg-lu-error/90 hover:bg-lu-error text-white font-semibold')}
+          className={cx(dockBtnBase, 'bg-[#dc2626] hover:bg-[#b91c1c] text-white font-semibold')}
         >
           <LogOut size={15} />
           <span>{t('Sair')}</span>

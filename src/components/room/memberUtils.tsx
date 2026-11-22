@@ -36,8 +36,8 @@ export function memberSyncMeta(member: RoomMember, room: RoomState | null): { to
   if (transmitting) return { tone: 'success', label: t('Transmitindo') };
   if (member.watchingScreen) return { tone: 'success', label: t('Assistindo') };
   if (behind) return { tone: 'warning', label: behind.text };
-  if (member.ready) return { tone: 'success', label: 'Sincronizado' };
-  return { tone: 'warning', label: 'Aguardando' };
+  if (member.ready) return { tone: 'success', label: t('Sincronizado') };
+  return { tone: 'warning', label: t('Aguardando') };
 }
 
 /** Paleta sutil de fundo de card por usuário (determinística pelo id, fiel aos tons escuros do Lunio). */

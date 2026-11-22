@@ -91,8 +91,9 @@ export const QueueTab: React.FC<QueueTabProps> = ({ onPlayItem }) => {
   };
 
   // Esc cancela o arraste
+  const dragging = Boolean(drag);
   useEffect(() => {
-    if (!drag) return;
+    if (!dragging) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -101,7 +102,8 @@ export const QueueTab: React.FC<QueueTabProps> = ({ onPlayItem }) => {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragging]);
 
   const offsetFor = (i: number): number => {
     if (!drag) return 0;

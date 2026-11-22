@@ -42,25 +42,31 @@ export const MemberGrid: React.FC<MemberGridProps> = ({
         ];
 
   const single = displayList.length === 1;
-  const colsClass =
-    displayList.length === 1
-      ? 'grid-cols-1'
-      : displayList.length <= 4
-        ? 'grid-cols-1 sm:grid-cols-2'
-        : 'grid-cols-2 md:grid-cols-3';
+  const two = displayList.length === 2;
+  const threeOrFour = displayList.length >= 3 && displayList.length <= 4;
+  const colsClass = single
+    ? 'grid-cols-1'
+    : displayList.length <= 4
+      ? 'grid-cols-1 sm:grid-cols-2'
+      : 'grid-cols-2 md:grid-cols-3';
 
   return (
     <div
       id="room-member-grid"
       className={cx(
-        'w-full h-full min-h-0 rounded-[18px] border border-lu-border bg-lu-video p-4 sm:p-5 overflow-y-auto custom-scrollbar flex items-center justify-center'
+        'w-full h-full min-h-0 overflow-y-auto custom-scrollbar flex',
+        single ? 'rounded-[18px]' : 'bg-transparent'
       )}
     >
       <div
         className={cx(
-          'w-full grid gap-4',
+          'w-full grid gap-3',
           colsClass,
-          single ? 'h-full' : 'max-w-[960px] auto-rows-[minmax(200px,1fr)]'
+          single
+            ? 'h-full'
+            : threeOrFour
+              ? 'h-full auto-rows-fr'
+              : 'my-auto auto-rows-[minmax(200px,1fr)]'
         )}
       >
         {displayList.map((member) => {
@@ -73,7 +79,13 @@ export const MemberGrid: React.FC<MemberGridProps> = ({
               onClick={() => onSelectMember?.(member.id)}
               className={cx(
                 'relative w-full rounded-[16px] border border-lu-border hover:border-lu-border-strong transition-colors flex flex-col items-center justify-center p-6 select-none overflow-hidden text-left',
-                single ? 'h-full min-h-[260px]' : 'aspect-[4/3] min-h-[190px] max-h-[320px]',
+                single
+                  ? 'h-full min-h-[260px]'
+                  : two
+                    ? 'aspect-[16/10] sm:min-h-[300px] sm:h-[min(62vh,520px)]'
+                    : threeOrFour
+                      ? 'h-full min-h-[190px]'
+                      : 'aspect-[4/3] min-h-[180px]',
                 memberCardTint(member.id, member.isHost)
               )}
             >
