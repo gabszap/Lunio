@@ -47,8 +47,9 @@ export const ChapterList: React.FC<ChapterListProps> = ({
         active={open}
         disabled={disabled}
         onClick={() => onOpenChange(!open)}
+        className="!w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11"
       >
-        <BookmarkMinus size={20} />
+        <BookmarkMinus size={18} />
       </IconButton>
 
       {open && (

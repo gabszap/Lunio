@@ -22,7 +22,7 @@ export function SubtitlePreparingBadge({ label, status }: { label?: string; stat
   return (
     <div
       role="status"
-      className={`absolute top-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5 px-4 py-2.5 rounded-[10px] text-[13px] font-medium whitespace-nowrap pointer-events-none ${floatingCard}`}
+      className={`absolute top-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5 px-4 py-2 rounded-[10px] text-[12.5px] font-medium whitespace-nowrap pointer-events-none max-w-[calc(100%-32px)] truncate ${floatingCard}`}
     >
       <Spinner size={16} className="text-lu-accent" />
       <span>

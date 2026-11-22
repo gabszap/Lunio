@@ -364,7 +364,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
       {/* Base: timeline e barra de controles */}
       <div
         id="player-bottom-controls-bar"
-        className="pointer-events-auto flex flex-col gap-1 px-3 sm:px-5 pt-16 pb-2 sm:pb-3.5 bg-gradient-to-t from-lu-video/92 to-lu-video/0"
+        className="sm:@container pointer-events-auto flex flex-col gap-1 px-3 sm:px-4 @[980px]:px-6 pt-16 pb-2 sm:pb-3.5 bg-gradient-to-t from-lu-video/92 to-lu-video/0"
       >
         <ChapterTimeline
           currentTime={currentTime}
@@ -377,12 +377,12 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         />
 
         <div className="flex items-center justify-between gap-1.5 flex-wrap sm:flex-nowrap">
-          <div className="flex items-center gap-0.5 sm:gap-1 min-w-0">
+          <div className="flex items-center gap-0.5 @[980px]:gap-1 min-w-0 flex-none">
             {isViewer ? (
               <span
                 id="viewer-sync-badge"
                 title={t('Sua reprodução é sincronizada automaticamente com o Host da sala.')}
-                className="inline-flex items-center gap-2 h-11 px-3.5 box-border rounded-[10px] bg-lu-success/10 border border-lu-success/28 text-lu-success text-[13px] font-semibold"
+                className="inline-flex items-center gap-2 h-9 @[980px]:h-11 px-3 @[980px]:px-3.5 box-border rounded-[10px] bg-lu-success/10 border border-lu-success/28 text-lu-success text-[12px] @[980px]:text-[13px] font-semibold flex-none"
               >
                 <Dot tone="success" />
                 {t('Ao vivo')}
@@ -395,26 +395,27 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   aria-label={paused ? t('Reproduzir (Espaço)') : t('Pausar (Espaço)')}
                   title={paused ? t('Reproduzir (Espaço)') : t('Pausar (Espaço)')}
                   onClick={onPlayToggle}
-                  className="hidden sm:inline-flex w-11 h-11 rounded-[10px] items-center justify-center bg-lu-accent text-lu-bg hover:bg-lu-accent-hover transition-colors"
+                  className="hidden sm:inline-flex flex-none w-9 h-9 @[980px]:w-11 @[980px]:h-11 rounded-[10px] items-center justify-center bg-lu-accent text-lu-bg hover:bg-lu-accent-hover transition-colors"
                 >
-                  {paused ? <Play size={20} /> : <Pause size={20} />}
+                  {paused ? <Play size={18} /> : <Pause size={18} />}
                 </button>
                 <SeekButtons currentTime={currentTime} duration={duration} onSeek={onSeek} />
                 {onNext && (
                   <IconButton
                     id="btn-next-in-queue"
                     label={hasNext ? t('Próximo da fila') : t('Nenhum vídeo na fila')}
-                    size={44}
+                    size={36}
                     disabled={!hasNext}
                     onClick={onNext}
+                    className="!w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11"
                   >
-                    <SkipForward size={20} />
+                    <SkipForward size={18} />
                   </IconButton>
                 )}
               </>
             )}
 
-            <span id="player-time-display" className="px-2 text-[13px] tabular text-lu-muted whitespace-nowrap">
+            <span id="player-time-display" className="px-1.5 text-[12px] @[980px]:text-[13px] tabular text-lu-muted whitespace-nowrap flex-none">
               <span className="text-lu-text font-medium">{formatTime(currentTime)}</span> / {formatTime(duration)}
             </span>
 
@@ -422,7 +423,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               <span
                 id="player-buffer-status"
                 title={t('Buffer contíguo à frente: +{v1} s (até {v2})', { v1: bufferAhead.toFixed(1), v2: formatTime(currentTime + bufferAhead) })}
-                className="hidden xl:inline-flex items-center gap-1.5 text-[12px] text-lu-muted whitespace-nowrap tabular"
+                className="hidden @[1040px]:inline-flex items-center gap-1.5 text-[12px] text-lu-muted whitespace-nowrap tabular flex-none"
               >
                 <Dot tone={bufferTone} />
                 {bufferAhead > 0.2 ? t('Buffer +{n} s', { n: bufferAhead.toFixed(1).replace('.', ',') }) : t('Buffer: baixando…')}
@@ -430,7 +431,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-0.5 sm:gap-1 flex-nowrap justify-end flex-none">
+          <div className="flex items-center gap-0.5 @[980px]:gap-1 flex-nowrap justify-end flex-none">
             <VolumeDisplay volume={volume} muted={muted} onVolumeChange={onVolumeChange} onMuteToggle={onMuteToggle} />
 
             {/* Legendas */}
@@ -441,11 +442,12 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                 aria-expanded={openMenu === 'subs'}
                 onClick={() => toggleMenu('subs')}
                 className={cx(
+                  '!w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11',
                   openMenu === 'subs' && 'bg-white/10',
                   (Boolean(activeSubtitle) || openMenu === 'subs') && '!text-lu-accent'
                 )}
               >
-                <Captions size={20} />
+                <Captions size={18} />
               </IconButton>
               {openMenu === 'subs' && (
                 <MenuPanel
@@ -537,8 +539,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   aria-expanded={openMenu === 'audio'}
                   active={openMenu === 'audio'}
                   onClick={() => toggleMenu('audio')}
+                  className="!w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11"
                 >
-                  <AudioWaveform size={20} />
+                  <AudioWaveform size={18} />
                 </IconButton>
                 {openMenu === 'audio' && (
                   <MenuPanel
@@ -575,8 +578,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   aria-expanded={openMenu === 'episodes'}
                   active={openMenu === 'episodes'}
                   onClick={() => toggleMenu('episodes')}
+                  className="!w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11"
                 >
-                  <Tv size={20} />
+                  <Tv size={18} />
                 </IconButton>
               </div>
             )}
@@ -613,9 +617,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                 id="btn-pip-toggle"
                 label={t('Picture-in-Picture')}
                 onClick={onPipToggle}
-                className={cx('hidden md:inline-flex', isPip && '!text-lu-accent')}
+                className={cx('hidden md:inline-flex !w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11', isPip && '!text-lu-accent')}
               >
-                <PictureInPicture2 size={20} />
+                <PictureInPicture2 size={18} />
               </IconButton>
             )}
 
@@ -624,9 +628,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                 id="btn-aspect-toggle"
                 label={t(ASPECT_LABEL[aspectMode])}
                 onClick={onToggleAspect}
-                className={cx('hidden md:inline-flex', aspectMode !== 'fit' && '!text-lu-accent')}
+                className={cx('hidden md:inline-flex !w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11', aspectMode !== 'fit' && '!text-lu-accent')}
               >
-                <Maximize2 size={20} />
+                <Maximize2 size={18} />
               </IconButton>
             )}
 
@@ -634,8 +638,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               id="btn-fullscreen-toggle"
               label={isFullscreen ? t('Sair da tela cheia (F)') : t('Tela cheia (F)')}
               onClick={onFullscreenToggle}
+              className="!w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11"
             >
-              {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
+              {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
             </IconButton>
           </div>
         </div>
