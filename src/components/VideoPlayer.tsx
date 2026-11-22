@@ -168,6 +168,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [resumePrompt, setResumePrompt] = useState<{ time: number; formatted: string } | null>(null);
   const [nextEpisodeTarget, setNextEpisodeTarget] = useState<CatalogEpisode | null>(null);
   const [dismissedNextFor, setDismissedNextFor] = useState<string | null>(null);
+  const [liveResolution, setLiveResolution] = useState<string | null>(null);
 
   const hasSource = Boolean(source.src && source.src.trim());
 
@@ -306,6 +307,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setPaused,
     setIsBuffering,
     setResumePrompt,
+    setLiveResolution,
   });
 
   const playback = usePlaybackControls({
@@ -566,6 +568,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onCanPlay={playerEvents.onCanPlay}
         onTimeUpdate={playerEvents.onTimeUpdate}
         onPlay={playerEvents.onPlay}
+        onPlaying={playerEvents.onPlaying}
         onPause={playerEvents.onPause}
         onDurationChange={playerEvents.onDurationChange}
         onProgress={playerEvents.onProgress}
@@ -732,6 +735,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           bufferedRanges={bufferedRanges}
           isInspecting={isInspecting}
           parsedMetadata={parsedMetadata}
+          liveResolution={liveResolution}
           volume={volume}
           muted={muted}
           playbackRate={playbackRate}

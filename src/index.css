@@ -247,6 +247,17 @@ media-player.object-cover video,
   object-fit: cover !important;
 }
 
+/* O base.css do Vidstack coloca height: 1000% no iframe do YouTube para tentar cortar a barra interna,
+   o que distorce/estica o vídeo fora de 16:9 fixo. Mantendo 100% × 100%, o próprio YouTube preserva a proporção exata. */
+[data-media-provider] iframe.vds-youtube,
+[data-media-provider] iframe.vds-youtube[data-no-controls],
+:fullscreen [data-media-provider] iframe.vds-youtube,
+.window-fullscreen [data-media-provider] iframe.vds-youtube {
+  width: 100% !important;
+  height: 100% !important;
+  aspect-ratio: unset !important;
+}
+
 canvas.JASSUB,
 :fullscreen canvas.JASSUB,
 .window-fullscreen canvas.JASSUB {

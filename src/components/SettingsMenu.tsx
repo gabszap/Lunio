@@ -77,7 +77,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
           id="settings-popover-panel"
           title={t('Ajustes')}
           onClose={() => onOpenChange(false)}
-          className="right-0 md:right-[-140px] w-[360px]"
+          className="right-0 w-[360px]"
         >
           <MenuSection title={t('Velocidade de reprodução')} value={formatRate(playbackRate)}>
             <Slider

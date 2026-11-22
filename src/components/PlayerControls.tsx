@@ -51,6 +51,8 @@ interface PlayerControlsProps {
   bufferedRanges?: { start: number; end: number }[];
   isInspecting?: boolean;
   parsedMetadata?: any;
+  /** Resolução detectada ao vivo (ex.: YouTube playbackQuality ou videoHeight real). */
+  liveResolution?: string | null;
   volume: number;
   muted: boolean;
   playbackRate: number;
@@ -211,6 +213,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   bufferedRanges,
   isInspecting,
   parsedMetadata,
+  liveResolution,
   volume,
   muted,
   playbackRate,
@@ -337,7 +340,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         </div>
 
         <div className="hidden sm:flex items-center gap-1.5 flex-none">
-          {parsedMetadata?.resolution && <Badge>{parsedMetadata.resolution}</Badge>}
+          {(liveResolution || parsedMetadata?.resolution) && <Badge>{liveResolution || parsedMetadata.resolution}</Badge>}
           {codecBadge && <Badge>{codecBadge}</Badge>}
           {volumeBoost > 100 && <Badge className="text-lu-success">Boost {volumeBoost}%</Badge>}
         </div>
@@ -514,7 +517,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   title={t('Legendas')}
                   meta={`${subtitles.length} ${subtitles.length === 1 ? 'faixa' : 'faixas'}`}
                   onClose={closeMenu}
-                  className="right-[-96px] w-[368px]"
+                  className="right-0 w-[368px]"
                 >
                   <div role="radiogroup" aria-label={t('Faixa de legenda')} className="flex flex-col gap-0.5">
                     <MenuItem
@@ -634,7 +637,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                     title={t('Faixas de áudio')}
                     meta={`${audioTracks.length} ${audioTracks.length === 1 ? 'faixa' : 'faixas'}`}
                     onClose={closeMenu}
-                    className="right-[-96px] w-[320px]"
+                    className="right-0 w-[320px]"
                   >
                     <div role="radiogroup" aria-label={t('Faixa de áudio')} className="flex flex-col gap-0.5 pb-1">
                       {audioTracks.map((trk) => (

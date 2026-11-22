@@ -190,6 +190,12 @@ test('volume boost e atraso do áudio conectam Web Audio real e atualizam GainNo
     await page.locator('#btn-settings-toggle').click();
     const panel = page.locator('#settings-popover-panel');
     await expect(panel).toBeVisible();
+    const playerBox = await page.locator('#video-player-root').boundingBox();
+    const panelBox = await panel.boundingBox();
+    expect(playerBox).not.toBeNull();
+    expect(panelBox).not.toBeNull();
+    expect(panelBox!.x + panelBox!.width).toBeLessThanOrEqual(playerBox!.x + playerBox!.width + 1);
+    expect(panelBox!.x).toBeGreaterThanOrEqual(playerBox!.x - 1);
 
     // Ativa Volume boost 200% e Atraso do áudio +250 ms
     await panel.getByRole('button', { name: '200%', exact: true }).click();

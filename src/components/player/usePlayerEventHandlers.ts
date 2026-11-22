@@ -48,6 +48,7 @@ export function usePlayerEventHandlers(args: {
 
   const onCanPlay = () => {
     setPlaybackError(null);
+    setIsBuffering(false);
     logger.info('[Player] Pronto para tocar');
     setReadiness((prev) => ({ ...prev, video: true, audio: true }));
 
@@ -109,6 +110,9 @@ export function usePlayerEventHandlers(args: {
     if (isSwitchingAudioRef.current) return;
     const t = typeof detail === 'number' ? detail : detail?.currentTime;
     if (t !== undefined && isFinite(t)) {
+      if (t > lastKnownTimeRef.current + 0.05) {
+        setIsBuffering(false);
+      }
       lastKnownTimeRef.current = t;
       setCurrentTime(t);
     }
@@ -118,6 +122,10 @@ export function usePlayerEventHandlers(args: {
     setIsBuffering(false);
     sessionManager.updateRunStatus('running');
     logger.action(`[Player] Play em ${formatTime(lastKnownTimeRef.current)}${isSwitchingAudioRef.current ? ' · áudio alternativo' : ''}`);
+  };
+  const onPlaying = () => {
+    setPaused(false);
+    setIsBuffering(false);
   };
   const onPause = () => {
     const videoEl = getVideoElement(playerRef);
@@ -226,5 +234,5 @@ export function usePlayerEventHandlers(args: {
     }
   };
 
-  return { onCanPlay, onTimeUpdate, onPlay, onPause, onDurationChange, onProgress, onWaiting, onError };
+  return { onCanPlay, onTimeUpdate, onPlay, onPlaying, onPause, onDurationChange, onProgress, onWaiting, onError };
 }

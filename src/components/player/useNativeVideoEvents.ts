@@ -7,6 +7,29 @@ import { sessionManager } from '../../lib/session';
 import { getProgressStorageKey } from './progress';
 import { reportProgress } from '../../lib/continueWatching';
 
+const YT_QUALITY_LABELS: Record<string, string> = {
+  highres: '4K+',
+  hd2160: '4K',
+  hd1440: '1440p',
+  hd1080: '1080p',
+  hd720: '720p',
+  large: '480p',
+  medium: '360p',
+  small: '240p',
+  tiny: '144p',
+};
+
+function formatVideoHeight(height: number): string | null {
+  if (!Number.isFinite(height) || height <= 0) return null;
+  if (height >= 2160) return '4K';
+  if (height >= 1440) return '1440p';
+  if (height >= 1080) return '1080p';
+  if (height >= 720) return '720p';
+  if (height >= 480) return '480p';
+  if (height >= 360) return '360p';
+  return `${Math.round(height)}p`;
+}
+
 /**
  * Ouve o <video> nativo (imune a dessincronias do Vidstack): tempo, buffer, pause/play, seek, capítulo atual,
  * progresso salvo e a recuperação do remux que "volta ao começo" depois de um pause.
@@ -31,13 +54,43 @@ export function useNativeVideoEvents(args: {
   setPaused: Dispatch<SetStateAction<boolean>>;
   setIsBuffering: Dispatch<SetStateAction<boolean>>;
   setResumePrompt: Dispatch<SetStateAction<{ time: number; formatted: string } | null>>;
+  setLiveResolution?: Dispatch<SetStateAction<string | null>>;
 }) {
   const {
     playerRef, resolvedStreamUrl, source, resumePrompt,
     isSwitchingAudioRef, audioOffsetRef, totalDurationRef, isExplicitSeekingRef, lastKnownTimeRef, wasPlayingBeforeSeekRef,
     handleSeekRef, currentChapterRef, normalizedChaptersRef,
-    setBuffered, setBufferedRanges, setCurrentTime, setPaused, setIsBuffering, setResumePrompt,
+    setBuffered, setBufferedRanges, setCurrentTime, setPaused, setIsBuffering, setResumePrompt, setLiveResolution,
   } = args;
+
+  // Detecta qualidade ao vivo no YouTube via postMessage oficial do iframe (onPlaybackQualityChange / infoDelivery)
+  useEffect(() => {
+    setLiveResolution?.(null);
+    if (!resolvedStreamUrl.startsWith('youtube/') || !setLiveResolution) return;
+    const onMessage = (event: MessageEvent) => {
+      if (typeof event.origin !== 'string' || !/^https:\/\/www\.youtube(-nocookie)?\.com$/i.test(event.origin)) return;
+      let payload: any = event.data;
+      if (typeof payload === 'string') {
+        try {
+          payload = JSON.parse(payload);
+        } catch {
+          return;
+        }
+      }
+      if (!payload || typeof payload !== 'object') return;
+      const rawQuality =
+        payload.event === 'onPlaybackQualityChange' && typeof payload.info === 'string'
+          ? payload.info
+          : typeof payload.info?.playbackQuality === 'string'
+          ? payload.info.playbackQuality
+          : null;
+      if (rawQuality && YT_QUALITY_LABELS[rawQuality]) {
+        setLiveResolution(YT_QUALITY_LABELS[rawQuality]);
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [resolvedStreamUrl, setLiveResolution]);
 
   // Sincronização direta e contínua do elemento <video> nativo (imune a dessincronias do Vidstack)
   useEffect(() => {
@@ -252,6 +305,11 @@ export function useNativeVideoEvents(args: {
     const onNativeProgress = () => {
       updateBufferInfo();
     };
+    const updateResolution = () => {
+      if (!videoEl || !setLiveResolution) return;
+      const label = formatVideoHeight(videoEl.videoHeight);
+      if (label) setLiveResolution(label);
+    };
 
 
     const attachListeners = () => {
@@ -274,7 +332,10 @@ export function useNativeVideoEvents(args: {
       videoEl.addEventListener('seeked', onNativeSeeked);
       videoEl.addEventListener('canplay', onNativeCanPlay);
       videoEl.addEventListener('progress', onNativeProgress);
+      videoEl.addEventListener('loadedmetadata', updateResolution);
+      videoEl.addEventListener('resize', updateResolution);
       updateBufferInfo();
+      updateResolution();
     };
 
     attachListeners();
@@ -292,6 +353,8 @@ export function useNativeVideoEvents(args: {
         videoEl.removeEventListener('seeked', onNativeSeeked);
         videoEl.removeEventListener('canplay', onNativeCanPlay);
         videoEl.removeEventListener('progress', onNativeProgress);
+        videoEl.removeEventListener('loadedmetadata', updateResolution);
+        videoEl.removeEventListener('resize', updateResolution);
       }
     };
   }, [resolvedStreamUrl]);
