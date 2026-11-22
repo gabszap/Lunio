@@ -466,29 +466,36 @@ export default function App() {
     }
   };
 
-  /** Fila da sala: o Host toca um item (o servidor tira da fila; o vídeo vai para todos como um media:set normal). */
-  const playPlaylistItem = (item: PlaylistItem) => {
-    if (!syncManager.isRoomHost()) return;
-    syncManager.emitPlaylistTake(item.id);
-    const payload: MediaPayload = {
-      url: item.url,
-      title: item.title,
-      mimeType: item.mimeType,
-      chapters: [],
-      subtitles: [],
-      audioTracks: [],
-      // O link pode ser só um id (item de outra pessoa): o tipo vem do que quem adicionou informou
-      isMkv: /matroska/i.test(item.mimeType || '') || /\.mkv|torrentio/i.test(item.url),
-      fingerprint: item.fingerprint,
-    };
-    logger.info(`[Fila] Tocando "${item.title}"`);
-    setPendingSubtitles([]);
-    setAutoPlayNext(true);
-    updateSeriesContext(null); // item da fila não vem do catálogo: sem menu de episódios
-    startPlayback(null);
-    setCurrentPayload(payload);
-    emitCurrentMedia(payload);
-  };
+  /** Carrega um item vindo da fila ou de um pedido aprovado com playNow. */
+  const loadQueuedItem = useCallback(
+    (item: PlaylistItem, takeFromQueue: boolean) => {
+      if (!syncManager.isRoomHost()) return;
+      if (takeFromQueue) syncManager.emitPlaylistTake(item.id);
+      const payload: MediaPayload = {
+        url: item.url,
+        title: item.title,
+        mimeType: item.mimeType,
+        chapters: [],
+        subtitles: [],
+        audioTracks: [],
+        // O link pode ser só um id (item de outra pessoa): o tipo vem do que quem adicionou informou
+        isMkv: /matroska/i.test(item.mimeType || '') || /\.mkv|torrentio/i.test(item.url),
+        fingerprint: item.fingerprint,
+      };
+      logger.info(`[Fila] Tocando "${item.title}"`);
+      setPendingSubtitles([]);
+      setAutoPlayNext(true);
+      updateSeriesContext(null); // item da fila não vem do catálogo: sem menu de episódios
+      startPlayback(null);
+      setCurrentPayload(payload);
+      emitCurrentMedia(payload);
+    },
+    [updateSeriesContext]
+  );
+
+  const playPlaylistItem = useCallback((item: PlaylistItem) => loadQueuedItem(item, true), [loadQueuedItem]);
+
+  useEffect(() => syncManager.subscribeRequestPlay((item) => loadQueuedItem(item, false)), [loadQueuedItem]);
 
   // Watch Party modal (aberto pelo painel quando você está sozinho)
   const handleCreateRoom = (code: string, username: string) => {

@@ -14,6 +14,8 @@ export interface PersistedRoom {
   v: 1;
   roomId: string;
   hostId: string;
+  /** Quando a sala foi criada (ms). JSONs antigos sem o campo fazem fallback para `savedAt`. */
+  createdAt?: number;
   media: RoomMedia | null;
   playlist: PlaylistItem[];
   bans: BannedMember[];
@@ -82,8 +84,9 @@ export function parsePersistedRoom(raw: unknown): PersistedRoom | null {
   const p = (r.playback ?? {}) as Record<string, unknown>;
   const rate = typeof p.rate === 'number' && p.rate > 0 && p.rate <= 4 ? p.rate : 1;
   const position = typeof p.position === 'number' && p.position >= 0 && Number.isFinite(p.position) ? p.position : 0;
+  const createdAt = typeof r.createdAt === 'number' && Number.isFinite(r.createdAt) && r.createdAt > 0 ? r.createdAt : r.savedAt;
 
-  return { v: 1, roomId: r.roomId, hostId: r.hostId, media, playlist, bans, playback: { playing: p.playing === true, position, rate }, savedAt: r.savedAt };
+  return { v: 1, roomId: r.roomId, hostId: r.hostId, createdAt, media, playlist, bans, playback: { playing: p.playing === true, position, rate }, savedAt: r.savedAt };
 }
 
 /** O Redis como armazém: um JSON por sala (leitura e escrita atômicas, sem corrida entre teclas) com validade. */

@@ -86,6 +86,7 @@ class SyncManager implements ScreenSignals {
   private mediaListeners = new Set<MediaSyncListener>();
   private chatListeners = new Set<ChatListener>();
   private errorListeners = new Set<ErrorListener>();
+  private requestPlayListeners = new Set<(item: PlaylistItem) => void>();
   private chatHistory: ChatMessage[] = [];
   private getCurrentTimeCallback: (() => number) | null = null;
 
@@ -598,6 +599,18 @@ class SyncManager implements ScreenSignals {
         break;
       }
 
+      case 'requests:update': {
+        if (!this.roomState) return;
+        this.roomState.requests = msg.requests;
+        this.notifyState();
+        break;
+      }
+
+      case 'request:play': {
+        for (const listener of [...this.requestPlayListeners]) listener(msg.item);
+        break;
+      }
+
       case 'members:update': {
         if (!this.roomState) return;
         this.roomState.members = msg.members;
@@ -797,8 +810,36 @@ class SyncManager implements ScreenSignals {
     });
   }
 
+  public getServerNow(): number {
+    return this.clock.now();
+  }
+
   public getPlaylist(): PlaylistItem[] {
     return this.roomState?.playlist || [];
+  }
+
+  public getRequests(): PlaylistItem[] {
+    return this.roomState?.requests || [];
+  }
+
+  public emitRequestAdd(item: { url: string; title: string; mimeType?: string; fingerprint?: string }) {
+    if (!this.isConnected) return;
+    this.send({ type: 'request:add', ...item });
+  }
+
+  public emitRequestRemove(itemId: string) {
+    if (!this.isConnected) return;
+    this.send({ type: 'request:remove', itemId });
+  }
+
+  public emitRequestApprove(itemId: string, playNow?: boolean) {
+    if (!this.isConnected || !this.isRoomHost()) return;
+    this.send({ type: 'request:approve', itemId, playNow });
+  }
+
+  public subscribeRequestPlay(listener: (item: PlaylistItem) => void): () => void {
+    this.requestPlayListeners.add(listener);
+    return () => this.requestPlayListeners.delete(listener);
   }
 
   public emitPlaylistAdd(item: { url: string; title: string; mimeType?: string; fingerprint?: string }) {

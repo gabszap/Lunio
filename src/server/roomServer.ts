@@ -4,7 +4,7 @@ import type { Server as HttpsServer } from 'node:https';
 import { issueRoomToken } from './access';
 import { config } from './config';
 import { isOriginAllowed } from './cors';
-import { PLAYLIST_MAX_ITEMS, playlistUrlKey } from '../types/sync';
+import { PLAYLIST_MAX_ITEMS, REQUESTS_MAX_ITEMS, playlistUrlKey } from '../types/sync';
 import { warmUpMedia } from './media/resolver';
 import { pruneRoomUploads, uploadIdFromUrl } from './media/uploads';
 import { uploadIndex } from './media/uploadIndex';
@@ -49,8 +49,10 @@ interface ClientSession {
 interface RoomInternal {
   roomId: string;
   hostId: string;
+  createdAt: number;
   media: RoomMedia | null;
   playlist: PlaylistItem[];
+  requests: PlaylistItem[];
   playback: {
     playing: boolean;
     position: number;
@@ -100,7 +102,7 @@ const BEHIND_BROADCAST_GAP_MS = 2000;
 
 /** Mensagens que mudam o que o Redis guarda (Host, banidos, fila, vídeo e posição). */
 const PERSISTED_MESSAGES = new Set<string>([
-  'playlist:add', 'playlist:remove', 'playlist:move', 'playlist:take', 'media:set',
+  'playlist:add', 'playlist:remove', 'playlist:move', 'playlist:take', 'request:approve', 'media:set',
   'room:transfer_host', 'room:ban', 'room:unban',
   'playback:play', 'playback:pause', 'playback:seek', 'playback:rate', 'playback:timeline',
 ]);
@@ -294,16 +296,19 @@ export class RoomManager {
   public getOrCreateRoom(roomId: string, initialHostId?: string): RoomInternal {
     let room = this.rooms.get(roomId);
     if (!room) {
+      const now = Date.now();
       room = {
         roomId,
         hostId: initialHostId || '',
+        createdAt: now,
         media: null,
         playlist: [],
+        requests: [],
         playback: {
           playing: false,
           position: 0,
           rate: 1.0,
-          updatedAt: Date.now(),
+          updatedAt: now,
         },
         clients: new Map(),
         chatHistory: [],
@@ -347,8 +352,10 @@ export class RoomManager {
     return {
       roomId: room.roomId,
       hostId: room.hostId,
+      createdAt: room.createdAt,
       media: room.media,
       playlist: room.playlist,
+      requests: room.requests,
       playback: {
         playing: room.playback.playing,
         position: currentPos,
@@ -631,6 +638,7 @@ export class RoomManager {
       v: 1,
       roomId: room.roomId,
       hostId: room.hostId,
+      createdAt: room.createdAt,
       media: room.media,
       playlist: room.playlist,
       bans: Array.from(room.bannedMembers.values()),
@@ -685,8 +693,10 @@ export class RoomManager {
       const room: RoomInternal = {
         roomId: p.roomId,
         hostId: p.hostId,
+        createdAt: p.createdAt ?? p.savedAt,
         media: p.media,
         playlist: p.playlist,
+        requests: [],
         playback: { playing, position: p.playback.position + (playing ? (downtime / 1000) * p.playback.rate : 0), rate: p.playback.rate, updatedAt: now },
         clients: new Map(),
         chatHistory: [],
@@ -983,6 +993,7 @@ export class RoomManager {
       }
 
       case 'playlist:add': {
+        if (!isHost) return;
         const url = typeof msg.url === 'string' ? msg.url.trim() : '';
         if (!/^https?:\/\//i.test(url) || url.length > 4096) return;
         if (currentRoom.playlist.length >= PLAYLIST_MAX_ITEMS) return;
@@ -1003,6 +1014,70 @@ export class RoomManager {
         // isso acontecer agora, sem ninguém esperando, do que na hora de tocar
         if (!/youtube/i.test(msg.mimeType || '')) warmUpMedia(url);
         this.broadcast(currentRoom, { type: 'playlist:update', playlist: currentRoom.playlist });
+        break;
+      }
+
+      case 'request:add': {
+        const url = typeof msg.url === 'string' ? msg.url.trim() : '';
+        if (!/^https?:\/\//i.test(url) || url.length > 4096) return;
+        if (currentRoom.requests.length >= REQUESTS_MAX_ITEMS) return;
+        const key = playlistUrlKey(url);
+        if (
+          currentRoom.requests.some((i) => playlistUrlKey(i.url) === key) ||
+          currentRoom.playlist.some((i) => playlistUrlKey(i.url) === key)
+        ) {
+          return;
+        }
+        const title = (typeof msg.title === 'string' ? msg.title.trim() : '').slice(0, 200) || 'Vídeo';
+        currentRoom.requests.push({
+          id: `rq_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+          url,
+          title,
+          mimeType: typeof msg.mimeType === 'string' ? msg.mimeType.slice(0, 100) : undefined,
+          fingerprint: typeof msg.fingerprint === 'string' && FINGERPRINT_RE.test(msg.fingerprint) ? msg.fingerprint : undefined,
+          addedById: clientSession.userId,
+          addedBy: clientSession.username,
+        });
+        this.sendSystemChat(currentRoom, `${clientSession.username} pediu: "${title}"`);
+        this.broadcast(currentRoom, { type: 'requests:update', requests: currentRoom.requests });
+        break;
+      }
+
+      case 'request:remove': {
+        const item = currentRoom.requests.find((i) => i.id === msg.itemId);
+        if (!item || (!isHost && item.addedById !== clientSession.userId)) return;
+        currentRoom.requests = currentRoom.requests.filter((i) => i.id !== item.id);
+        this.broadcast(currentRoom, { type: 'requests:update', requests: currentRoom.requests });
+        break;
+      }
+
+      case 'request:approve': {
+        if (!isHost) return;
+        const req = currentRoom.requests.find((i) => i.id === msg.itemId);
+        if (!req) return;
+        if (msg.playNow) {
+          // Guarda em takenLinks antes de remover de requests para que o envio ao Host e o media:set seguinte usem lk_…
+          currentRoom.takenLinks = [
+            ...this.linksFor(currentRoom).filter((l) => l.url === req.url).map((l) => ({ ...l, at: Date.now() })),
+            ...currentRoom.takenLinks,
+          ].slice(0, 5);
+          currentRoom.requests = currentRoom.requests.filter((i) => i.id !== req.id);
+          this.broadcast(currentRoom, { type: 'requests:update', requests: currentRoom.requests });
+          this.send(ws, { type: 'request:play', item: req });
+          break;
+        }
+        currentRoom.requests = currentRoom.requests.filter((i) => i.id !== req.id);
+        const key = playlistUrlKey(req.url);
+        if (
+          currentRoom.playlist.length < PLAYLIST_MAX_ITEMS &&
+          !currentRoom.playlist.some((i) => playlistUrlKey(i.url) === key)
+        ) {
+          currentRoom.playlist.push({ ...req });
+          if (!/youtube/i.test(req.mimeType || '')) warmUpMedia(req.url);
+          this.sendSystemChat(currentRoom, `➕ ${clientSession.username} aprovou para a fila: "${req.title}"`);
+          this.broadcast(currentRoom, { type: 'playlist:update', playlist: currentRoom.playlist });
+        }
+        this.broadcast(currentRoom, { type: 'requests:update', requests: currentRoom.requests });
         break;
       }
 

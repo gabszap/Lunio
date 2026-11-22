@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Ban, Crown, PenLine, Shield, UserMinus, UserX } from 'lucide-react';
+import { ArrowRight, Ban, Crown, Eye, PenLine, Shield, UserMinus, UserX } from 'lucide-react';
 import { t } from '../../lib/i18n';
 import { roomCodeFrom } from '../../lib/roomCode';
 import { syncManager } from '../../lib/sync';
@@ -85,6 +85,13 @@ export const MembersTab: React.FC<MembersTabProps> = ({ members, roomState, curr
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-4 py-3.5 flex flex-col gap-3.5">
+      <div className="flex items-center justify-between text-[13px] text-lu-muted px-0.5">
+        <span className="inline-flex items-center gap-2 text-lu-text font-medium">
+          {isHost ? <Crown size={15} className="text-lu-accent" /> : <Eye size={15} className="text-lu-muted" />}
+          {isHost ? t('Você é o Host') : t('Você é espectador')}
+        </span>
+      </div>
+
       {/* Seu apelido */}
       <div className="p-3 pl-3.5 rounded-[14px] bg-lu-surface border border-lu-border">
         {isEditingProfile ? (

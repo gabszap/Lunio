@@ -6,7 +6,7 @@ import type { RecentStream } from '../../lib/recent';
 import type { StreamOption } from '../../lib/streams';
 import type { CatalogRef } from '../../lib/continueWatching';
 import type { CatalogSeriesContext } from '../../types/media';
-import { PLAYLIST_MAX_ITEMS, type PlaylistItem, type RoomState } from '../../types/sync';
+import { PLAYLIST_MAX_ITEMS, REQUESTS_MAX_ITEMS, type PlaylistItem, type RoomState } from '../../types/sync';
 import type { SourceCommit } from '../home/types';
 import { PlayerConsole } from '../PlayerConsole';
 import { useScreenShare } from '../player/ScreenShareContext';
@@ -138,17 +138,34 @@ export const RoomShell: React.FC<RoomShellProps> = ({
   const handleSubmitUrl = useCallback(
     async (raw: string): Promise<string | null> => {
       const playlist = syncManager.getPlaylist();
-      const existing = playlist.map((p) => p.url);
-      const res = await prepareMediaLink(raw, existing, PLAYLIST_MAX_ITEMS);
+      const requests = syncManager.getRequests();
+      if (room.isHost) {
+        const res = await prepareMediaLink(
+          raw,
+          playlist.map((p) => p.url),
+          PLAYLIST_MAX_ITEMS
+        );
+        if ('error' in res) return res.error;
+        syncManager.emitPlaylistAdd(res.item);
+        if (sidebarOpen) onSidebarTabChange('queue');
+        return null;
+      }
+      const res = await prepareMediaLink(
+        raw,
+        [...requests.map((r) => r.url), ...playlist.map((p) => p.url)],
+        REQUESTS_MAX_ITEMS + playlist.length
+      );
       if ('error' in res) return res.error;
-      syncManager.emitPlaylistAdd(res.item);
-      if (sidebarOpen) onSidebarTabChange('queue');
+      if (requests.length >= REQUESTS_MAX_ITEMS) return t('A lista de pedidos está cheia.');
+      syncManager.emitRequestAdd(res.item);
+      if (sidebarOpen) onSidebarTabChange('requests');
       return null;
     },
-    [sidebarOpen, onSidebarTabChange]
+    [room.isHost, sidebarOpen, onSidebarTabChange]
   );
 
-  const createdAt = (roomState as (RoomState & { createdAt?: number }) | null)?.createdAt ?? fallbackJoinedAt;
+  const createdAt = roomState?.createdAt ?? fallbackJoinedAt;
+  const serverNow = useCallback(() => syncManager.getServerNow(), []);
 
   const dockProps = {
     connected: room.connected,
@@ -170,6 +187,8 @@ export const RoomShell: React.FC<RoomShellProps> = ({
     onClose: onCloseSidebar,
     onOpenRoomLobby,
     onPlayQueueItem,
+    onApproveRequest: (item: PlaylistItem, playNow?: boolean) => syncManager.emitRequestApprove(item.id, playNow),
+    onRemoveRequest: (itemId: string) => syncManager.emitRequestRemove(itemId),
     unreadChat,
     focusMemberId,
   };
@@ -181,6 +200,7 @@ export const RoomShell: React.FC<RoomShellProps> = ({
         connected={room.connected}
         environment={environment}
         createdAt={createdAt}
+        now={serverNow}
         isHost={room.isHost}
         sidebarOpen={sidebarOpen}
         unreadChat={unreadChat}
