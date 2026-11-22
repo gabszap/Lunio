@@ -216,22 +216,42 @@ test('volume boost e atraso do áudio conectam Web Audio real e atualizam GainNo
   }
 });
 
-test('abas da Home (Catálogo / Sala / Status) têm indicador deslizante animado', async ({ browser }) => {
+test('abas da Home e da barra lateral da sala animam indicador deslizante e troca de menus', async ({ browser }) => {
   const { page, context } = await newUser(browser);
   try {
     await page.goto('/');
     const indicator = page.locator('.lu-pill-indicator').first();
     await expect(indicator).toBeVisible();
 
-    const clipCatalog = await indicator.evaluate((el) => getComputedStyle(el).clipPath);
-    expect(clipCatalog).toContain('inset(');
+    const clipInitialHome = await indicator.evaluate((el) => getComputedStyle(el).clipPath);
+    expect(clipInitialHome).toContain('inset(');
+
+    // Home abre em "Sala": Sala → Status (direita) → Catálogo (esquerda) → Sala (direita)
+    await page.getByRole('tab', { name: 'Status' }).click();
+    await expect.poll(() => indicator.evaluate((el) => getComputedStyle(el).clipPath)).not.toBe(clipInitialHome);
+    await expect(page.locator('main')).toHaveClass(/lu-tab-panel-right/);
+
+    await page.getByRole('tab', { name: 'Catálogo' }).click();
+    await expect(page.locator('main')).toHaveClass(/lu-tab-panel-left/);
 
     await page.getByRole('tab', { name: 'Sala' }).click();
-    await expect.poll(() => indicator.evaluate((el) => getComputedStyle(el).clipPath)).not.toBe(clipCatalog);
-    const clipRoom = await indicator.evaluate((el) => getComputedStyle(el).clipPath);
+    await expect(page.locator('main')).toHaveClass(/lu-tab-panel-right/);
 
-    await page.getByRole('tab', { name: 'Status' }).click();
-    await expect.poll(() => indicator.evaluate((el) => getComputedStyle(el).clipPath)).not.toBe(clipRoom);
+    // Sala: indicador deslizante + transição direcional nas abas da barra lateral (Pedidos / Fila / Chat / Membros)
+    await createRoom(page, 'Ana', FIXTURE_URL);
+    const sidebar = page.locator('aside[aria-label="Watch Party"]');
+    const sidebarIndicator = sidebar.locator('.lu-pill-indicator').first();
+    await expect(sidebarIndicator).toBeVisible();
+
+    const clipInitial = await sidebarIndicator.evaluate((el) => getComputedStyle(el).clipPath);
+    expect(clipInitial).toContain('inset(');
+
+    await sidebar.getByRole('tab', { name: /Membros/ }).click();
+    await expect.poll(() => sidebarIndicator.evaluate((el) => getComputedStyle(el).clipPath)).not.toBe(clipInitial);
+    await expect(sidebar.locator('.lu-tab-panel-right')).toBeVisible();
+
+    await sidebar.getByRole('tab', { name: /Pedidos/ }).click();
+    await expect(sidebar.locator('.lu-tab-panel-left')).toBeVisible();
   } finally {
     await context.close();
   }

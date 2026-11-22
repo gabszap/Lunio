@@ -274,6 +274,54 @@ export function Segmented<T extends string>({
   );
 }
 
+/** Calcula `clip-path: inset(...)` do indicador deslizante acompanhando o botão ativo e redimensionamentos. */
+export function useSlidingPill<T extends string>(activeKey: T, radius: number, layoutKey?: string | number) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const buttonRefs = useRef<Map<T, HTMLButtonElement>>(new Map());
+  const [clipPath, setClipPath] = useState<string | null>(null);
+  const [animated, setAnimated] = useState(false);
+
+  const measure = useCallback(() => {
+    const list = listRef.current;
+    const activeBtn = buttonRefs.current.get(activeKey);
+    if (!list || !activeBtn) return;
+    const w = list.clientWidth;
+    const h = list.clientHeight;
+    if (w <= 0 || h <= 0) return;
+    const top = Math.max(0, activeBtn.offsetTop);
+    const left = Math.max(0, activeBtn.offsetLeft);
+    const right = Math.max(0, w - (left + activeBtn.offsetWidth));
+    const bottom = Math.max(0, h - (top + activeBtn.offsetHeight));
+    setClipPath(`inset(${top}px ${right}px ${bottom}px ${left}px round ${radius}px)`);
+  }, [activeKey, radius]);
+
+  useLayoutEffect(() => {
+    measure();
+    if (!animated) {
+      const id = requestAnimationFrame(() => setAnimated(true));
+      return () => cancelAnimationFrame(id);
+    }
+  }, [measure, animated, layoutKey]);
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(list);
+    return () => ro.disconnect();
+  }, [measure]);
+
+  const setButtonRef = useCallback(
+    (key: T) => (el: HTMLButtonElement | null) => {
+      if (el) buttonRefs.current.set(key, el);
+      else buttonRefs.current.delete(key);
+    },
+    []
+  );
+
+  return { listRef, clipPath, animated, setButtonRef };
+}
+
 /** Abas em "pílula" do cabeçalho (Catálogo / Sala / Status) e filtros (Temporadas, Tudo/Filmes/Séries). */
 export function PillTabs<T extends string>({
   value,
@@ -288,42 +336,8 @@ export function PillTabs<T extends string>({
   size?: 'lg' | 'sm';
   label: string;
 }) {
-  const listRef = useRef<HTMLDivElement>(null);
-  const buttonRefs = useRef<Map<T, HTMLButtonElement>>(new Map());
-  const [clipPath, setClipPath] = useState<string | null>(null);
-  const [animated, setAnimated] = useState(false);
-
   const radius = size === 'lg' ? 10 : 8;
-
-  const measure = useCallback(() => {
-    const list = listRef.current;
-    const activeBtn = buttonRefs.current.get(value);
-    if (!list || !activeBtn) return;
-    const w = list.clientWidth;
-    const h = list.clientHeight;
-    if (w <= 0 || h <= 0) return;
-    const top = Math.max(0, activeBtn.offsetTop);
-    const left = Math.max(0, activeBtn.offsetLeft);
-    const right = Math.max(0, w - (left + activeBtn.offsetWidth));
-    const bottom = Math.max(0, h - (top + activeBtn.offsetHeight));
-    setClipPath(`inset(${top}px ${right}px ${bottom}px ${left}px round ${radius}px)`);
-  }, [value, radius]);
-
-  useLayoutEffect(() => {
-    measure();
-    if (!animated) {
-      const id = requestAnimationFrame(() => setAnimated(true));
-      return () => cancelAnimationFrame(id);
-    }
-  }, [measure, animated, options.length]);
-
-  useEffect(() => {
-    const list = listRef.current;
-    if (!list || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => measure());
-    ro.observe(list);
-    return () => ro.disconnect();
-  }, [measure]);
+  const { listRef, clipPath, animated, setButtonRef } = useSlidingPill(value, radius, options.length);
 
   return (
     <div
@@ -347,10 +361,7 @@ export function PillTabs<T extends string>({
         return (
           <button
             key={opt.value}
-            ref={(el) => {
-              if (el) buttonRefs.current.set(opt.value, el);
-              else buttonRefs.current.delete(opt.value);
-            }}
+            ref={setButtonRef(opt.value)}
             type="button"
             role="tab"
             aria-selected={selected}

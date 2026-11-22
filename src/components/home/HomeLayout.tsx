@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Activity, Github, LayoutGrid, Users } from 'lucide-react';
 import { Logo, PillTabs, cx } from '../ui';
 import { LANGS, setLang, t, msg, useLang } from '../../lib/i18n';
 
 export type HomeTab = 'catalog' | 'room' | 'status';
+
+const TAB_ORDER: Record<HomeTab, number> = { catalog: 0, room: 1, status: 2 };
 
 export const REPO_URL = 'https://github.com/gabszap/Lunio';
 
@@ -50,8 +52,22 @@ const LanguageSwitch: React.FC = () => {
   );
 };
 
-export const HomeLayout: React.FC<HomeLayoutProps> = ({ tab, onTabChange, onLogo, children, centered }) => (
-  <div className={cx('relative min-h-screen flex flex-col', tab === 'catalog' ? 'lu-catalog-bg' : 'lu-home-bg')}>
+export const HomeLayout: React.FC<HomeLayoutProps> = ({ tab, onTabChange, onLogo, children, centered }) => {
+  const prevTabRef = useRef<HomeTab>(tab);
+  const directionRef = useRef<'right' | 'left' | null>(null);
+  if (prevTabRef.current !== tab) {
+    directionRef.current = TAB_ORDER[tab] >= TAB_ORDER[prevTabRef.current] ? 'right' : 'left';
+    prevTabRef.current = tab;
+  }
+  const panelAnimClass =
+    directionRef.current === 'right'
+      ? 'lu-tab-panel-right'
+      : directionRef.current === 'left'
+      ? 'lu-tab-panel-left'
+      : undefined;
+
+  return (
+  <div className={cx('relative min-h-screen flex flex-col overflow-x-clip', tab === 'catalog' ? 'lu-catalog-bg' : 'lu-home-bg')}>
     <header className="relative z-10 grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_auto_1fr] items-center gap-y-3 px-4 sm:px-8 pt-4 sm:pt-0 sm:h-20">
       <Logo onClick={onLogo} />
 
@@ -83,12 +99,15 @@ export const HomeLayout: React.FC<HomeLayoutProps> = ({ tab, onTabChange, onLogo
     </header>
 
     <main
+      key={tab}
       className={cx(
         'relative flex-1 flex flex-col',
-        centered ? 'items-center justify-center gap-7 px-4 sm:px-8 pt-6 pb-12' : 'px-4 sm:px-12 pt-6 pb-16'
+        centered ? 'items-center justify-center gap-7 px-4 sm:px-8 pt-6 pb-12' : 'px-4 sm:px-12 pt-6 pb-16',
+        panelAnimClass
       )}
     >
       {children}
     </main>
   </div>
-);
+  );
+};

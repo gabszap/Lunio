@@ -1,15 +1,22 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Users, X } from 'lucide-react';
 import { t } from '../../lib/i18n';
 import { syncManager } from '../../lib/sync';
 import type { ChatMessage, PlaylistItem, RoomState } from '../../types/sync';
-import { IconButton, PrimaryButton, cx } from '../ui';
+import { IconButton, PrimaryButton, cx, useSlidingPill } from '../ui';
 import { ChatTab } from './ChatTab';
 import { MembersTab } from './MembersTab';
 import { QueueTab } from './QueueTab';
 import { RequestsTab } from './RequestsTab';
 
 export type RoomSidebarTab = 'requests' | 'queue' | 'chat' | 'members';
+
+const SIDEBAR_TAB_ORDER: Record<RoomSidebarTab, number> = {
+  requests: 0,
+  queue: 1,
+  chat: 2,
+  members: 3,
+};
 
 export interface RoomSidebarProps {
   open: boolean;
@@ -70,6 +77,22 @@ export const RoomSidebar: React.FC<RoomSidebarProps> = ({
   const members = roomState?.members || [];
   const queueCount = roomState?.playlist?.length ?? syncManager.getPlaylist().length;
   const requests = (roomState as (RoomState & { requests?: PlaylistItem[] }) | null)?.requests ?? [];
+
+  const prevTabRef = useRef<RoomSidebarTab>(activeTab);
+  const directionRef = useRef<'right' | 'left' | null>(null);
+  if (prevTabRef.current !== activeTab) {
+    directionRef.current = SIDEBAR_TAB_ORDER[activeTab] >= SIDEBAR_TAB_ORDER[prevTabRef.current] ? 'right' : 'left';
+    prevTabRef.current = activeTab;
+  }
+  const panelAnimClass =
+    directionRef.current === 'right'
+      ? 'lu-tab-panel-right'
+      : directionRef.current === 'left'
+      ? 'lu-tab-panel-left'
+      : undefined;
+
+  const pillLayoutKey = `${open ? 1 : 0}:${status.isConnected ? 1 : 0}:${requests.length}:${queueCount}:${unreadChat}:${members.length}`;
+  const { listRef, clipPath, animated, setButtonRef } = useSlidingPill(activeTab, 8, pillLayoutKey);
 
   const tabs: Array<{ id: RoomSidebarTab; label: string; count?: number; accentBadge?: boolean }> = [
     { id: 'requests', label: t('Pedidos'), count: requests.length > 0 ? requests.length : undefined, accentBadge: true },
@@ -134,21 +157,29 @@ export const RoomSidebar: React.FC<RoomSidebarProps> = ({
       ) : (
         <>
           <div className="p-2 border-b border-lu-border flex-none">
-            <div role="tablist" aria-label={t('Watch Party')} className="flex items-center gap-1 p-1 rounded-[12px] bg-lu-bg">
+            <div ref={listRef} role="tablist" aria-label={t('Watch Party')} className="relative flex items-center gap-1 p-1 rounded-[12px] bg-lu-bg">
+              {clipPath && (
+                <span
+                  aria-hidden="true"
+                  className={cx('lu-pill-indicator', animated && 'lu-pill-indicator-animated')}
+                  style={{ clipPath }}
+                />
+              )}
               {tabs.map((tab) => {
                 const selected = activeTab === tab.id;
                 return (
                   <button
                     key={tab.id}
+                    ref={setButtonRef(tab.id)}
                     type="button"
                     role="tab"
                     aria-selected={selected}
                     onClick={() => onTabChange(tab.id)}
                     className={cx(
-                      'appearance-none flex-auto inline-flex items-center justify-center gap-1.5 h-8 px-2 rounded-[8px] text-[12px] font-[inherit] whitespace-nowrap transition-colors',
+                      'lu-pill-btn relative z-10 appearance-none flex-auto inline-flex items-center justify-center gap-1.5 h-8 px-2 rounded-[8px] text-[12px] font-[inherit] whitespace-nowrap',
                       selected
-                        ? 'bg-lu-tint text-lu-accent font-semibold'
-                        : 'bg-transparent text-lu-muted font-medium hover:bg-white/6 hover:text-lu-text'
+                        ? cx('text-lu-accent font-semibold', !clipPath && 'bg-lu-tint')
+                        : 'bg-transparent text-lu-muted font-medium'
                     )}
                   >
                     <span>{tab.label}</span>
@@ -171,19 +202,25 @@ export const RoomSidebar: React.FC<RoomSidebarProps> = ({
           </div>
 
           {activeTab === 'requests' && (
-            <RequestsTab
-              requests={requests}
-              isHost={isHost}
-              currentUserId={currentUser.id}
-              onApprove={onApproveRequest}
-              onRemove={onRemoveRequest}
-            />
+            <div key="requests" className={cx('flex-1 min-h-0 flex flex-col', panelAnimClass)}>
+              <RequestsTab
+                requests={requests}
+                isHost={isHost}
+                currentUserId={currentUser.id}
+                onApprove={onApproveRequest}
+                onRemove={onRemoveRequest}
+              />
+            </div>
           )}
 
-          {activeTab === 'queue' && <QueueTab onPlayItem={onPlayQueueItem} />}
+          {activeTab === 'queue' && (
+            <div key="queue" className={cx('flex-1 min-h-0 flex flex-col', panelAnimClass)}>
+              <QueueTab onPlayItem={onPlayQueueItem} />
+            </div>
+          )}
 
           {/* Mantém ChatTab montado quando oculto para preservar o rascunho digitado ao trocar de aba */}
-          <div className={activeTab === 'chat' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
+          <div className={activeTab === 'chat' ? cx('flex-1 min-h-0 flex flex-col', panelAnimClass) : 'hidden'}>
             <ChatTab
               messages={chatMessages}
               members={members}
@@ -193,13 +230,15 @@ export const RoomSidebar: React.FC<RoomSidebarProps> = ({
           </div>
 
           {activeTab === 'members' && (
-            <MembersTab
-              members={members}
-              roomState={roomState}
-              currentUser={currentUser}
-              isHost={isHost}
-              focusMemberId={focusMemberId}
-            />
+            <div key="members" className={cx('flex-1 min-h-0 flex flex-col', panelAnimClass)}>
+              <MembersTab
+                members={members}
+                roomState={roomState}
+                currentUser={currentUser}
+                isHost={isHost}
+                focusMemberId={focusMemberId}
+              />
+            </div>
           )}
         </>
       )}
