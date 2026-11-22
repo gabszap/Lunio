@@ -375,11 +375,11 @@ html.is-fullscreen .player-menu-panel {
 }
 
 .lu-tab-panel-right {
-  animation: lu-tab-enter-right 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: lu-tab-enter-right 260ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 .lu-tab-panel-left {
-  animation: lu-tab-enter-left 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: lu-tab-enter-left 260ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 @keyframes lu-view-enter {
@@ -394,7 +394,7 @@ html.is-fullscreen .player-menu-panel {
 }
 
 .lu-view-enter {
-  animation: lu-view-enter 250ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: lu-view-enter 250ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 @keyframes lu-modal-backdrop-enter {
@@ -418,11 +418,11 @@ html.is-fullscreen .player-menu-panel {
 }
 
 .lu-modal-backdrop-enter {
-  animation: lu-modal-backdrop-enter 180ms ease both;
+  animation: lu-modal-backdrop-enter 180ms ease backwards;
 }
 
 .lu-modal-enter {
-  animation: lu-modal-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: lu-modal-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 .lu-source-card {

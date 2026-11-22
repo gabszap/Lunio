@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, X } from 'lucide-react';
 import { t } from '../lib/i18n';
 
@@ -108,7 +109,7 @@ export const TextButton: React.FC<ButtonProps & { tone?: 'muted' | 'accent' | 't
     {...rest}
     className={cx(
       baseBtn,
-      'justify-center gap-1.5 rounded-[10px] bg-transparent hover:bg-white/8 disabled:opacity-40',
+      'justify-center gap-1.5 rounded-[10px] bg-transparent hover:bg-white/8 transition-[background-color,color,transform] duration-150 active:scale-[0.97] disabled:opacity-40 disabled:active:scale-100',
       size === 'md' ? 'h-11 px-3 text-[14px]' : 'h-9 px-2.5 text-[13px]',
       tone === 'accent' ? 'text-lu-accent font-semibold' : tone === 'text' ? 'text-lu-text font-medium' : 'text-lu-muted font-medium',
       className
@@ -665,7 +666,7 @@ export const Modal: React.FC<{
   }, [open, onClose]);
 
   if (!open) return null;
-  return (
+  const modalNode = (
     <div
       className="lu-modal-backdrop-enter fixed inset-0 z-[100] flex items-center justify-center p-4 bg-[rgba(3,4,7,0.92)]"
       onMouseDown={(e) => {
@@ -687,6 +688,7 @@ export const Modal: React.FC<{
       </div>
     </div>
   );
+  return typeof document !== 'undefined' ? createPortal(modalNode, document.body) : modalNode;
 };
 
 export const ModalHeader: React.FC<{ title: string; description?: React.ReactNode; onClose?: () => void }> = ({

@@ -242,6 +242,23 @@ test('abas da Home e da barra lateral da sala animam indicador deslizante e troc
     await expect(page.getByRole('button', { name: 'Calendário', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Biblioteca', exact: true })).toHaveCount(0);
 
+    // Modal Addons deve abrir centralizado na viewport via portal (nunca preso ao <main>)
+    await page.getByRole('button', { name: 'Addons', exact: true }).click();
+    const addonsDialog = page.getByRole('dialog', { name: 'Addons' });
+    await expect(addonsDialog).toBeVisible();
+    const addonsBox = await addonsDialog.boundingBox();
+    expect(addonsBox).not.toBeNull();
+    expect(addonsBox!.y).toBeGreaterThanOrEqual(0);
+    expect(addonsBox!.y + addonsBox!.height).toBeLessThanOrEqual(720);
+    await page.keyboard.press('Escape');
+    await expect(addonsDialog).toBeHidden();
+
+    // Explorar / Ver tudo -> Voltar anima o retorno da esquerda
+    await page.getByRole('button', { name: 'Explorar', exact: true }).click();
+    await expect(page.locator('.lu-tab-panel-right').first()).toBeVisible();
+    await page.getByRole('button', { name: 'Catálogo', exact: true }).click();
+    await expect(page.locator('.lu-tab-panel-left').first()).toBeVisible();
+
     await page.getByRole('tab', { name: 'Sala' }).click();
     await expect(page.locator('main')).toHaveClass(/lu-tab-panel-right/);
 
