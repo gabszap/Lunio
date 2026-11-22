@@ -130,8 +130,8 @@ export const PrimaryButton: React.FC<ButtonProps & { size?: 'md' | 'lg'; block?:
     {...rest}
     className={cx(
       baseBtn,
-      'justify-center gap-2 px-5 rounded-[10px] bg-lu-accent text-lu-bg text-[14px] font-semibold hover:bg-lu-accent-hover',
-      'disabled:opacity-45 disabled:hover:bg-lu-accent',
+      'justify-center gap-2 px-5 rounded-[10px] bg-lu-accent text-lu-bg text-[14px] font-semibold hover:bg-lu-accent-hover transition-[background-color,transform] duration-150 active:scale-[0.97]',
+      'disabled:opacity-45 disabled:hover:bg-lu-accent disabled:active:scale-100',
       size === 'lg' ? 'h-12' : 'h-11',
       block && 'w-full',
       className
@@ -153,8 +153,8 @@ export const GhostButton: React.FC<ButtonProps & { size?: 'md' | 'lg'; block?: b
     {...rest}
     className={cx(
       baseBtn,
-      'justify-center gap-2 px-4 rounded-[10px] bg-lu-surface border border-lu-border-strong text-lu-text text-[14px] font-medium hover:bg-lu-elevated',
-      'disabled:opacity-45',
+      'justify-center gap-2 px-4 rounded-[10px] bg-lu-surface border border-lu-border-strong text-lu-text text-[14px] font-medium hover:bg-lu-elevated transition-[background-color,border-color,transform] duration-150 active:scale-[0.97]',
+      'disabled:opacity-45 disabled:active:scale-100',
       size === 'lg' ? 'h-12' : 'h-11',
       block && 'w-full',
       className
@@ -667,7 +667,7 @@ export const Modal: React.FC<{
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-[rgba(3,4,7,0.92)]"
+      className="lu-modal-backdrop-enter fixed inset-0 z-[100] flex items-center justify-center p-4 bg-[rgba(3,4,7,0.92)]"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget && onClose) onClose();
       }}
@@ -679,7 +679,7 @@ export const Modal: React.FC<{
         aria-label={label}
         style={{ width }}
         className={cx(
-          'max-w-full max-h-[calc(100vh-32px)] overflow-y-auto box-border p-7 rounded-[18px] bg-lu-surface border border-lu-border shadow-[0_24px_64px_rgba(0,0,0,0.55)] flex flex-col gap-5 text-lu-text',
+          'lu-modal-enter max-w-full max-h-[calc(100vh-32px)] overflow-y-auto box-border p-7 rounded-[18px] bg-lu-surface border border-lu-border shadow-[0_24px_64px_rgba(0,0,0,0.55)] flex flex-col gap-5 text-lu-text',
           className
         )}
       >

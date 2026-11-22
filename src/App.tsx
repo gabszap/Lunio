@@ -642,6 +642,7 @@ export default function App() {
       {view === 'home' ? (
         <HomeLayout
           tab={homeTab}
+          stepKey={homeTab === 'room' ? homeStep : undefined}
           onTabChange={(tab) => {
             setHomeTab(tab);
             setWatchIntent(null);

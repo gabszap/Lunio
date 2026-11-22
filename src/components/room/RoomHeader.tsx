@@ -233,7 +233,7 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
       </IconButton>
 
       {connected && (
-        <form onSubmit={handleSubmit} className="relative flex-1 min-w-0 sm:w-[240px] sm:flex-none lg:w-[256px]">
+        <form onSubmit={handleSubmit} className="relative flex-1 min-w-0 sm:w-[280px] sm:flex-none lg:w-[360px]">
           <input
             type="text"
             value={urlInput}

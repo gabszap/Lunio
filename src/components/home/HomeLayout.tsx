@@ -14,6 +14,8 @@ export const COMMIT = typeof __APP_COMMIT__ === 'string' ? __APP_COMMIT__ : 'dev
 
 interface HomeLayoutProps {
   tab: HomeTab;
+  /** Sub-etapa dentro da aba (ex.: 'menu' -> 'stream'/'upload'/'join') para animar avançar/voltar. */
+  stepKey?: string;
   onTabChange: (tab: HomeTab) => void;
   onLogo: () => void;
   children: React.ReactNode;
@@ -52,12 +54,15 @@ const LanguageSwitch: React.FC = () => {
   );
 };
 
-export const HomeLayout: React.FC<HomeLayoutProps> = ({ tab, onTabChange, onLogo, children, centered }) => {
-  const prevTabRef = useRef<HomeTab>(tab);
+export const HomeLayout: React.FC<HomeLayoutProps> = ({ tab, stepKey, onTabChange, onLogo, children, centered }) => {
+  const prevRef = useRef<{ tab: HomeTab; stepKey?: string }>({ tab, stepKey });
   const directionRef = useRef<'right' | 'left' | null>(null);
-  if (prevTabRef.current !== tab) {
-    directionRef.current = TAB_ORDER[tab] >= TAB_ORDER[prevTabRef.current] ? 'right' : 'left';
-    prevTabRef.current = tab;
+  if (prevRef.current.tab !== tab) {
+    directionRef.current = TAB_ORDER[tab] >= TAB_ORDER[prevRef.current.tab] ? 'right' : 'left';
+    prevRef.current = { tab, stepKey };
+  } else if (prevRef.current.stepKey !== stepKey) {
+    directionRef.current = stepKey === 'menu' ? 'left' : 'right';
+    prevRef.current = { tab, stepKey };
   }
   const panelAnimClass =
     directionRef.current === 'right'
@@ -99,7 +104,7 @@ export const HomeLayout: React.FC<HomeLayoutProps> = ({ tab, onTabChange, onLogo
     </header>
 
     <main
-      key={tab}
+      key={`${tab}:${stepKey ?? ''}`}
       className={cx(
         'relative flex-1 flex flex-col',
         centered ? 'items-center justify-center gap-7 px-4 sm:px-8 pt-6 pb-12' : 'px-4 sm:px-12 pt-6 pb-16',

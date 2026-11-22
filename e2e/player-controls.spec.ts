@@ -237,15 +237,31 @@ test('abas da Home e da barra lateral da sala animam indicador deslizante e troc
     await page.getByRole('tab', { name: 'Catálogo' }).click();
     await expect(page.locator('main')).toHaveClass(/lu-tab-panel-left/);
     await expect(page.locator('main')).toHaveCSS('animation-name', 'lu-tab-enter-left');
+    await expect(page.getByRole('button', { name: 'Explorar', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Addons', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Calendário', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Biblioteca', exact: true })).toHaveCount(0);
 
     await page.getByRole('tab', { name: 'Sala' }).click();
     await expect(page.locator('main')).toHaveClass(/lu-tab-panel-right/);
 
-    // Sala: indicador deslizante + transição direcional nas abas da barra lateral (Pedidos / Fila / Chat / Membros)
+    // Transição ao clicar em uma opção de "Crie uma sala" e ao voltar
+    await page.getByRole('button', { name: /Colar link de stream/ }).click();
+    await expect(page.locator('main')).toHaveClass(/lu-tab-panel-right/);
+    await page.getByRole('button', { name: /Voltar/ }).click();
+    await expect(page.locator('main')).toHaveClass(/lu-tab-panel-left/);
+
+    // Sala: indicador deslizante + transição direcional nas abas da barra lateral + campo de URL alinhado aos 360px do chat
     await createRoom(page, 'Ana', FIXTURE_URL);
     const sidebar = page.locator('aside[aria-label="Watch Party"]');
     const sidebarIndicator = sidebar.locator('.lu-pill-indicator').first();
     await expect(sidebarIndicator).toBeVisible();
+
+    const urlBox = await page.getByRole('textbox', { name: 'Link para adicionar à fila' }).boundingBox();
+    const sidebarBox = await sidebar.boundingBox();
+    expect(urlBox).not.toBeNull();
+    expect(sidebarBox).not.toBeNull();
+    expect(Math.abs((urlBox?.width ?? 0) - (sidebarBox?.width ?? 0))).toBeLessThanOrEqual(4);
 
     const clipInitial = await sidebarIndicator.evaluate((el) => getComputedStyle(el).clipPath);
     expect(clipInitial).toContain('inset(');

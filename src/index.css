@@ -382,6 +382,97 @@ html.is-fullscreen .player-menu-panel {
   animation: lu-tab-enter-left 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+@keyframes lu-view-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(0.988);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.lu-view-enter {
+  animation: lu-view-enter 250ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes lu-modal-backdrop-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes lu-modal-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.lu-modal-backdrop-enter {
+  animation: lu-modal-backdrop-enter 180ms ease both;
+}
+
+.lu-modal-enter {
+  animation: lu-modal-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.lu-source-card {
+  transition:
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 180ms ease;
+}
+
+.lu-source-card:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+.lu-source-card-icon {
+  transition:
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 160ms ease;
+}
+
+.lu-action-btn {
+  transition:
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    box-shadow 160ms ease;
+}
+
+.lu-action-btn:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lu-source-card:not(:disabled):hover {
+    transform: translateY(-2px);
+    background-color: rgb(255 255 255 / 0.055);
+    border-color: rgb(167 139 250 / 0.32);
+    box-shadow: 0 10px 24px rgb(0 0 0 / 0.28);
+  }
+  .lu-source-card:not(:disabled):hover .lu-source-card-icon {
+    transform: scale(1.07);
+    background-color: var(--color-lu-tint);
+  }
+  .lu-action-btn:not(:disabled):hover {
+    transform: translateY(-1px);
+    border-color: rgb(167 139 250 / 0.35);
+  }
+}
+
 
 
 /* Enquanto a transmissão de tela cobre o vídeo da sala, a legenda do filme não aparece por cima da tela transmitida */
