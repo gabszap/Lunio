@@ -4,8 +4,8 @@ import { Ban, UserX } from 'lucide-react';
 const loadVideoPlayer = () => import('./components/VideoPlayer').then((m) => ({ default: m.VideoPlayer }));
 const VideoPlayer = lazy(loadVideoPlayer);
 const CatalogTab = lazy(() => import('./components/catalog/CatalogTab').then((m) => ({ default: m.CatalogTab })));
-import { PlayerConsole } from './components/PlayerConsole';
-import { PlayerPage } from './components/PlayerPage';
+import { RoomShell } from './components/room/RoomShell';
+import type { RoomSidebarTab } from './components/room/RoomSidebar';
 import { RoomLobbyModal } from './components/RoomLobbyModal';
 import { UsernameModal, getLastUsername, shouldSkipNamePrompt } from './components/UsernameModal';
 import { SubtitleModal } from './components/SubtitleModal';
@@ -25,7 +25,6 @@ import type { CommitMode, CommitOptions } from './components/home/types';
 import { MediaPayload, SubtitleTrack, CatalogSeriesContext } from './types/media';
 import { CatalogEpisode, episodeTag, loadActiveSeriesContext, saveActiveSeriesContext } from './lib/catalog';
 import type { PlaylistItem } from './types/sync';
-import { PlaylistPanel } from './components/PlaylistPanel';
 import { logger } from './lib/logger';
 import { clearLastRoom, saveLastRoom } from './lib/lastRoom';
 import { refFromSeriesContext, startPlayback, type CatalogRef } from './lib/continueWatching';
@@ -98,7 +97,11 @@ export default function App() {
   const [showRoomModal, setShowRoomModal] = useState(false);
   // Ação que espera o apelido (criar ou entrar em sala sem nome definido nesta aba)
   const [nameGate, setNameGate] = useState<{ action: () => void; label: string; onCancel?: () => void } | null>(null);
-  const [isWatchPartyOpen, setIsWatchPartyOpen] = useState(false);
+  const [isWatchPartyOpen, setIsWatchPartyOpen] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
+  );
+  const [sidebarTab, setSidebarTab] = useState<RoomSidebarTab>('chat');
+  const [autoOpenScreenPicker, setAutoOpenScreenPicker] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [kickBanAlert, setKickBanAlert] = useState<{ title: string; message: string; type: 'kicked' | 'banned' } | null>(null);
   const [seriesContext, setSeriesContext] = useState<CatalogSeriesContext | null>(() => loadActiveSeriesContext());
@@ -117,10 +120,23 @@ export default function App() {
   const wasInRoomRef = useRef(false);
   const isWatchPartyOpenRef = useRef(isWatchPartyOpen);
   isWatchPartyOpenRef.current = isWatchPartyOpen;
+  const sidebarTabRef = useRef(sidebarTab);
+  sidebarTabRef.current = sidebarTab;
 
   useEffect(() => {
-    if (isWatchPartyOpen) setUnreadChatCount(0);
-  }, [isWatchPartyOpen]);
+    if (isWatchPartyOpen && sidebarTab === 'chat') setUnreadChatCount(0);
+  }, [isWatchPartyOpen, sidebarTab]);
+
+  // Proteção contra fechamento ou recarregamento acidental da guia enquanto estiver numa sala
+  useEffect(() => {
+    if (view !== 'player' || !syncStatus.isConnected || discordState.isEmbedded) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [view, syncStatus.isConnected, discordState.isEmbedded]);
 
   useEffect(() => {
     window.scrollTo({ top: 0 });
@@ -163,6 +179,7 @@ export default function App() {
     setRoomInUrl(code);
     wasInRoomRef.current = false;
     syncManager.connect(code);
+    setIsWatchPartyOpen(typeof window !== 'undefined' ? window.innerWidth >= 1024 : true);
     setView('player');
   }, []);
 
@@ -299,7 +316,9 @@ export default function App() {
     const unsubChat = syncManager.subscribeChat((msg) => {
       if (msg.isSystem) return;
       if (msg.userId === syncManager.getUser().id) return;
-      if (!isWatchPartyOpenRef.current) setUnreadChatCount((c) => c + 1);
+      if (!(isWatchPartyOpenRef.current && sidebarTabRef.current === 'chat')) {
+        setUnreadChatCount((c) => c + 1);
+      }
     });
 
     const unsubError = syncManager.subscribeError((_errorMsg, code) => {
@@ -400,6 +419,7 @@ export default function App() {
       // Cria a sala e já abre o player; o código fica no cabeçalho do player para compartilhar
       ensureRoom();
       emitCurrentMedia(merged);
+      setIsWatchPartyOpen(typeof window !== 'undefined' ? window.innerWidth >= 1024 : true);
       setView('player');
     } else {
       const st = syncManager.getStatus();
@@ -407,6 +427,7 @@ export default function App() {
         syncManager.leaveRoom();
         setRoomInUrl(null);
       }
+      setIsWatchPartyOpen(false);
       setView('player');
     }
   };
@@ -511,10 +532,11 @@ export default function App() {
     setWatchIntent(null);
   };
 
-  /** "Compartilhar sua tela": cria a sala sem vídeo e abre o player; é lá que o Host escolhe a qualidade e transmite. */
+  /** "Compartilhar sua tela": cria a sala sem vídeo e abre o palco; abre o seletor de qualidade automaticamente. */
   const startScreenRoom = () => {
     // Já é Host de uma sala (voltou à Home sem sair): volta a ela em vez de esvaziar o vídeo só neste navegador
     if (isHostingRoom()) {
+      setAutoOpenScreenPicker(true);
       setView('player');
       return;
     }
@@ -524,6 +546,8 @@ export default function App() {
       setCurrentPayload(EMPTY_PAYLOAD);
       setWatchIntent(null);
       ensureRoom();
+      setIsWatchPartyOpen(typeof window !== 'undefined' ? window.innerWidth >= 1024 : true);
+      setAutoOpenScreenPicker(true);
       setView('player');
     }, t('Criar sala'));
   };
@@ -627,50 +651,80 @@ export default function App() {
           )}
         </HomeLayout>
       ) : (
-        <PlayerPage
+        <RoomShell
           onHome={leaveToHome}
           room={roomInfo}
           environment={environment}
+          hasSource={Boolean(currentPayload.url && currentPayload.url.trim())}
+          sidebarOpen={isWatchPartyOpen}
+          onToggleSidebar={() => setIsWatchPartyOpen((v) => !v)}
+          onCloseSidebar={() => setIsWatchPartyOpen(false)}
+          sidebarTab={sidebarTab}
+          onSidebarTabChange={setSidebarTab}
           unreadChat={unreadChatCount}
-          onToggleWatchParty={() => setIsWatchPartyOpen((v) => !v)}
-          queue={<PlaylistPanel onPlayItem={playPlaylistItem} />}
-          console={<PlayerConsole />}
-        >
-          <Suspense fallback={<PanelFallback />}>
-            {/* key = URL: um vídeo novo (fila, Host trocando) nasce com estado limpo: áudio escolhido, posição, retomada */}
-            <VideoPlayer
-              key={currentPayload.url}
-              source={{ src: currentPayload.url, type: currentPayload.mimeType, fingerprint: currentPayload.fingerprint }}
-              title={currentPayload.title}
-              chapters={currentPayload.chapters}
-              subtitles={currentPayload.subtitles}
-              audioTracks={currentPayload.audioTracks}
-              onOpenRoomLobby={() => setShowRoomModal(true)}
-              isWatchPartyOpen={isWatchPartyOpen}
-              onToggleWatchParty={() => setIsWatchPartyOpen((prev) => !prev)}
-              onCloseWatchParty={() => setIsWatchPartyOpen(false)}
-              onBack={leaveToHome}
-              onLeaveRoom={leaveToHome}
-              autoPlay={autoPlayNext}
-              seriesContext={seriesContext}
-              onSelectEpisodeStream={playEpisodeStream}
-              onPlayPlaylistItem={playPlaylistItem}
-              onAddSubtitle={() => setSubtitleModal('current')}
-              onChooseVideo={() => goHome('room')}
-              onMediaChangeRequested={(media) => {
-                setCurrentPayload({
-                  url: media.url,
-                  title: media.title,
-                  mimeType: 'video/x-matroska',
-                  chapters: media.chapters || [],
-                  subtitles: media.subtitles || [],
-                  audioTracks: media.audioTracks || [],
-                  fingerprint: media.fingerprint,
-                });
-              }}
-            />
-          </Suspense>
-        </PlayerPage>
+          onOpenRoomLobby={() => setShowRoomModal(true)}
+          onPlayQueueItem={playPlaylistItem}
+          autoOpenScreenPicker={autoOpenScreenPicker}
+          onAutoOpenScreenPickerConsumed={() => setAutoOpenScreenPicker(false)}
+          recentStreams={recentStreams}
+          onRemoveRecent={(url) =>
+            setRecentStreams((prev) => {
+              const next = prev.filter((i) => i.url !== url);
+              saveRecentStreams(next);
+              return next;
+            })
+          }
+          onClearRecent={() => {
+            setRecentStreams([]);
+            saveRecentStreams([]);
+          }}
+          pendingSubtitles={pendingSubtitles.length}
+          onAddSubtitle={() => setSubtitleModal('pending')}
+          ensureRoom={ensureRoom}
+          requireName={(cb) => (isHostingRoom() ? cb() : withName(cb, t('Criar sala')))}
+          onCommitMedia={commitMedia}
+          onPlayCatalogStream={playStream}
+          renderPlayer={({ roomState, onSelectMember, fullscreenDock, fullscreenSidebar }) => (
+            <Suspense fallback={<PanelFallback />}>
+              {/* key = URL: um vídeo novo (fila, Host trocando) nasce com estado limpo: áudio escolhido, posição, retomada */}
+              <VideoPlayer
+                key={currentPayload.url}
+                source={{ src: currentPayload.url, type: currentPayload.mimeType, fingerprint: currentPayload.fingerprint }}
+                title={currentPayload.title}
+                chapters={currentPayload.chapters}
+                subtitles={currentPayload.subtitles}
+                audioTracks={currentPayload.audioTracks}
+                onOpenRoomLobby={() => setShowRoomModal(true)}
+                isWatchPartyOpen={isWatchPartyOpen}
+                onToggleWatchParty={() => setIsWatchPartyOpen((prev) => !prev)}
+                onCloseWatchParty={() => setIsWatchPartyOpen(false)}
+                onBack={leaveToHome}
+                onLeaveRoom={leaveToHome}
+                autoPlay={autoPlayNext}
+                seriesContext={seriesContext}
+                onSelectEpisodeStream={playEpisodeStream}
+                onPlayPlaylistItem={playPlaylistItem}
+                onAddSubtitle={() => setSubtitleModal('current')}
+                onChooseVideo={() => goHome('room')}
+                roomState={roomState}
+                onSelectMember={onSelectMember}
+                fullscreenDock={fullscreenDock}
+                fullscreenSidebar={fullscreenSidebar}
+                onMediaChangeRequested={(media) => {
+                  setCurrentPayload({
+                    url: media.url,
+                    title: media.title,
+                    mimeType: 'video/x-matroska',
+                    chapters: media.chapters || [],
+                    subtitles: media.subtitles || [],
+                    audioTracks: media.audioTracks || [],
+                    fingerprint: media.fingerprint,
+                  });
+                }}
+              />
+            </Suspense>
+          )}
+        />
       )}
 
       <SubtitleModal open={subtitleModal !== null} onClose={() => setSubtitleModal(null)} onAdd={addSubtitle} />

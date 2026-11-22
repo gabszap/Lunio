@@ -8,8 +8,6 @@ import {
   Captions,
   AudioWaveform,
   Maximize2,
-  Users,
-  ChevronLeft,
   RotateCcw,
   RotateCw,
   Plus,
@@ -25,7 +23,6 @@ import { VolumeDisplay } from './VolumeDisplay';
 import { SettingsMenu, formatMs } from './SettingsMenu';
 import { ChapterTimeline } from './ChapterTimeline';
 import { ChapterList } from './ChapterList';
-import { ScreenShareControl } from './player/ScreenShare';
 import { EpisodesOverlay } from './EpisodesMenu';
 import { t, msg } from '../lib/i18n';
 import {
@@ -39,7 +36,6 @@ import {
   MenuPanel,
   MenuSection,
   Spinner,
-  cx,
   useDismiss,
 } from './ui';
 
@@ -193,7 +189,7 @@ const ASPECT_LABEL: Record<'fit' | 'fill' | 'stretch', string> = {
   stretch: msg('Ajuste de tela: esticar (Z)'),
 };
 
-type MenuId = 'subs' | 'audio' | 'chapters' | 'episodes' | 'settings' | 'screen' | null;
+type MenuId = 'subs' | 'audio' | 'chapters' | 'episodes' | 'settings' | null;
 
 export const PlayerControls: React.FC<PlayerControlsProps> = ({
   title,
@@ -276,18 +272,11 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   const subtitleLine = [currentChapter?.title, parsedMetadata?.episodeTitle].filter(Boolean).join(' · ');
   const codecBadge = parsedMetadata?.codec ? String(parsedMetadata.codec).toUpperCase().replace('X265', 'HEVC').replace('X264', 'H.264') : null;
 
-  const badgeCount = unreadChatCount > 0 ? unreadChatCount : (watchPartyMembersCount ?? 0) > 1 ? watchPartyMembersCount : 0;
-
   return (
     <div id="player-ui-overlay" className="absolute inset-0 flex flex-col justify-between pointer-events-none">
-      {/* Topo: voltar, título, capítulo atual e selos técnicos */}
+      {/* Topo: título, capítulo atual e selos técnicos (ações da sala ficam no cabeçalho e na dock) */}
       <div className="pointer-events-auto flex items-start justify-between gap-4 px-3 sm:px-6 pt-3 sm:pt-5 pb-14 bg-gradient-to-b from-lu-video/80 to-lu-video/0">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-          {onBack && (
-            <IconButton label={t('Voltar')} onClick={onBack} className="-ml-2">
-              <ChevronLeft size={20} />
-            </IconButton>
-          )}
           <div className="min-w-0">
             <h2 id="player-media-title" className="m-0 text-[15px] sm:text-[16px] font-medium truncate">
               {title || t('Stream de vídeo')}
@@ -636,30 +625,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                 className="hidden md:inline-flex"
               >
                 <Maximize2 size={20} />
-              </IconButton>
-            )}
-
-            <ScreenShareControl open={openMenu === 'screen'} onOpenChange={(o) => setOpenMenu(o ? 'screen' : null)} />
-
-            {onWatchPartyToggle && (
-              <IconButton
-                id="btn-watchparty-toggle"
-                label={t('Watch Party')}
-                active={Boolean(isWatchPartyConnected)}
-                onClick={onWatchPartyToggle}
-                className="hidden sm:inline-flex"
-              >
-                <Users size={20} />
-                {badgeCount ? (
-                  <span
-                    className={cx(
-                      'absolute top-[5px] right-1 min-w-4 h-4 px-1 box-border rounded-lg text-[10px] font-bold leading-4 text-center text-lu-bg',
-                      unreadChatCount > 0 ? 'bg-lu-error' : 'bg-lu-accent'
-                    )}
-                  >
-                    {badgeCount > 9 ? '9+' : badgeCount}
-                  </span>
-                ) : null}
               </IconButton>
             )}
 
