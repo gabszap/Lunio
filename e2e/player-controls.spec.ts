@@ -227,12 +227,16 @@ test('abas da Home e da barra lateral da sala animam indicador deslizante e troc
     expect(clipInitialHome).toContain('inset(');
 
     // Home abre em "Sala": Sala → Status (direita) → Catálogo (esquerda) → Sala (direita)
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.getByRole('tab', { name: 'Status' }).click();
     await expect.poll(() => indicator.evaluate((el) => getComputedStyle(el).clipPath)).not.toBe(clipInitialHome);
+    await expect(indicator).toHaveCSS('transition-property', /clip-path/);
     await expect(page.locator('main')).toHaveClass(/lu-tab-panel-right/);
+    await expect(page.locator('main')).toHaveCSS('animation-name', 'lu-tab-enter-right');
 
     await page.getByRole('tab', { name: 'Catálogo' }).click();
     await expect(page.locator('main')).toHaveClass(/lu-tab-panel-left/);
+    await expect(page.locator('main')).toHaveCSS('animation-name', 'lu-tab-enter-left');
 
     await page.getByRole('tab', { name: 'Sala' }).click();
     await expect(page.locator('main')).toHaveClass(/lu-tab-panel-right/);

@@ -331,7 +331,7 @@ html.is-fullscreen .player-menu-panel {
 }
 
 .lu-pill-indicator-animated {
-  transition: clip-path 240ms var(--ease-lu-in-out);
+  transition: clip-path 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .lu-pill-btn {
@@ -355,56 +355,31 @@ html.is-fullscreen .player-menu-panel {
 @keyframes lu-tab-enter-right {
   from {
     opacity: 0;
-    transform: translate3d(14px, 0, 0);
+    transform: translate3d(22px, 0, 0) scale(0.99);
   }
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0);
+    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
 @keyframes lu-tab-enter-left {
   from {
     opacity: 0;
-    transform: translate3d(-14px, 0, 0);
+    transform: translate3d(-22px, 0, 0) scale(0.99);
   }
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-}
-
-@keyframes lu-tab-enter-fade {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
 .lu-tab-panel-right {
-  animation: lu-tab-enter-right 220ms var(--ease-lu-out) both;
+  animation: lu-tab-enter-right 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .lu-tab-panel-left {
-  animation: lu-tab-enter-left 220ms var(--ease-lu-out) both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .lu-pill-indicator-animated {
-    transition: none;
-  }
-  .lu-pill-btn {
-    transition: color 150ms ease, background-color 150ms ease;
-  }
-  .lu-pill-btn:active {
-    transform: none;
-  }
-  .lu-tab-panel-right,
-  .lu-tab-panel-left {
-    animation: lu-tab-enter-fade 150ms ease both;
-  }
+  animation: lu-tab-enter-left 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 
