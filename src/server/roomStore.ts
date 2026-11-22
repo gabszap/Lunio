@@ -1,23 +1,34 @@
 import { config } from './config';
 import { redisKeys, waitRedisReady, withRedis } from './media/redis';
-import { PLAYLIST_MAX_ITEMS } from '../types/sync';
-import type { BannedMember, PlaylistItem, RoomMedia } from '../types/sync';
+import { PLAYLIST_MAX_ITEMS, REQUESTS_MAX_ITEMS } from '../types/sync';
+import type { BannedMember, ChatMessage, PlaylistItem, RoomMedia, RoomVisibility } from '../types/sync';
 
 /**
  * Estado das salas que precisa sobreviver a um restart do servidor (deploy, queda, reinício da VPS):
- * quem é o Host, os banidos, a fila, o vídeo e a posição. O que NÃO vai: quem está conectado (volta sozinho ao
- * reconectar), o chat e o `ready` de cada pessoa. RAM continua sendo a autoridade do que aparece na tela; o Redis só
- * guarda o que dá para repor depois de uma ida e volta. Sem `REDIS_URL` nada disto existe e o comportamento é o de sempre.
+ * Host, configurações (nome, visibilidade, senha, auto-pause), banidos, fila, pedidos, chat recente, vídeo e posição.
+ * RAM continua sendo a autoridade do que aparece na tela; sem `REDIS_URL` nada disto existe e o comportamento é o de sempre.
  */
 
 export interface PersistedRoom {
   v: 1;
   roomId: string;
   hostId: string;
+  /** Nome personalizável da sala. */
+  name?: string;
+  /** Visibilidade da sala ('public' | 'private'). */
+  visibility?: RoomVisibility;
+  /** Hash salted scrypt da senha (nunca texto puro). */
+  passwordHash?: string;
+  /** Pausa automática quando alguém trava em buffering. */
+  autoPauseOnBuffer?: boolean;
   /** Quando a sala foi criada (ms). JSONs antigos sem o campo fazem fallback para `savedAt`. */
   createdAt?: number;
   media: RoomMedia | null;
   playlist: PlaylistItem[];
+  /** Pedidos pendentes dos espectadores. */
+  requests?: PlaylistItem[];
+  /** Histórico recente do chat (até 50 mensagens). */
+  chatHistory?: ChatMessage[];
   bans: BannedMember[];
   playback: { playing: boolean; position: number; rate: number };
   /** Quando foi gravado: o relógio decide se ainda vale (o TTL do Redis é só a rede de proteção). */
@@ -58,7 +69,49 @@ export function parsePersistedRoom(raw: unknown): PersistedRoom | null {
   for (const item of r.playlist) {
     const i = item as Record<string, unknown>;
     if (!isString(i?.id, 128) || !isString(i.url) || !isString(i.title, 400) || !isString(i.addedById, 128) || !isString(i.addedBy, 128)) return null;
-    playlist.push({ id: i.id, url: i.url, title: i.title, mimeType: isString(i.mimeType, 100) ? i.mimeType : undefined, addedById: i.addedById, addedBy: i.addedBy });
+    playlist.push({
+      id: i.id,
+      url: i.url,
+      title: i.title,
+      mimeType: isString(i.mimeType, 100) ? i.mimeType : undefined,
+      fingerprint: isString(i.fingerprint, 320) ? i.fingerprint : undefined,
+      addedById: i.addedById,
+      addedBy: i.addedBy,
+    });
+  }
+
+  const requests: PlaylistItem[] = [];
+  if (Array.isArray(r.requests)) {
+    for (const item of r.requests.slice(0, REQUESTS_MAX_ITEMS)) {
+      const i = item as Record<string, unknown>;
+      if (!isString(i?.id, 128) || !isString(i.url) || !isString(i.title, 400) || !isString(i.addedById, 128) || !isString(i.addedBy, 128)) continue;
+      requests.push({
+        id: i.id,
+        url: i.url,
+        title: i.title,
+        mimeType: isString(i.mimeType, 100) ? i.mimeType : undefined,
+        fingerprint: isString(i.fingerprint, 320) ? i.fingerprint : undefined,
+        addedById: i.addedById,
+        addedBy: i.addedBy,
+      });
+    }
+  }
+
+  const chatHistory: ChatMessage[] = [];
+  if (Array.isArray(r.chatHistory)) {
+    for (const entry of r.chatHistory.slice(-50)) {
+      const c = entry as Record<string, unknown>;
+      if (!isString(c?.id, 128) || !isString(c.userId, 128) || !isString(c.username, 128) || !isString(c.text, 1000) || typeof c.timestamp !== 'number') continue;
+      chatHistory.push({
+        id: c.id,
+        userId: c.userId,
+        username: c.username,
+        avatarUrl: isString(c.avatarUrl) ? c.avatarUrl : undefined,
+        text: c.text,
+        timestamp: c.timestamp,
+        isSystem: c.isSystem === true ? true : undefined,
+      });
+    }
   }
 
   const bans: BannedMember[] = [];
@@ -85,8 +138,28 @@ export function parsePersistedRoom(raw: unknown): PersistedRoom | null {
   const rate = typeof p.rate === 'number' && p.rate > 0 && p.rate <= 4 ? p.rate : 1;
   const position = typeof p.position === 'number' && p.position >= 0 && Number.isFinite(p.position) ? p.position : 0;
   const createdAt = typeof r.createdAt === 'number' && Number.isFinite(r.createdAt) && r.createdAt > 0 ? r.createdAt : r.savedAt;
+  const name = isString(r.name, 64) && r.name.trim() ? r.name.trim() : undefined;
+  const visibility: RoomVisibility = r.visibility === 'private' ? 'private' : 'public';
+  const passwordHash = isString(r.passwordHash, 256) && r.passwordHash.includes(':') ? r.passwordHash : undefined;
+  const autoPauseOnBuffer = r.autoPauseOnBuffer === true;
 
-  return { v: 1, roomId: r.roomId, hostId: r.hostId, createdAt, media, playlist, bans, playback: { playing: p.playing === true, position, rate }, savedAt: r.savedAt };
+  return {
+    v: 1,
+    roomId: r.roomId,
+    hostId: r.hostId,
+    name,
+    visibility,
+    passwordHash,
+    autoPauseOnBuffer,
+    createdAt,
+    media,
+    playlist,
+    requests,
+    chatHistory,
+    bans,
+    playback: { playing: p.playing === true, position, rate },
+    savedAt: r.savedAt,
+  };
 }
 
 /** O Redis como armazém: um JSON por sala (leitura e escrita atômicas, sem corrida entre teclas) com validade. */

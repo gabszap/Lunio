@@ -13,6 +13,9 @@ import type {
   RoomState,
   RoomMember,
   RoomMedia,
+  RoomVisibility,
+  RoomReaction,
+  ReactionKind,
   ChatMessage,
   MemberPlaybackState,
   BannedMember,
@@ -58,7 +61,9 @@ class SyncManager implements ScreenSignals {
   private screenViewers: Array<{ id: string; username: string }> = [];
   private screenViewersListeners = new Set<(viewers: Array<{ id: string; username: string }>) => void>();
   private currentRoomId: string = '';
+  private currentRoomPassword: string | undefined = undefined;
   private roomState: RoomState | null = null;
+  private reactionListeners = new Set<(reaction: RoomReaction) => void>();
   /** Votação para pular o capítulo atual (null = nenhuma). Vem do servidor. */
   private skipVote: import('../types/sync').SkipVoteState | null = null;
   private skipVoteListeners = new Set<SkipVoteListener>();
@@ -222,10 +227,11 @@ class SyncManager implements ScreenSignals {
   /**
    * Conecta ao servidor WebSocket da Watch Party
    */
-  public connect(customRoomId?: string) {
+  public connect(customRoomId?: string, password?: string) {
+    if (password !== undefined) this.currentRoomPassword = password || undefined;
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
-      if (customRoomId && customRoomId !== this.currentRoomId) {
-        this.joinRoom(customRoomId);
+      if (customRoomId && (customRoomId !== this.currentRoomId || password !== undefined)) {
+        this.joinRoom(customRoomId, password);
       }
       return;
     }
@@ -298,6 +304,7 @@ class SyncManager implements ScreenSignals {
         this.send({
           type: 'room:join',
           roomId: this.currentRoomId,
+          password: this.currentRoomPassword,
           user: this.user,
         });
 
@@ -430,16 +437,18 @@ class SyncManager implements ScreenSignals {
     this.heartbeatBurst = [];
   }
 
-  public joinRoom(roomId: string) {
+  public joinRoom(roomId: string, password?: string) {
     this.currentRoomId = roomId;
+    if (password !== undefined) this.currentRoomPassword = password || undefined;
     if (this.isConnected) {
       this.send({
         type: 'room:join',
         roomId,
+        password: this.currentRoomPassword,
         user: this.user,
       });
     } else {
-      this.connect(roomId);
+      this.connect(roomId, password);
     }
   }
 
@@ -456,6 +465,7 @@ class SyncManager implements ScreenSignals {
     this.isConnected = false;
     this.isConnecting = false;
     this.currentRoomId = '';
+    this.currentRoomPassword = undefined;
     const hadScreen = Boolean(this.roomState?.screen);
     this.roomState = null;
     this.screenKeys = [];
@@ -710,6 +720,26 @@ class SyncManager implements ScreenSignals {
         break;
       }
 
+      case 'room:settings_update': {
+        if (!this.roomState) break;
+        this.roomState = {
+          ...this.roomState,
+          name: msg.name,
+          visibility: msg.visibility,
+          hasPassword: msg.hasPassword,
+          autoPauseOnBuffer: msg.autoPauseOnBuffer,
+        };
+        this.notifyState();
+        break;
+      }
+
+      case 'reaction:broadcast': {
+        for (const listener of this.reactionListeners) {
+          listener(msg.reaction);
+        }
+        break;
+      }
+
       case 'error': {
         const errCode = (msg as any).code;
         logger.warn(`[Sala] Servidor: ${msg.message}`);
@@ -811,6 +841,35 @@ class SyncManager implements ScreenSignals {
 
   public getServerNow(): number {
     return this.clock.now();
+  }
+
+  /** Posição esperada da reprodução da sala agora (em segundos), ou null se não há sala conectada. */
+  public getExpectedPlaybackTime(): number | null {
+    if (!this.roomState) return null;
+    const { playing, position, rate, updatedAt } = this.roomState.playback;
+    if (!playing) return Math.max(0, position);
+    const elapsed = Math.max(0, (this.clock.now() - updatedAt) / 1000);
+    return Math.max(0, position + elapsed * rate);
+  }
+
+  public emitRoomSettings(settings: {
+    name?: string;
+    visibility?: RoomVisibility;
+    password?: string | null;
+    autoPauseOnBuffer?: boolean;
+  }) {
+    if (!this.isConnected || !this.isRoomHost()) return;
+    this.send({ type: 'room:settings', ...settings });
+  }
+
+  public emitReaction(kind: ReactionKind) {
+    if (!this.isConnected) return;
+    this.send({ type: 'reaction:send', kind });
+  }
+
+  public subscribeReaction(listener: (reaction: RoomReaction) => void): () => void {
+    this.reactionListeners.add(listener);
+    return () => this.reactionListeners.delete(listener);
   }
 
   public getPlaylist(): PlaylistItem[] {

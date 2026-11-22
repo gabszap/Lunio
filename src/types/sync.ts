@@ -3,6 +3,19 @@ import type { RoomScreen, ScreenQualityId } from './screen';
 
 export type MemberPlaybackState = 'waiting' | 'loading' | 'ready' | 'playing' | 'paused' | 'stalled';
 
+export type RoomVisibility = 'public' | 'private';
+
+export type ReactionKind = 'fire' | 'laugh' | 'shock' | 'heart' | 'clap' | 'cry';
+export const REACTION_KINDS: readonly ReactionKind[] = ['fire', 'laugh', 'shock', 'heart', 'clap', 'cry'] as const;
+
+export interface RoomReaction {
+  id: string;
+  kind: ReactionKind;
+  userId: string;
+  username: string;
+  timestamp: number;
+}
+
 export interface RoomMember {
   id: string;
   username: string;
@@ -86,6 +99,14 @@ export interface BannedMember {
 export interface RoomState {
   roomId: string;
   hostId: string;
+  /** Nome personalizável definido pelo Host (opcional). */
+  name?: string;
+  /** Sala pública (entra com o link) ou privada (trancada ou com senha). */
+  visibility?: RoomVisibility;
+  /** Se a sala privada exige senha para entrar (o hash nunca vai ao cliente). */
+  hasPassword?: boolean;
+  /** Pausa automaticamente para todos se algum membro travar (buffering) e retoma quando voltar. */
+  autoPauseOnBuffer?: boolean;
   /** Timestamp (ms) de criação da sala no servidor (para o cronômetro de duração). */
   createdAt?: number;
   media: RoomMedia | null;
@@ -116,12 +137,25 @@ export type ClientMessage =
   | {
       type: 'room:join';
       roomId: string;
+      password?: string;
       user: {
         id: string;
         username: string;
         avatarUrl?: string;
         platform?: 'discord' | 'web';
       };
+    }
+  | {
+      type: 'room:settings';
+      name?: string;
+      visibility?: RoomVisibility;
+      /** String não vazia define/altera a senha; `null` remove a senha; `undefined` mantém a atual. */
+      password?: string | null;
+      autoPauseOnBuffer?: boolean;
+    }
+  | {
+      type: 'reaction:send';
+      kind: ReactionKind;
     }
   | {
       type: 'room:leave';
@@ -393,7 +427,18 @@ export type ServerMessage =
       viewers: Array<{ id: string; username: string }>;
     }
   | {
+      type: 'room:settings_update';
+      name?: string;
+      visibility: RoomVisibility;
+      hasPassword: boolean;
+      autoPauseOnBuffer: boolean;
+    }
+  | {
+      type: 'reaction:broadcast';
+      reaction: RoomReaction;
+    }
+  | {
       type: 'error';
       message: string;
-      code?: 'kicked' | 'banned' | string;
+      code?: 'kicked' | 'banned' | 'password_required' | 'wrong_password' | 'room_locked' | string;
     };
