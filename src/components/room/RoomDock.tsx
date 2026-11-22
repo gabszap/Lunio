@@ -1,41 +1,11 @@
 import React, { useRef, useState } from 'react';
-import { Check, ChevronUp, Clock, Compass, Keyboard, Link2, LogOut, Share2, Terminal, Users } from 'lucide-react';
+import { Check, ChevronUp, Clock, Compass, Link2, LogOut, Share2, Terminal, Users } from 'lucide-react';
 import { formatTime } from '../../lib/chapters';
-import { t, msg } from '../../lib/i18n';
+import { t } from '../../lib/i18n';
 import { copyText } from '../../lib/recent';
 import { syncManager } from '../../lib/sync';
 import { ScreenShareControl } from '../player/ScreenShare';
-import { Kbd, cx, useDismiss } from '../ui';
-
-const SHORTCUTS: Array<{ group: string; items: Array<{ label: string; keys: string[]; accent?: boolean }> }> = [
-  {
-    group: msg('Reprodução'),
-    items: [
-      { label: msg('Play / Pause'), keys: [msg('Espaço'), 'K'] },
-      { label: msg('Voltar 10 s'), keys: ['J', '←'] },
-      { label: msg('Avançar 10 s'), keys: ['L', '→'] },
-      { label: msg('Pular abertura (+90 s)'), keys: ['N', 'O'], accent: true },
-    ],
-  },
-  {
-    group: msg('Áudio e legendas'),
-    items: [
-      { label: msg('Volume ±5%'), keys: ['↑', '↓'] },
-      { label: 'Silenciar', keys: ['M'] },
-      { label: msg('Alternar legendas'), keys: ['C'] },
-      { label: msg('Sincronia da legenda ±50 ms'), keys: ['G', 'H'] },
-      { label: msg('Atraso do áudio ±50 ms'), keys: ['[', ']'] },
-    ],
-  },
-  {
-    group: 'Vídeo',
-    items: [
-      { label: msg('Ajuste de tela'), keys: ['Z'] },
-      { label: msg('Tela cheia'), keys: ['F'] },
-      { label: 'Watch Party', keys: ['W'] },
-    ],
-  },
-];
+import { cx, useDismiss } from '../ui';
 
 export interface RoomDockProps {
   connected: boolean;
@@ -71,16 +41,13 @@ export const RoomDock: React.FC<RoomDockProps> = ({
   const [shareOpen, setShareOpen] = useState(false);
   const [shareAt, setShareAt] = useState(0);
   const [copiedLink, setCopiedLink] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
 
   const shareRef = useRef<HTMLDivElement>(null);
-  const shortcutsRef = useRef<HTMLDivElement>(null);
   useDismiss(shareOpen, () => setShareOpen(false), shareRef);
-  useDismiss(shortcutsOpen, () => setShortcutsOpen(false), shortcutsRef);
 
   const canChooseMedia = !connected || isHost;
-  const anyMenuOpen = shareOpen || shortcutsOpen || screenOpen;
+  const anyMenuOpen = shareOpen || screenOpen;
   const revealDock = !isFullscreen || hovered || anyMenuOpen;
 
   const copyRoomLink = async (atSeconds?: number) => {
@@ -173,52 +140,6 @@ export const RoomDock: React.FC<RoomDockProps> = ({
       )}
 
       <span className="w-px h-5 bg-lu-border mx-0.5 flex-none" aria-hidden="true" />
-
-      <div ref={shortcutsRef} className="relative hidden sm:block">
-        <button
-          id="btn-dock-shortcuts"
-          type="button"
-          aria-label={t('Atalhos do teclado')}
-          title={t('Atalhos do teclado')}
-          aria-expanded={shortcutsOpen}
-          onClick={() => setShortcutsOpen((v) => !v)}
-          className={cx(
-            dockBtnBase,
-            shortcutsOpen ? 'bg-lu-tint text-lu-accent' : 'bg-white/6 text-lu-muted hover:text-lu-text hover:bg-white/10'
-          )}
-        >
-          <Keyboard size={16} />
-          <span className="hidden xl:inline">{t('Atalhos')}</span>
-        </button>
-
-        {shortcutsOpen && (
-          <div
-            role="dialog"
-            aria-label={t('Atalhos do teclado')}
-            className="absolute left-1/2 -translate-x-1/2 bottom-[calc(100%+10px)] z-50 w-[420px] max-w-[calc(100vw-32px)] box-border p-2.5 rounded-[14px] bg-lu-elevated border border-lu-border shadow-[0_16px_40px_rgba(0,0,0,0.5)]"
-          >
-            <div className="px-2.5 pt-2 pb-1 text-[14px] font-semibold">{t('Atalhos do teclado')}</div>
-            {SHORTCUTS.map((section, i) => (
-              <React.Fragment key={section.group}>
-                {i > 0 && <div className="h-px bg-lu-border mx-2.5" />}
-                <div className="py-1.5">
-                  <div className="px-2.5 py-1.5 text-[12px] font-medium text-lu-muted">{t(section.group)}</div>
-                  {section.items.map((item) => (
-                    <div key={item.label} className="flex items-center justify-between gap-4 h-9 px-2.5">
-                      <span className={cx('text-[14px]', item.accent ? 'text-lu-accent' : 'text-lu-text')}>{t(item.label)}</span>
-                      <span className="flex gap-1">
-                        {item.keys.map((k) => (
-                          <Kbd key={k}>{t(k)}</Kbd>
-                        ))}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </React.Fragment>
-            ))}
-          </div>
-        )}
-      </div>
 
       <button
         id="btn-dock-logs"

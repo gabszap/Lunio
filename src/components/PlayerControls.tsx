@@ -364,7 +364,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
       {/* Base: timeline e barra de controles */}
       <div
         id="player-bottom-controls-bar"
-        className="pointer-events-auto flex flex-col gap-1 px-3 sm:px-6 pt-16 pb-2 sm:pb-4 bg-gradient-to-t from-lu-video/92 to-lu-video/0"
+        className="pointer-events-auto flex flex-col gap-1 px-3 sm:px-5 pt-16 pb-2 sm:pb-3.5 bg-gradient-to-t from-lu-video/92 to-lu-video/0"
       >
         <ChapterTimeline
           currentTime={currentTime}
@@ -376,8 +376,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           disabled={isViewer}
         />
 
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-1 flex-wrap min-w-0">
+        <div className="flex items-center justify-between gap-1.5 flex-wrap sm:flex-nowrap">
+          <div className="flex items-center gap-0.5 sm:gap-1 min-w-0">
             {isViewer ? (
               <span
                 id="viewer-sync-badge"
@@ -422,7 +422,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               <span
                 id="player-buffer-status"
                 title={t('Buffer contíguo à frente: +{v1} s (até {v2})', { v1: bufferAhead.toFixed(1), v2: formatTime(currentTime + bufferAhead) })}
-                className="hidden lg:inline-flex items-center gap-1.5 text-[12px] text-lu-muted whitespace-nowrap tabular"
+                className="hidden xl:inline-flex items-center gap-1.5 text-[12px] text-lu-muted whitespace-nowrap tabular"
               >
                 <Dot tone={bufferTone} />
                 {bufferAhead > 0.2 ? t('Buffer +{n} s', { n: bufferAhead.toFixed(1).replace('.', ',') }) : t('Buffer: baixando…')}
@@ -430,7 +430,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-1 flex-wrap justify-end">
+          <div className="flex items-center gap-0.5 sm:gap-1 flex-nowrap justify-end flex-none">
             <VolumeDisplay volume={volume} muted={muted} onVolumeChange={onVolumeChange} onMuteToggle={onMuteToggle} />
 
             {/* Legendas */}
@@ -612,9 +612,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               <IconButton
                 id="btn-pip-toggle"
                 label={t('Picture-in-Picture')}
-                active={isPip}
                 onClick={onPipToggle}
-                className="hidden md:inline-flex"
+                className={cx('hidden md:inline-flex', isPip && '!text-lu-accent')}
               >
                 <PictureInPicture2 size={20} />
               </IconButton>
@@ -624,9 +623,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               <IconButton
                 id="btn-aspect-toggle"
                 label={t(ASPECT_LABEL[aspectMode])}
-                active={aspectMode !== 'fit'}
                 onClick={onToggleAspect}
-                className="hidden md:inline-flex"
+                className={cx('hidden md:inline-flex', aspectMode !== 'fit' && '!text-lu-accent')}
               >
                 <Maximize2 size={20} />
               </IconButton>

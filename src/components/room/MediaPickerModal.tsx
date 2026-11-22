@@ -1,5 +1,5 @@
-import React, { Suspense, lazy, useState } from 'react';
-import { Compass, FolderOpen, Link, Upload, Youtube } from 'lucide-react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
+import { ChevronLeft, Compass, FolderOpen, Link, Upload, X, Youtube } from 'lucide-react';
 import { StreamStep } from '../home/StreamStep';
 import { UploadStep } from '../home/UploadStep';
 import { DriveStep, YouTubeStep } from '../home/LinkSourceSteps';
@@ -11,7 +11,7 @@ import type { StreamOption } from '../../lib/streams';
 import type { CatalogSeriesContext, MediaPayload } from '../../types/media';
 import type { CatalogRef } from '../../lib/continueWatching';
 import { t, msg } from '../../lib/i18n';
-import { Modal, ModalHeader, PillTabs, Spinner } from '../ui';
+import { Dot, IconButton, PillTabs, Spinner, cx } from '../ui';
 
 const CatalogTab = lazy(() => import('../catalog/CatalogTab').then((m) => ({ default: m.CatalogTab })));
 
@@ -21,6 +21,7 @@ interface MediaPickerModalProps {
   open: boolean;
   onClose: () => void;
   inRoom?: boolean;
+  roomCode?: string;
   initialTab?: PickerTab;
   recentStreams: RecentStream[];
   onRemoveRecent: (url: string) => void;
@@ -39,22 +40,18 @@ interface MediaPickerModalProps {
 }
 
 const TABS: Array<{ value: PickerTab; label: string; icon: React.ReactNode }> = [
-  { value: 'catalog', label: msg('Catálogo'), icon: <Compass size={15} /> },
-  { value: 'stream', label: msg('Link de stream'), icon: <Link size={15} /> },
-  { value: 'upload', label: msg('Enviar um arquivo'), icon: <Upload size={15} /> },
-  { value: 'youtube', label: 'YouTube', icon: <Youtube size={15} /> },
-  { value: 'drive', label: 'Google Drive', icon: <FolderOpen size={15} /> },
+  { value: 'catalog', label: msg('Catálogo'), icon: <Compass size={16} /> },
+  { value: 'stream', label: msg('Link de stream'), icon: <Link size={16} /> },
+  { value: 'upload', label: msg('Enviar um arquivo'), icon: <Upload size={16} /> },
+  { value: 'youtube', label: 'YouTube', icon: <Youtube size={16} /> },
+  { value: 'drive', label: 'Google Drive', icon: <FolderOpen size={16} /> },
 ];
 
-/**
- * Modal de escolha/troca de vídeo dentro da própria sala (sem sair nem desconectar).
- * Reaproveita o Catálogo e os formulários de fonte existentes da Home.
- */
-const MediaPickerContent: React.FC<Omit<MediaPickerModalProps, 'open'> & { onTabChange: (tab: PickerTab) => void }> = ({
+const MediaPickerPage: React.FC<Omit<MediaPickerModalProps, 'open'>> = ({
   onClose,
   inRoom,
+  roomCode,
   initialTab = 'catalog',
-  onTabChange,
   recentStreams,
   onRemoveRecent,
   onClearRecent,
@@ -68,10 +65,16 @@ const MediaPickerContent: React.FC<Omit<MediaPickerModalProps, 'open'> & { onTab
   const [tab, setTab] = useState<PickerTab>(initialTab);
   const [watchIntent, setWatchIntent] = useState<WatchIntent | null>(null);
 
-  const selectTab = (next: PickerTab) => {
-    setTab(next);
-    onTabChange(next);
-  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Só fecha a tela cheia do catálogo se não houver um modal aberto por cima (ex.: AddonsPanel ou SubtitleModal)
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+      onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const handleCommit = (
     payload: MediaPayload,
@@ -96,52 +99,82 @@ const MediaPickerContent: React.FC<Omit<MediaPickerModalProps, 'open'> & { onTab
 
   const handlePickStep = (step: SourceStep) => {
     if (step === 'stream' || step === 'upload' || step === 'youtube' || step === 'drive') {
-      selectTab(step);
+      setTab(step);
     }
   };
 
   return (
-    <>
-      <ModalHeader
-        title={t('Escolher vídeo')}
-        description={t('Troque o vídeo ou explore o catálogo sem sair da sala.')}
-        onClose={onClose}
-      />
+    <div
+      aria-label={t('Escolher vídeo')}
+      className={cx(
+        'fixed inset-0 z-[90] overflow-y-auto flex flex-col text-lu-text',
+        tab === 'catalog' ? 'lu-catalog-bg' : 'lu-home-bg'
+      )}
+    >
+      <header className="sticky top-0 z-20 grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_auto_1fr] items-center gap-y-3 px-4 sm:px-8 py-3 sm:py-0 sm:h-20 bg-lu-bg/85 backdrop-blur-md border-b border-lu-border">
+        <div className="flex items-center gap-2.5 min-w-0 justify-self-start">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex items-center gap-1.5 h-10 pl-2.5 pr-3.5 rounded-[10px] bg-lu-surface border border-lu-border text-[13.5px] font-semibold text-lu-text hover:bg-lu-elevated hover:border-lu-border-strong transition-colors whitespace-nowrap"
+          >
+            <ChevronLeft size={17} />
+            <span>{t('Voltar para a sala')}</span>
+          </button>
+          {inRoom && roomCode && (
+            <span className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-lu-bg2 border border-lu-border text-[12px] font-semibold text-lu-muted tabular">
+              <Dot tone="success" />
+              {t('Sala')} <span className="tracking-[0.08em] text-lu-text">{roomCode}</span>
+            </span>
+          )}
+        </div>
 
-      <div className="overflow-x-auto no-scrollbar">
-        <PillTabs
-          value={tab}
-          onChange={(next) => {
-            selectTab(next);
-            setWatchIntent(null);
-          }}
-          size="sm"
-          label={t('Fonte do vídeo')}
-          options={TABS}
-        />
-      </div>
+        <div className="col-span-2 row-start-2 sm:col-span-1 sm:row-start-auto overflow-x-auto no-scrollbar max-w-full">
+          <PillTabs
+            value={tab}
+            onChange={(next) => {
+              setTab(next);
+              setWatchIntent(null);
+            }}
+            size="sm"
+            label={t('Fonte do vídeo')}
+            options={TABS}
+          />
+        </div>
 
-      <div className="min-h-[320px] flex justify-center">
+        <div className="flex items-center justify-end col-start-2 row-start-1 sm:col-start-3">
+          <IconButton label={t('Voltar para a sala')} size={40} tone="muted" onClick={onClose}>
+            <X size={20} />
+          </IconButton>
+        </div>
+      </header>
+
+      <main
+        className={cx(
+          'relative flex-1 flex flex-col',
+          tab === 'catalog'
+            ? 'px-4 sm:px-12 pt-6 pb-16'
+            : 'items-center justify-center gap-7 px-4 sm:px-8 pt-6 pb-12'
+        )}
+      >
         {tab === 'catalog' && (
-          <div className="w-full">
-            <Suspense
-              fallback={
-                <div role="status" aria-label={t('Carregando')} className="w-full min-h-[280px] flex items-center justify-center">
-                  <Spinner size={28} className="text-lu-accent" />
-                </div>
-              }
-            >
-              <CatalogTab
-                syncUrl={false}
-                onWatch={(intent) => {
-                  setWatchIntent(intent);
-                  selectTab('stream');
-                }}
-                onPlayStream={handlePlayStream}
-                onCreateRoom={() => selectTab('stream')}
-              />
-            </Suspense>
-          </div>
+          <Suspense
+            fallback={
+              <div role="status" aria-label={t('Carregando')} className="w-full min-h-[360px] flex items-center justify-center">
+                <Spinner size={28} className="text-lu-accent" />
+              </div>
+            }
+          >
+            <CatalogTab
+              syncUrl={false}
+              onWatch={(intent) => {
+                setWatchIntent(intent);
+                setTab('stream');
+              }}
+              onPlayStream={handlePlayStream}
+              onCreateRoom={() => setTab('stream')}
+            />
+          </Suspense>
         )}
 
         {tab === 'stream' && (
@@ -154,7 +187,7 @@ const MediaPickerContent: React.FC<Omit<MediaPickerModalProps, 'open'> & { onTab
             inRoom={inRoom}
             pendingSubtitles={pendingSubtitles}
             onAddSubtitle={onAddSubtitle}
-            onBack={() => (watchIntent ? selectTab('catalog') : onClose())}
+            onBack={() => (watchIntent ? setTab('catalog') : onClose())}
             onCommit={handleCommit}
           />
         )}
@@ -172,36 +205,15 @@ const MediaPickerContent: React.FC<Omit<MediaPickerModalProps, 'open'> & { onTab
         {tab === 'youtube' && <YouTubeStep onBack={onClose} onCommit={handleCommit} inRoom={inRoom} />}
 
         {tab === 'drive' && <DriveStep onBack={onClose} onCommit={handleCommit} inRoom={inRoom} />}
-      </div>
-    </>
+      </main>
+    </div>
   );
 };
 
-export const MediaPickerModal: React.FC<MediaPickerModalProps> = (props) => {
-  const { open, onClose, initialTab = 'catalog' } = props;
-  const [activeTab, setActiveTab] = useState<PickerTab>(initialTab);
-
-  return (
-    <Modal
-      open={open}
-      onClose={() => {
-        setActiveTab(initialTab);
-        onClose();
-      }}
-      label={t('Escolher vídeo')}
-      width={activeTab === 'catalog' ? 980 : 660}
-      className="!p-5 !gap-4"
-    >
-      {open && (
-        <MediaPickerContent
-          {...props}
-          onClose={() => {
-            setActiveTab(initialTab);
-            onClose();
-          }}
-          onTabChange={setActiveTab}
-        />
-      )}
-    </Modal>
-  );
+/**
+ * Tela inteira do Catálogo / fontes de mídia aberta por cima da sala, preservando a conexão e o player vivos por baixo.
+ */
+export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({ open, ...rest }) => {
+  if (!open) return null;
+  return <MediaPickerPage {...rest} />;
 };

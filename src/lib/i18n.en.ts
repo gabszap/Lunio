@@ -669,7 +669,6 @@ export const EN: Record<string, string> = {
   "{n} nova": "{n} new",
   "{n} novas": "{n} new",
   "Escolher vídeo": "Choose video",
-  "Troque o vídeo ou explore o catálogo sem sair da sala.": "Switch video or browse the catalog without leaving the room.",
   "Fonte do vídeo": "Video source",
   "Carregando": "Loading",
   "conectado": "connected",
@@ -685,7 +684,6 @@ export const EN: Record<string, string> = {
   "Recusar pedido": "Reject request",
   "Aguardando Host": "Waiting for Host",
   "Cancelar pedido": "Cancel request",
-  "Atalhos": "Shortcuts",
   "Logs": "Logs",
   "Sugerir link para a sala": "Suggest a link for the room",
   "Enviar pedido": "Send request",
@@ -699,4 +697,5 @@ export const EN: Record<string, string> = {
   "Membros": "Members",
   "A lista de pedidos está cheia.": "The request list is full.",
   "Tocar na sala": "Play in room",
+  "Voltar para a sala": "Back to room",
 };
