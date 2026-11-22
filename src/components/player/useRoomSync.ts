@@ -79,14 +79,12 @@ export function useRoomSync(args: RoomSyncArgs) {
   const [syncToast, setSyncToast] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState(() => syncManager.getStatus());
   const [hostPausedInfo, setHostPausedInfo] = useState<{ username: string } | null>(null);
-  const [unreadChatCount, setUnreadChatCount] = useState<number>(0);
   const [chatToasts, setChatToasts] = useState<Array<{ id: string; username: string; text: string; avatarUrl?: string }>>([]);
   const isWatchPartyOpenRef = useRef<boolean>(isWatchPartyOpen);
   isWatchPartyOpenRef.current = isWatchPartyOpen;
 
   useEffect(() => {
     if (isWatchPartyOpen) {
-      setUnreadChatCount(0);
       setChatToasts([]);
     }
   }, [isWatchPartyOpen]);
@@ -174,7 +172,6 @@ export function useRoomSync(args: RoomSyncArgs) {
       if (msg.userId === currentUserId) return;
 
       if (!isWatchPartyOpenRef.current) {
-        setUnreadChatCount((prev) => prev + 1);
         const toastId = msg.id || `${Date.now()}_${Math.random()}`;
         const newToast = { id: toastId, username: msg.username, text: msg.text, avatarUrl: msg.avatarUrl };
         setChatToasts((prev) => {
@@ -270,7 +267,6 @@ export function useRoomSync(args: RoomSyncArgs) {
     setSyncToast,
     syncStatus,
     hostPausedInfo,
-    unreadChatCount,
     chatToasts,
     setChatToasts,
   };

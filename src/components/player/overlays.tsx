@@ -1,71 +1,14 @@
 import type React from 'react';
-import { TriangleAlert, RefreshCw, RotateCcw, X, FastForward, Film, Users, MessageSquare, Pause, Crown, Plus, ChevronLeft } from 'lucide-react';
+import { TriangleAlert, RefreshCw, RotateCcw, X, FastForward, MessageSquare, Pause, Crown, ChevronLeft } from 'lucide-react';
 import type { SubtitleTrack, SubtitlePreparationStatus } from '../../types/media';
 import { formatTime } from '../../lib/chapters';
 import { Avatar, Dot, GhostButton, IconButton, Kbd, PrimaryButton, Spinner } from '../ui';
-import { WatchPartyPanel } from '../WatchPartyPanel';
 import { t } from '../../lib/i18n';
 
 /** Peças visuais do player (avisos, prompts e toasts). Só renderizam: o estado e as decisões ficam nos hooks. */
 
 const floatingCard =
   'bg-lu-surface/90 backdrop-blur-md border border-lu-border shadow-[0_16px_40px_rgba(0,0,0,0.45)]';
-
-export function StandbyScreen(props: {
-  canChoose: boolean;
-  isConnected: boolean;
-  reconnecting?: boolean;
-  membersCount: number;
-  isWatchPartyOpen: boolean;
-  onChooseVideo?: () => void;
-  onToggleWatchParty: () => void;
-  onCloseWatchParty: () => void;
-  onOpenRoomLobby?: () => void;
-  onLeaveRoom?: () => void;
-  /** Palco da transmissão de tela (cartão "Assistir", imagem, avisos) por cima do aviso de sala vazia. */
-  stage?: React.ReactNode;
-  /** Botão extra do Host ao lado de "Escolher um vídeo" (transmitir a tela). */
-  hostAction?: React.ReactNode;
-}) {
-  const { canChoose, isConnected, reconnecting, membersCount, isWatchPartyOpen, onChooseVideo, onToggleWatchParty, onCloseWatchParty, onOpenRoomLobby, onLeaveRoom, stage, hostAction } = props;
-  return (
-    <div
-      id="video-player-standby"
-      className="relative w-full aspect-video min-h-[320px] rounded-[18px] lu-video-bg border border-lu-border overflow-hidden flex items-center justify-center select-none"
-    >
-      <div className="flex flex-col items-center text-center gap-5 px-6">
-        <div className="w-16 h-16 rounded-[14px] bg-lu-tint border border-lu-accent/30 flex items-center justify-center text-lu-accent">
-          <Film size={28} />
-        </div>
-        <div>
-          <h2 className="m-0 text-[20px] font-semibold tracking-[-0.01em]">{t('Nenhum vídeo na sala')}</h2>
-          <p className="mt-2 mx-auto mb-0 max-w-[420px] text-[14px] text-lu-muted">
-            {canChoose || !isConnected
-              ? t('Escolha um vídeo pra começar. Arquivo, YouTube, Drive ou link de stream.')
-              : t('O Host ainda não escolheu o vídeo. Ele aparece aqui assim que for carregado.')}
-          </p>
-        </div>
-        <div className="flex flex-wrap justify-center gap-3">
-          {canChoose && (
-            <PrimaryButton onClick={onChooseVideo}>
-              <Plus size={18} />
-              <span>{t('Escolher um vídeo')}</span>
-            </PrimaryButton>
-          )}
-          {hostAction}
-          <GhostButton onClick={onToggleWatchParty}>
-            <Users size={18} />
-            <span>{t('Watch Party · {n} online', { n: Math.max(1, membersCount) })}</span>
-          </GhostButton>
-        </div>
-      </div>
-
-      {stage}
-      {reconnecting && <ReconnectingBanner />}
-      <WatchPartyPanel isOpen={isWatchPartyOpen} onClose={onCloseWatchParty} onOpenRoomLobby={onOpenRoomLobby} onLeaveRoom={onLeaveRoom} />
-    </div>
-  );
-}
 
 export function SubtitlePreparingBadge({ label, status }: { label?: string; status?: SubtitlePreparationStatus }) {
   const stage = status?.stage;
