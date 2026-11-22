@@ -293,15 +293,16 @@ test.describe('transmissão de tela (motor falso)', () => {
     await submitName(host.page, 'Ana');
     await expect(host.page).toHaveURL(/\?room=[A-Z0-9]+/);
     const code = new URL(host.page.url()).searchParams.get('room')!;
-    await expect(host.page.getByText('Nenhum vídeo na sala')).toBeVisible();
+    await expect(host.page.locator('#room-member-grid')).toBeVisible();
 
-    // sem vídeo, o Host transmite pelo botão da própria tela de espera
+    // sem vídeo, o Host transmite pela dock (o menu já abre automaticamente ou pelo botão da dock)
     await expect(shareBtn(host.page)).toBeVisible();
-    await shareBtn(host.page).click();
-    // o menu da tela de espera abre numa janela centralizada: tem de caber inteiro na tela
-    const dialog = host.page.getByRole('dialog');
-    await expect(dialog).toBeVisible();
-    const box = (await dialog.boundingBox())!;
+    const menu = host.page.locator('#screen-share-menu');
+    if (!(await menu.isVisible().catch(() => false))) {
+      await shareBtn(host.page).click();
+    }
+    await expect(menu).toBeVisible();
+    const box = (await menu.boundingBox())!;
     const viewport = host.page.viewportSize()!;
     expect(box.y).toBeGreaterThanOrEqual(0);
     expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);

@@ -62,6 +62,7 @@ test('restart do servidor: a sala volta com Host e fila, e quem reconecta primei
     await host.page.getByLabel('Link para adicionar à fila').fill(SUBTITLES_URL);
     await host.page.getByRole('button', { name: 'Adicionar à fila' }).click();
     await expect(host.page.getByText('Adicionado por Ana')).toBeVisible();
+    await guest.page.getByRole('tab', { name: /Fila/ }).click();
     await expect(guest.page.getByText('Adicionado por Ana')).toBeVisible();
     await expect.poll(() => redis.exists(`lunio:roomstate:${code}`), { timeout: 10_000 }).toBe(1); // gravado (debounce de 250 ms)
     await host.page.waitForTimeout(1000);
@@ -79,6 +80,7 @@ test('restart do servidor: a sala volta com Host e fila, e quem reconecta primei
 
     await openParticipants(guest.page);
     await expect(guest.page.getByText('Você é espectador', { exact: true })).toBeVisible(); // não assumiu o Host
+    await guest.page.getByRole('tab', { name: /Fila/ }).click();
     await expect(guest.page.getByText('Adicionado por Ana')).toBeVisible(); // a fila voltou
 
     // A Ana volta e retoma o Host
@@ -86,7 +88,9 @@ test('restart do servidor: a sala volta com Host e fila, e quem reconecta primei
     await expect(host.page.getByText('Reconectando à sala…')).toBeHidden({ timeout: 40_000 });
     await openParticipants(host.page);
     await expect(host.page.getByText('Você é o Host', { exact: true })).toBeVisible();
+    await host.page.getByRole('tab', { name: /Fila/ }).click();
     await expect(host.page.getByText('Adicionado por Ana')).toBeVisible();
+    await openParticipants(guest.page);
     await expect(guest.page.getByText('Você é espectador', { exact: true })).toBeVisible();
   } finally {
     await host.context.close();

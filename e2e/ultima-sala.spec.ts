@@ -9,8 +9,7 @@ test.describe('Voltar à última sala', () => {
     await joinRoom(guest.page, code, 'Bia');
     await waitReady(host.page);
 
-    await host.page.mouse.move(640, 360);
-    await host.page.getByRole('button', { name: 'Voltar', exact: true }).click();
+    await host.page.locator('#btn-dock-leave').click();
     await expect(host.page).not.toHaveURL(/room=/);
 
     const card = host.page.locator('section', { hasText: `Voltar à sala ${code}` });
