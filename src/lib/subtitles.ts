@@ -10,6 +10,7 @@ import {
 import { logger } from './logger';
 import { apiFetch } from './access';
 import { collectAssFontNames, selectFontsToLoad } from './assFonts';
+import { transformAssStyle } from './assStyle';
 import { srtToVtt } from './media';
 import { sessionManager } from './session';
 import { t } from './/i18n';
@@ -628,7 +629,7 @@ export class SubtitleManager {
     if (typeof window !== 'undefined') {
       localStorage.setItem('vidstack_player_subtitle_font_size', clamped.toString());
     }
-    this.applyCssVariables();
+    this.reapplySubtitleAppearance();
     logger.setting('Tamanho da legenda', `${clamped}%`);
   }
 
@@ -638,8 +639,39 @@ export class SubtitleManager {
     if (typeof window !== 'undefined') {
       localStorage.setItem('vidstack_player_subtitle_bottom_offset', clamped.toString());
     }
-    this.applyCssVariables();
+    this.reapplySubtitleAppearance();
     logger.setting('Posição da legenda', `${clamped}%`);
+  }
+
+  private reapplySubtitleAppearance() {
+    this.applyCssVariables();
+    if (this.jassubInstance && this.currentTrack?.content) {
+      const styled = transformAssStyle(this.currentTrack.content, this.fontSizePercent, this.bottomOffsetPercent);
+      try {
+        if (typeof this.jassubInstance.setTrack === 'function') {
+          this.jassubInstance.setTrack(styled);
+          this.jassubInstance.resize?.(true);
+        }
+      } catch {
+        // fallback silencioso se o worker ainda estiver iniciando
+      }
+    }
+    this.applyNativeCuePosition();
+  }
+
+  private applyNativeCuePosition() {
+    const track = this.nativeTrackEl?.track;
+    if (!track?.cues) return;
+    const line = Math.max(50, Math.min(98, 100 - this.bottomOffsetPercent));
+    for (const cue of Array.from(track.cues)) {
+      const vttCue = cue as VTTCue;
+      if ('line' in vttCue) {
+        try {
+          vttCue.snapToLines = false;
+          vttCue.line = line;
+        } catch {}
+      }
+    }
   }
 
   private applyCssVariables() {
@@ -858,9 +890,11 @@ export class SubtitleManager {
       }));
       assertCurrent();
 
+      const styledAssContent = transformAssStyle(subContent, this.fontSizePercent, this.bottomOffsetPercent);
+
       const opts: any = {
         video,
-        subContent,
+        subContent: styledAssContent,
         debug: false,
         wasmUrl: '/jassub/wasm/jassub-worker.wasm',
         modernWasmUrl: '/jassub/wasm/jassub-worker-modern.wasm',
@@ -997,6 +1031,7 @@ export class SubtitleManager {
       if (trackEl.track) {
         this.nativeOriginalCues = Array.from(trackEl.track.cues || []).map(cue => ({ cue, start: cue.startTime, end: cue.endTime }));
         this.applySubtitleOffset();
+        this.applyNativeCuePosition();
         trackEl.track.mode = 'showing';
       }
 

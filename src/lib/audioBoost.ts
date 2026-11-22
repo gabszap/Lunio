@@ -17,6 +17,7 @@ export class AudioBoostManager {
   private isAvailable = true;
 
   constructor() {
+    if (typeof localStorage === 'undefined') return;
     const savedBoost = localStorage.getItem('vidstack_player_volume_boost');
     if (savedBoost) {
       const parsed = parseFloat(savedBoost);
@@ -157,7 +158,7 @@ export class AudioBoostManager {
   public setBoost(percent: number) {
     const clamped = Math.max(100, Math.min(200, percent));
     this.boostPercent = clamped;
-    localStorage.setItem('vidstack_player_volume_boost', clamped.toString());
+    if (typeof localStorage !== 'undefined') localStorage.setItem('vidstack_player_volume_boost', clamped.toString());
 
     if (this.currentElement) {
       if (clamped > 100) {
@@ -175,7 +176,7 @@ export class AudioBoostManager {
   public setAudioDelay(delayInSeconds: number) {
     const clamped = Math.max(0, Math.min(5.0, Number(delayInSeconds.toFixed(3))));
     this.audioDelaySec = clamped;
-    localStorage.setItem('vidstack_player_audio_delay', clamped.toString());
+    if (typeof localStorage !== 'undefined') localStorage.setItem('vidstack_player_audio_delay', clamped.toString());
 
     if (this.currentElement) {
       if (clamped > 0) {
@@ -190,9 +191,16 @@ export class AudioBoostManager {
     logger.setting('Atraso do áudio', `${Math.round(clamped * 1000)} ms`);
   }
 
+  private resumeIfNeeded(graph: AudioGraph) {
+    if (graph.audioContext.state === 'suspended' && this.currentElement && !this.currentElement.paused) {
+      graph.audioContext.resume().catch(() => {});
+    }
+  }
+
   private applyGain(graph: AudioGraph) {
     // 100% -> gain 1.0; 200% -> gain 2.0
     const gainValue = this.boostPercent / 100;
+    this.resumeIfNeeded(graph);
     try {
       graph.gainNode.gain.cancelScheduledValues(graph.audioContext.currentTime);
       graph.gainNode.gain.setValueAtTime(gainValue, graph.audioContext.currentTime);
@@ -202,6 +210,7 @@ export class AudioBoostManager {
   }
 
   private applyDelay(graph: AudioGraph) {
+    this.resumeIfNeeded(graph);
     try {
       graph.delayNode.delayTime.cancelScheduledValues(graph.audioContext.currentTime);
       graph.delayNode.delayTime.setValueAtTime(this.audioDelaySec, graph.audioContext.currentTime);

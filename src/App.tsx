@@ -32,7 +32,7 @@ import { describeSourceForLog } from './lib/mediaLog';
 import { shareableFingerprint } from './lib/media';
 import { discordManager, DiscordContextState } from './lib/discord';
 import { syncManager } from './lib/sync';
-import { generateRoomCode, roomCodeFrom } from './lib/roomCode';
+import { generateRoomCode, readRoomFromUrl, setRoomInUrl } from './lib/roomCode';
 import { RecentStream, loadRecentStreams, pushRecentStream, saveRecentStreams } from './lib/recent';
 import { t, useLang } from './lib/i18n';
 import { ScreenShareProvider } from './components/player/ScreenShareContext';
@@ -56,14 +56,6 @@ const EMPTY_PAYLOAD: MediaPayload = {
   audioTracks: [],
 };
 
-function setRoomInUrl(code: string | null) {
-  const url = new URL(window.location.href);
-  if (code) url.searchParams.set('room', code);
-  else url.searchParams.delete('room');
-  // A sala vive na raiz: o link não carrega a aba de onde foi criada (/home, /catalog...)
-  window.history.replaceState(null, '', (code ? '/' : url.pathname) + url.search);
-}
-
 export default function App() {
   // Trocar o idioma remonta a árvore inteira (a troca só existe na Home, sem vídeo tocando)
   const lang = useLang();
@@ -76,7 +68,7 @@ export default function App() {
   const [homeTab, setHomeTab] = useState<HomeTab>(() => {
     const fromPath = tabFromPath(window.location.pathname);
     if (fromPath !== 'room') return fromPath;
-    const hasRoom = new URLSearchParams(window.location.search).has('room');
+    const hasRoom = Boolean(readRoomFromUrl());
     return (initialSearch.current || initialDetail.current) && !hasRoom ? 'catalog' : 'room';
   });
   const [homeStep, setHomeStep] = useState<HomeStep>('menu');
@@ -254,10 +246,9 @@ export default function App() {
 
     discordManager.initialize();
 
-    // No navegador: ?room=CODE entra direto na sala (ou mostra o erro na tela "Entrar na sala")
+    // No navegador: /room/CODE (ou ?room=CODE legado) entra direto na sala (ou mostra erro em "Entrar na sala")
     if (!discordManager.isDiscordActivity()) {
-      const queryRoom = new URLSearchParams(window.location.search).get('room');
-      const validCode = queryRoom ? roomCodeFrom(queryRoom) : null;
+      const validCode = readRoomFromUrl();
       if (validCode) {
         checkRoom(validCode).then((info) => {
           if (info && !info.exists) {

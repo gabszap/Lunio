@@ -89,10 +89,10 @@ export const EpisodesOverlay: React.FC<EpisodesOverlayProps> = ({
       ref={containerRef}
       id="player-episodes-overlay"
       className={cx(
-        'absolute left-3 sm:left-6 top-14 sm:top-16 bottom-20 sm:bottom-24 z-40',
-        targetEpisode ? 'w-[440px] sm:w-[560px]' : 'w-[360px] sm:w-[420px]',
-        'max-w-[calc(100vw-24px)] transition-all duration-200',
-        'rounded-[20px] bg-lu-surface/95 border border-lu-border shadow-[0_20px_50px_rgba(0,0,0,0.85)]',
+        'absolute right-3 sm:right-4 top-3 sm:top-4 bottom-16 sm:bottom-20 z-40',
+        targetEpisode ? 'w-[min(580px,calc(100%-24px))]' : 'w-[min(520px,calc(100%-24px))]',
+        'transition-[width] duration-200 ease-out',
+        'rounded-[18px] bg-lu-bg2/96 border border-lu-border-strong shadow-[0_24px_64px_rgba(0,0,0,0.75)]',
         'backdrop-blur-xl p-4 flex flex-col gap-3 pointer-events-auto select-none overflow-hidden',
       )}
       onClick={(e) => e.stopPropagation()}
@@ -237,8 +237,8 @@ export const EpisodesOverlay: React.FC<EpisodesOverlayProps> = ({
             </div>
           )}
 
-          {/* Lista de episódios: Thumb fixa (112x63) + Número + Nome + Data */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar flex flex-col gap-2 pr-1 min-h-0">
+          {/* Lista de episódios compacta e espaçosa para mostrar mais episódios de uma vez */}
+          <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar flex flex-col gap-1.5 pr-1 min-h-0">
             {seasonEpisodes.map((ep) => {
               const isCurrent = ep.id === seriesContext.currentEpisodeId;
               const watched = isWatched(ep.id);
@@ -262,15 +262,15 @@ export const EpisodesOverlay: React.FC<EpisodesOverlayProps> = ({
                     }
                   }}
                   className={cx(
-                    'w-full flex items-center gap-3 p-2 rounded-[14px] text-left transition-all group select-none',
+                    'w-full flex items-center gap-3 p-2 rounded-[12px] text-left transition-all group select-none',
                     isViewer ? 'cursor-default' : 'cursor-pointer',
                     isCurrent
                       ? 'bg-lu-tint/70 border border-lu-accent/40 text-lu-text'
                       : 'bg-white/[0.03] hover:bg-white/8 text-lu-text border border-white/5',
                   )}
                 >
-                  {/* Thumbnail do episódio com dimensões travadas (112x63) para nunca bugar em tela cheia */}
-                  <div className="relative w-28 h-[63px] min-w-[112px] max-w-[112px] min-h-[63px] max-h-[63px] shrink-0 rounded-[8px] overflow-hidden bg-lu-bg border border-white/10">
+                  {/* Thumbnail do episódio 16:9 compacta (96x54) */}
+                  <div className="relative w-24 h-[54px] min-w-[96px] max-w-[96px] min-h-[54px] max-h-[54px] shrink-0 rounded-[8px] overflow-hidden bg-lu-bg border border-white/10">
                     {ep.thumbnail ? (
                       <img
                         src={ep.thumbnail}

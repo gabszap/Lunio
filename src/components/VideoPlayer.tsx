@@ -521,6 +521,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onProviderChange={(provider) => {
           if (provider) providerReadyRef.current = true;
           if (isHLSProvider(provider)) provider.library = () => import('hls.js');
+          const videoEl = getVideoElement(playerRef);
+          if (videoEl) audioBoost.attachToElement(videoEl);
         }}
         // O MediaProvider do Vidstack (React) só carrega o provedor ao montar o <video>. Ao trocar de "video" para "hls"
         // (e voltar) o elemento é o mesmo, então pedimos o carregamento do provedor novo à mão.
@@ -684,6 +686,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           onSubtitleDelayChange={prefs.handleSubtitleDelayChange}
           subtitleFontSize={prefs.subtitleFontSize}
           onSubtitleFontSizeChange={prefs.handleSubtitleFontSizeChange}
+          subtitleBottomOffset={prefs.subtitleBottomOffset}
+          onSubtitleBottomOffsetChange={prefs.handleSubtitleBottomOffsetChange}
           onFullscreenToggle={fullscreen.handleFullscreenToggle}
           onPipToggle={fullscreen.handlePipToggle}
           onToggleAspect={prefs.handleToggleAspect}

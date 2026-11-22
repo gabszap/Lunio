@@ -314,6 +314,11 @@ html.is-fullscreen .player-menu-panel {
   line-height: 1.4 !important;
 }
 
+.vds-captions {
+  --cue-font-size: calc(1em * var(--subtitle-font-size, 100%) / 100);
+  padding-bottom: var(--subtitle-bottom-offset, 5%);
+}
+
 
 
 /* Enquanto a transmissão de tela cobre o vídeo da sala, a legenda do filme não aparece por cima da tela transmitida */

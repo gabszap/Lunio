@@ -12,7 +12,7 @@ import {
   RotateCw,
   Plus,
   SkipForward,
-  Tv,
+  ListVideo,
 } from 'lucide-react';
 import { Chapter, SubtitleTrack, AudioTrackOption, CatalogSeriesContext } from '../types/media';
 import type { CatalogEpisode } from '../lib/catalog';
@@ -75,6 +75,8 @@ interface PlayerControlsProps {
   onSubtitleDelayChange?: (delay: number) => void;
   subtitleFontSize?: number;
   onSubtitleFontSizeChange?: (size: number) => void;
+  subtitleBottomOffset?: number;
+  onSubtitleBottomOffsetChange?: (offset: number) => void;
   aspectCover?: boolean;
   aspectMode?: 'fit' | 'fill' | 'stretch';
   onToggleAspect?: () => void;
@@ -227,6 +229,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   onSubtitleDelayChange,
   subtitleFontSize = 100,
   onSubtitleFontSizeChange,
+  subtitleBottomOffset = 5,
+  onSubtitleBottomOffsetChange,
   aspectMode = 'fit',
   onToggleAspect,
   onFullscreenToggle,
@@ -498,12 +502,14 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                     <>
                       <MenuDivider />
                       <MenuSection title={t('Sincronia')} value={formatMs(subtitleDelay)}>
-                        <ChipRow>
-                          <Chip onClick={() => onSubtitleDelayChange(Number((subtitleDelay - 0.05).toFixed(2)))}>{t('−50 ms')}</Chip>
-                          <Chip selected={subtitleDelay === 0} onClick={() => onSubtitleDelayChange(0)}>
+                        <ChipRow gap="tight">
+                          <Chip dense onClick={() => onSubtitleDelayChange(Number((subtitleDelay - 0.25).toFixed(2)))}>−250 ms</Chip>
+                          <Chip dense onClick={() => onSubtitleDelayChange(Number((subtitleDelay - 0.05).toFixed(2)))}>{t('−50 ms')}</Chip>
+                          <Chip dense selected={subtitleDelay === 0} onClick={() => onSubtitleDelayChange(0)}>
                             {t('Redefinir')}
                           </Chip>
-                          <Chip onClick={() => onSubtitleDelayChange(Number((subtitleDelay + 0.05).toFixed(2)))}>{t('+50 ms')}</Chip>
+                          <Chip dense onClick={() => onSubtitleDelayChange(Number((subtitleDelay + 0.05).toFixed(2)))}>{t('+50 ms')}</Chip>
+                          <Chip dense onClick={() => onSubtitleDelayChange(Number((subtitleDelay + 0.25).toFixed(2)))}>+250 ms</Chip>
                         </ChipRow>
                       </MenuSection>
                     </>
@@ -512,11 +518,26 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   {activeSubtitle && onSubtitleFontSizeChange && (
                     <>
                       <MenuDivider />
-                      <MenuSection title={t('Tamanho da fonte')} value={`${subtitleFontSize}%`} last>
-                        <ChipRow>
-                          {[75, 100, 125, 150].map((sz) => (
-                            <Chip key={sz} selected={subtitleFontSize === sz} onClick={() => onSubtitleFontSizeChange(sz)}>
+                      <MenuSection title={t('Tamanho da fonte')} value={`${subtitleFontSize}%`}>
+                        <ChipRow gap="tight">
+                          {[75, 100, 125, 150, 175].map((sz) => (
+                            <Chip key={sz} dense selected={subtitleFontSize === sz} onClick={() => onSubtitleFontSizeChange(sz)}>
                               {sz}%
+                            </Chip>
+                          ))}
+                        </ChipRow>
+                      </MenuSection>
+                    </>
+                  )}
+
+                  {activeSubtitle && onSubtitleBottomOffsetChange && (
+                    <>
+                      <MenuDivider />
+                      <MenuSection title={t('Altura da legenda')} value={`${subtitleBottomOffset}%`} last={!onAddSubtitle}>
+                        <ChipRow gap="tight">
+                          {[0, 5, 10, 15, 20].map((off) => (
+                            <Chip key={off} dense selected={subtitleBottomOffset === off} onClick={() => onSubtitleBottomOffsetChange(off)}>
+                              {off}%
                             </Chip>
                           ))}
                         </ChipRow>
@@ -594,7 +615,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   onClick={() => toggleMenu('episodes')}
                   className="!w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11"
                 >
-                  <Tv size={18} />
+                  <ListVideo size={18} />
                 </IconButton>
               </div>
             )}

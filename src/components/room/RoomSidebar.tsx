@@ -65,8 +65,6 @@ export const RoomSidebar: React.FC<RoomSidebarProps> = ({
     }
   }, [open, activeTab]);
 
-  if (!open) return null;
-
   const status = syncManager.getStatus();
   const isHost = syncManager.isRoomHost();
   const members = roomState?.members || [];
@@ -84,13 +82,24 @@ export const RoomSidebar: React.FC<RoomSidebarProps> = ({
     <aside
       role="complementary"
       aria-label={t('Watch Party')}
+      aria-hidden={!open}
+      inert={!open ? ('' as unknown as boolean) : undefined}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
       className={cx(
         'rounded-2xl bg-lu-bg2 border border-lu-border flex flex-col min-h-0 overflow-hidden text-lu-text cursor-auto',
         isFullscreen
-          ? 'fixed inset-y-3 right-3 z-50 w-[min(360px,calc(100vw-24px))] shadow-[0_24px_64px_rgba(0,0,0,0.6)]'
-          : 'w-[360px] flex-none max-lg:fixed max-lg:inset-y-3 max-lg:right-3 max-lg:z-50 max-lg:w-[min(360px,calc(100vw-24px))] max-lg:shadow-[0_24px_64px_rgba(0,0,0,0.6)]'
+          ? cx(
+              'fixed inset-y-3 right-3 z-50 w-[min(360px,calc(100vw-24px))] shadow-[0_24px_64px_rgba(0,0,0,0.6)] transition-[transform,opacity] duration-200 ease-out',
+              open ? 'translate-x-0 opacity-100 pointer-events-auto' : 'translate-x-[calc(100%+24px)] opacity-0 pointer-events-none'
+            )
+          : cx(
+              'flex-none transition-[width,opacity,margin,transform] duration-200 ease-out',
+              'max-lg:fixed max-lg:inset-y-3 max-lg:right-3 max-lg:z-50 max-lg:w-[min(360px,calc(100vw-24px))] max-lg:shadow-[0_24px_64px_rgba(0,0,0,0.6)]',
+              open
+                ? 'lg:w-[360px] opacity-100 max-lg:translate-x-0 pointer-events-auto'
+                : 'lg:w-0 lg:-ml-3 lg:border-transparent opacity-0 max-lg:translate-x-[calc(100%+24px)] pointer-events-none'
+            )
       )}
     >
       {/* Cabeçalho compacto com botão de fechar quando em tela cheia ou drawer (< lg) */}

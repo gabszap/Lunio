@@ -14,6 +14,7 @@ export function usePlayerPrefs() {
   const [audioDelay, setAudioDelay] = useState<number>(() => audioBoost.getAudioDelay());
   const [subtitleDelay, setSubtitleDelay] = useState<number>(() => subtitleManager.getSubtitleDelay());
   const [subtitleFontSize, setSubtitleFontSize] = useState<number>(() => subtitleManager.getFontSize());
+  const [subtitleBottomOffset, setSubtitleBottomOffset] = useState<number>(() => subtitleManager.getBottomOffset());
   const [osdToast, setOsdToast] = useState<{ text: string; icon?: string } | null>(null);
   /** Pular a abertura/encerramento sozinho (quem tem o controle) ou votar sozinho (espectador). Preferência desta pessoa. */
   const [autoSkipIntro, setAutoSkipIntroState] = useState<boolean>(() => {
@@ -67,6 +68,12 @@ export function usePlayerPrefs() {
     triggerOsdToast(t('Tamanho da legenda: {size}%', { size }));
   }, [triggerOsdToast]);
 
+  const handleSubtitleBottomOffsetChange = useCallback((offset: number) => {
+    subtitleManager.setBottomOffset(offset);
+    setSubtitleBottomOffset(offset);
+    triggerOsdToast(t('Altura da legenda: {offset}%', { offset }));
+  }, [triggerOsdToast]);
+
   // Alternar Aspect Ratio (Original / Esticar / Preencher - estilo mpv & Stremio)
   const handleToggleAspect = () => {
     setAspectMode((prev) => {
@@ -102,10 +109,12 @@ export function usePlayerPrefs() {
     audioDelay,
     subtitleDelay,
     subtitleFontSize,
+    subtitleBottomOffset,
     osdToast,
     triggerOsdToast,
     handleAudioDelayChange,
     handleSubtitleDelayChange,
     handleSubtitleFontSizeChange,
+    handleSubtitleBottomOffsetChange,
   };
 }

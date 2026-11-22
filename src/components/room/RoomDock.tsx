@@ -51,10 +51,8 @@ export const RoomDock: React.FC<RoomDockProps> = ({
   const revealDock = !isFullscreen || hovered || anyMenuOpen;
 
   const copyRoomLink = async (atSeconds?: number) => {
-    const url = new URL('/', window.location.origin);
-    url.searchParams.set('room', roomCode);
-    if (atSeconds === undefined) url.searchParams.delete('t');
-    else url.searchParams.set('t', String(Math.floor(atSeconds)));
+    const url = new URL(`/room/${roomCode}`, window.location.origin);
+    if (atSeconds !== undefined) url.searchParams.set('t', String(Math.floor(atSeconds)));
     setShareOpen(false);
     if (await copyText(url.toString())) {
       setCopiedLink(true);

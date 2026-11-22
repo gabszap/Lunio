@@ -2,6 +2,7 @@ import { discordManager } from './discord';
 import { clearRoomToken, setRoomToken } from './access';
 import { logger } from './logger';
 import { t } from './/i18n';
+import { readRoomFromUrl } from './roomCode';
 import { ServerClock } from './serverClock';
 import type { ScreenSignals } from './screen/signals';
 import type { ScreenKeyMaterial } from './screen/wire';
@@ -234,10 +235,9 @@ class SyncManager implements ScreenSignals {
       this.reconnectTimer = null;
     }
 
-    // Detecta sala: Discord Voice Channel se disponível, query param ?room= ou customRoomId
+    // Detecta sala: Discord Voice Channel se disponível, rota /room/:code (ou ?room= legado) ou customRoomId
     const discordState = discordManager.getState();
-    const urlParams = new URLSearchParams(window.location.search);
-    const queryRoom = urlParams.get('room');
+    const queryRoom = readRoomFromUrl();
 
     // Se estiver no Discord e o canal de voz ainda não estiver resolvido pelo SDK, aguarda a resolução
     if (discordState.isEmbedded && !discordState.channelId && !customRoomId) {
@@ -342,8 +342,7 @@ class SyncManager implements ScreenSignals {
   }
 
   public syncWithDiscord(discordState: import('./discord').DiscordContextState) {
-    const urlParams = new URLSearchParams(window.location.search);
-    const queryRoom = urlParams.get('room');
+    const queryRoom = readRoomFromUrl();
 
     if (discordState.user) {
       this.setUserProfile(
