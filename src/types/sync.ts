@@ -5,17 +5,6 @@ export type MemberPlaybackState = 'waiting' | 'loading' | 'ready' | 'playing' | 
 
 export type RoomVisibility = 'public' | 'private';
 
-export type ReactionKind = 'fire' | 'laugh' | 'shock' | 'heart' | 'clap' | 'cry';
-export const REACTION_KINDS: readonly ReactionKind[] = ['fire', 'laugh', 'shock', 'heart', 'clap', 'cry'] as const;
-
-export interface RoomReaction {
-  id: string;
-  kind: ReactionKind;
-  userId: string;
-  username: string;
-  timestamp: number;
-}
-
 export interface RoomMember {
   id: string;
   username: string;
@@ -152,10 +141,6 @@ export type ClientMessage =
       /** String não vazia define/altera a senha; `null` remove a senha; `undefined` mantém a atual. */
       password?: string | null;
       autoPauseOnBuffer?: boolean;
-    }
-  | {
-      type: 'reaction:send';
-      kind: ReactionKind;
     }
   | {
       type: 'room:leave';
@@ -432,10 +417,6 @@ export type ServerMessage =
       visibility: RoomVisibility;
       hasPassword: boolean;
       autoPauseOnBuffer: boolean;
-    }
-  | {
-      type: 'reaction:broadcast';
-      reaction: RoomReaction;
     }
   | {
       type: 'error';

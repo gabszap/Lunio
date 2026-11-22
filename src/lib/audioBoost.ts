@@ -73,12 +73,12 @@ export class AudioBoostManager {
         const delayNode = audioContext.createDelay(5.0); // max 5 seconds delay buffer
         const compressorNode = audioContext.createDynamicsCompressor();
 
-        // Dynamics compressor settings to prevent harsh clipping when boosted up to 200%
-        compressorNode.threshold.setValueAtTime(-6, audioContext.currentTime);
-        compressorNode.knee.setValueAtTime(30, audioContext.currentTime);
-        compressorNode.ratio.setValueAtTime(12, audioContext.currentTime);
-        compressorNode.attack.setValueAtTime(0.003, audioContext.currentTime);
-        compressorNode.release.setValueAtTime(0.25, audioContext.currentTime);
+        // Limitador suave perto de 0 dBFS: transparente em 100% e evita clipping no boost até 200%
+        compressorNode.threshold.setValueAtTime(-1, audioContext.currentTime);
+        compressorNode.knee.setValueAtTime(6, audioContext.currentTime);
+        compressorNode.ratio.setValueAtTime(20, audioContext.currentTime);
+        compressorNode.attack.setValueAtTime(0.002, audioContext.currentTime);
+        compressorNode.release.setValueAtTime(0.15, audioContext.currentTime);
 
         // Chain: source -> gainNode -> delayNode -> compressor -> destination
         sourceNode.connect(gainNode);
@@ -109,6 +109,8 @@ export class AudioBoostManager {
               const now = graph.audioContext.currentTime;
               graph.gainNode.gain.cancelScheduledValues(now);
               graph.gainNode.gain.setValueAtTime(this.boostPercent / 100, now);
+              graph.delayNode.delayTime.cancelScheduledValues(now);
+              graph.delayNode.delayTime.setValueAtTime(this.audioDelaySec, now);
               if (graph.audioContext.state === 'suspended') {
                 graph.audioContext.resume().catch(() => {});
               }
@@ -155,16 +157,31 @@ export class AudioBoostManager {
     }
   }
 
+  private ensureElement(): HTMLMediaElement | null {
+    if (this.currentElement && (typeof this.currentElement.isConnected !== 'boolean' || this.currentElement.isConnected)) {
+      return this.currentElement;
+    }
+    if (typeof document !== 'undefined') {
+      const video = document.querySelector('#video-player-root video') as HTMLMediaElement | null;
+      if (video) {
+        this.currentElement = video;
+        return video;
+      }
+    }
+    return this.currentElement;
+  }
+
   public setBoost(percent: number) {
     const clamped = Math.max(100, Math.min(200, percent));
     this.boostPercent = clamped;
     if (typeof localStorage !== 'undefined') localStorage.setItem('vidstack_player_volume_boost', clamped.toString());
 
-    if (this.currentElement) {
+    const el = this.ensureElement();
+    if (el) {
       if (clamped > 100) {
-        this.attachToElement(this.currentElement);
+        this.attachToElement(el);
       }
-      const graph = videoGraphMap.get(this.currentElement);
+      const graph = videoGraphMap.get(el);
       if (graph) {
         this.applyGain(graph);
       }
@@ -178,11 +195,12 @@ export class AudioBoostManager {
     this.audioDelaySec = clamped;
     if (typeof localStorage !== 'undefined') localStorage.setItem('vidstack_player_audio_delay', clamped.toString());
 
-    if (this.currentElement) {
+    const el = this.ensureElement();
+    if (el) {
       if (clamped > 0) {
-        this.attachToElement(this.currentElement);
+        this.attachToElement(el);
       }
-      const graph = videoGraphMap.get(this.currentElement);
+      const graph = videoGraphMap.get(el);
       if (graph) {
         this.applyDelay(graph);
       }

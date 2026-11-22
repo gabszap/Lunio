@@ -645,18 +645,48 @@ export class SubtitleManager {
 
   private reapplySubtitleAppearance() {
     this.applyCssVariables();
-    if (this.jassubInstance && this.currentTrack?.content) {
+    const instance = this.jassubInstance;
+    if (instance && this.currentTrack?.content) {
       const styled = transformAssStyle(this.currentTrack.content, this.fontSizePercent, this.bottomOffsetPercent);
-      try {
-        if (typeof this.jassubInstance.setTrack === 'function') {
-          this.jassubInstance.setTrack(styled);
-          this.jassubInstance.resize?.(true);
-        }
-      } catch {
-        // fallback silencioso se o worker ainda estiver iniciando
-      }
+      void Promise.resolve(instance.ready)
+        .then(async () => {
+          if (this.jassubInstance !== instance) return;
+          if (instance.renderer && typeof instance.renderer.setTrack === 'function') {
+            await instance.renderer.setTrack(styled);
+          } else if (typeof instance.setTrack === 'function') {
+            await instance.setTrack(styled);
+          }
+          await this.forceJassubRepaint(instance);
+        })
+        .catch(() => {
+          // fallback silencioso se o worker ainda estiver iniciando ou for descartado
+        });
     }
     this.applyNativeCuePosition();
+  }
+
+  private async forceJassubRepaint(instance: any) {
+    if (!instance || this.jassubInstance !== instance) return;
+    try {
+      await Promise.resolve(instance.ready);
+      if (this.jassubInstance !== instance) return;
+      const video: HTMLVideoElement | undefined = instance._video;
+      if (video && video.videoWidth > 0 && video.videoHeight > 0 && typeof instance.manualRender === 'function') {
+        await instance.manualRender(
+          {
+            mediaTime: video.currentTime || 0,
+            width: video.videoWidth,
+            height: video.videoHeight,
+            expectedDisplayTime: performance.now(),
+          },
+          true
+        );
+      } else if (instance._lastDemandTime && typeof instance._demandRender === 'function') {
+        await instance._demandRender(true);
+      } else if (typeof instance.resize === 'function') {
+        await instance.resize(true);
+      }
+    } catch {}
   }
 
   private applyNativeCuePosition() {
@@ -1096,7 +1126,7 @@ export class SubtitleManager {
     if (this.jassubInstance) {
       try {
         this.jassubInstance.timeOffset = offset;
-        this.jassubInstance.resize(true);
+        void this.forceJassubRepaint(this.jassubInstance);
       } catch {}
     }
     const track = this.nativeTrackEl?.track;

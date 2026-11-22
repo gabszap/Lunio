@@ -5,7 +5,7 @@ import type { Server as HttpsServer } from 'node:https';
 import { issueRoomToken } from './access';
 import { config } from './config';
 import { isOriginAllowed } from './cors';
-import { PLAYLIST_MAX_ITEMS, REACTION_KINDS, REQUESTS_MAX_ITEMS, playlistUrlKey } from '../types/sync';
+import { PLAYLIST_MAX_ITEMS, REQUESTS_MAX_ITEMS, playlistUrlKey } from '../types/sync';
 import { warmUpMedia } from './media/resolver';
 import { pruneRoomUploads, uploadIdFromUrl } from './media/uploads';
 import { uploadIndex } from './media/uploadIndex';
@@ -65,8 +65,6 @@ interface ClientSession {
   behindShownMs?: number;
   /** O Host expulsou ou baniu: a chave da transmissão já foi pedida, a saída de vez não pede de novo. */
   removedByHost?: boolean;
-  /** Último envio de reação (ms) para limitar spam. */
-  lastReactionAt?: number;
 }
 
 interface RoomInternal {
@@ -135,7 +133,6 @@ const PERSISTED_MESSAGES = new Set<string>([
   'room:settings', 'room:transfer_host', 'room:ban', 'room:unban', 'chat:send',
   'playback:play', 'playback:pause', 'playback:seek', 'playback:rate', 'playback:timeline',
 ]);
-const REACTION_COOLDOWN_MS = 500;
 const AUTO_PAUSE_MAX_MS = 15_000;
 /** O Host manda a posição a cada poucos segundos: gravar no máximo a cada 5 s por sala. */
 const TIMELINE_PERSIST_GAP_MS = 5000;
@@ -1119,24 +1116,6 @@ export class RoomManager {
           visibility: currentRoom.visibility,
           hasPassword: Boolean(currentRoom.passwordHash),
           autoPauseOnBuffer: currentRoom.autoPauseOnBuffer,
-        });
-        break;
-      }
-
-      case 'reaction:send': {
-        if (!REACTION_KINDS.includes(msg.kind)) return;
-        const now = Date.now();
-        if (clientSession.lastReactionAt && now - clientSession.lastReactionAt < REACTION_COOLDOWN_MS) return;
-        clientSession.lastReactionAt = now;
-        this.broadcast(currentRoom, {
-          type: 'reaction:broadcast',
-          reaction: {
-            id: `rx_${now.toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-            kind: msg.kind,
-            userId: clientSession.userId,
-            username: clientSession.username,
-            timestamp: now,
-          },
         });
         break;
       }

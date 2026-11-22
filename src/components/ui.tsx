@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useRef } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Check, X } from 'lucide-react';
 import { t } from '../lib/i18n';
 
@@ -288,29 +288,80 @@ export function PillTabs<T extends string>({
   size?: 'lg' | 'sm';
   label: string;
 }) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const buttonRefs = useRef<Map<T, HTMLButtonElement>>(new Map());
+  const [clipPath, setClipPath] = useState<string | null>(null);
+  const [animated, setAnimated] = useState(false);
+
+  const radius = size === 'lg' ? 10 : 8;
+
+  const measure = useCallback(() => {
+    const list = listRef.current;
+    const activeBtn = buttonRefs.current.get(value);
+    if (!list || !activeBtn) return;
+    const w = list.clientWidth;
+    const h = list.clientHeight;
+    if (w <= 0 || h <= 0) return;
+    const top = Math.max(0, activeBtn.offsetTop);
+    const left = Math.max(0, activeBtn.offsetLeft);
+    const right = Math.max(0, w - (left + activeBtn.offsetWidth));
+    const bottom = Math.max(0, h - (top + activeBtn.offsetHeight));
+    setClipPath(`inset(${top}px ${right}px ${bottom}px ${left}px round ${radius}px)`);
+  }, [value, radius]);
+
+  useLayoutEffect(() => {
+    measure();
+    if (!animated) {
+      const id = requestAnimationFrame(() => setAnimated(true));
+      return () => cancelAnimationFrame(id);
+    }
+  }, [measure, animated, options.length]);
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(list);
+    return () => ro.disconnect();
+  }, [measure]);
+
   return (
     <div
+      ref={listRef}
       role="tablist"
       aria-label={label}
       className={cx(
-        'flex gap-1 p-1 bg-lu-bg2 border border-lu-border',
+        'relative flex gap-1 p-1 bg-lu-bg2 border border-lu-border',
         size === 'lg' ? 'rounded-[14px]' : 'rounded-xl'
       )}
     >
+      {clipPath && (
+        <span
+          aria-hidden="true"
+          className={cx('lu-pill-indicator', animated && 'lu-pill-indicator-animated')}
+          style={{ clipPath }}
+        />
+      )}
       {options.map((opt) => {
         const selected = opt.value === value;
         return (
           <button
             key={opt.value}
+            ref={(el) => {
+              if (el) buttonRefs.current.set(opt.value, el);
+              else buttonRefs.current.delete(opt.value);
+            }}
             type="button"
             role="tab"
             aria-selected={selected}
             onClick={() => onChange(opt.value)}
             className={cx(
               baseBtn,
-              'justify-center gap-2 font-semibold',
+              'lu-pill-btn relative z-10 justify-center gap-2 font-semibold',
               size === 'lg' ? 'h-11 px-[18px] rounded-[10px] text-[14px]' : 'h-9 px-3.5 rounded-lg text-[13px]',
-              selected ? 'bg-lu-tint text-lu-accent' : 'bg-transparent text-lu-muted hover:bg-white/8'
+              selected
+                ? cx('text-lu-accent', !clipPath && 'bg-lu-tint')
+                : 'bg-transparent text-lu-muted'
             )}
           >
             {opt.icon}

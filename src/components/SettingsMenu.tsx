@@ -125,11 +125,11 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   onChange={(e) => onAudioDelayChange(parseFloat(e.target.value))}
                 />
                 <ChipRow gap="tight">
-                  <Chip dense selected={audioDelay === 0} onClick={() => onAudioDelayChange(0)}>
+                  <Chip dense className="!flex-auto px-2" selected={audioDelay === 0} onClick={() => onAudioDelayChange(0)}>
                     {t('Redefinir')}
                   </Chip>
                   {AUDIO_DELAY_PRESETS.map((d) => (
-                    <Chip key={d} dense selected={Math.abs(audioDelay - d) < 0.01} onClick={() => onAudioDelayChange(d)}>
+                    <Chip key={d} dense className="!flex-auto px-2" selected={Math.abs(audioDelay - d) < 0.01} onClick={() => onAudioDelayChange(d)}>
                       +{Math.round(d * 1000)} ms
                     </Chip>
                   ))}

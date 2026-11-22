@@ -9,15 +9,16 @@ import {
 } from '@vidstack/react';
 import '@vidstack/react/player/styles/base.css';
 
+import { Play, X } from 'lucide-react';
 import { getVideoElement } from './player/dom';
 import { MediaSource, Chapter, SubtitleTrack, AudioTrackOption, VideoInfo, CatalogSeriesContext } from '../types/media';
-import type { CatalogEpisode } from '../lib/catalog';
+import { episodeTag, type CatalogEpisode } from '../lib/catalog';
 import type { StreamOption } from '../lib/streams';
 import { PlayerControls } from './PlayerControls';
 import type { PlaylistItem, RoomState } from '../types/sync';
 import { MemberGrid } from './room/MemberGrid';
 import { audioBoost } from '../lib/audioBoost';
-import { normalizeChapters, getCurrentChapter, getSkippableChapter } from '../lib/chapters';
+import { normalizeChapters, getCurrentChapter, getSkippableChapter, shouldShowNextEpisodePrompt } from '../lib/chapters';
 import { useSkipVote } from './player/useSkipVote';
 import { logger } from '../lib/logger';
 import { t } from '../lib/i18n';
@@ -165,6 +166,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [canPip, setCanPip] = useState<boolean>(false);
   // Prompt flutuante para retomar reprodução do momento anterior
   const [resumePrompt, setResumePrompt] = useState<{ time: number; formatted: string } | null>(null);
+  const [nextEpisodeTarget, setNextEpisodeTarget] = useState<CatalogEpisode | null>(null);
+  const [dismissedNextFor, setDismissedNextFor] = useState<string | null>(null);
 
   const hasSource = Boolean(source.src && source.src.trim());
 
@@ -505,6 +508,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     prefs.triggerOsdToast(t('Sincronizado com o Host'));
   };
 
+  const nextCatalogEpisode = (() => {
+    if (!seriesContext || !onSelectEpisodeStream || queueSize > 0 || isViewer) return null;
+    const idx = seriesContext.episodes.findIndex((e) => e.id === seriesContext.currentEpisodeId);
+    if (idx < 0 || idx + 1 >= seriesContext.episodes.length) return null;
+    return seriesContext.episodes[idx + 1];
+  })();
+  const showNextEpisodeCard =
+    Boolean(nextCatalogEpisode) &&
+    dismissedNextFor !== seriesContext?.currentEpisodeId &&
+    !controls.menuOpen &&
+    !screenCovering &&
+    shouldShowNextEpisodePrompt(currentTime, duration, normalizedChapters);
+
   return (
     <div
       id="video-player-root"
@@ -654,6 +670,53 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         />
       )}
 
+      {/* Cartão "Próximo episódio": aparece no capítulo de encerramento (ED/Ending) ou nos últimos 15 s se não houver capítulo */}
+      {showNextEpisodeCard && nextCatalogEpisode && (
+        <div
+          id="next-episode-prompt"
+          onClick={(e) => e.stopPropagation()}
+          className={`pointer-events-auto absolute right-4 sm:right-6 z-40 w-[min(340px,calc(100%-32px))] p-3.5 rounded-[16px] bg-lu-bg2/94 backdrop-blur-md border border-lu-border-strong shadow-[0_16px_40px_rgba(0,0,0,0.65)] flex flex-col gap-2.5 transition-[bottom] duration-200 ${
+            skippableChapter
+              ? showControls
+                ? 'bottom-[168px] sm:bottom-[176px]'
+                : 'bottom-[78px]'
+              : showControls
+              ? 'bottom-24 sm:bottom-28'
+              : 'bottom-6'
+          }`}
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-lu-accent">
+                {t('Próximo episódio')} · {episodeTag(nextCatalogEpisode.season, nextCatalogEpisode.episode)}
+              </div>
+              <div className="text-[14px] font-semibold text-lu-text truncate mt-0.5">
+                {nextCatalogEpisode.title || t('Episódio {v1}', { v1: nextCatalogEpisode.episode })}
+              </div>
+            </div>
+            <button
+              type="button"
+              aria-label={t('Fechar')}
+              onClick={() => setDismissedNextFor(seriesContext?.currentEpisodeId ?? '')}
+              className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-lu-muted hover:text-lu-text hover:bg-white/8 flex-none"
+            >
+              <X size={15} />
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              resetControlsTimer();
+              setNextEpisodeTarget(nextCatalogEpisode);
+            }}
+            className="w-full h-9 px-3 rounded-[10px] inline-flex items-center justify-center gap-2 bg-lu-accent text-lu-bg hover:bg-lu-accent-hover text-[13px] font-semibold transition-colors"
+          >
+            <Play size={14} className="fill-current" />
+            <span>{t('Escolher fonte do próximo')}</span>
+          </button>
+        </div>
+      )}
+
       {/* Controles (somem após 3 s de inatividade) */}
       <div
         className={`absolute inset-0 z-30 transition-opacity duration-300 ${
@@ -713,6 +776,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           onAddSubtitle={onAddSubtitle}
           seriesContext={seriesContext}
           onSelectEpisodeStream={onSelectEpisodeStream}
+          externalEpisodesTarget={nextEpisodeTarget}
+          onExternalEpisodesTargetConsumed={() => setNextEpisodeTarget(null)}
           onNext={syncStatus.isConnected && syncStatus.isHost ? playNextInQueue : undefined}
           hasNext={queueSize > 0}
           viewerBehindSec={viewerBehindSec}

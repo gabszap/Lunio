@@ -16,7 +16,6 @@ import { MemberStrip } from './MemberStrip';
 import { RoomDock } from './RoomDock';
 import { RoomSidebar, type RoomSidebarTab } from './RoomSidebar';
 import { MediaPickerModal } from './MediaPickerModal';
-import { FloatingReactions } from './FloatingReactions';
 
 export interface RoomShellProps {
   onHome: () => void;
@@ -222,7 +221,6 @@ export const RoomShell: React.FC<RoomShellProps> = ({
               fullscreenDock: <RoomDock {...dockProps} isFullscreen />,
               fullscreenSidebar: <RoomSidebar {...sidebarProps} isFullscreen />,
             })}
-            {room.connected && <FloatingReactions />}
           </div>
 
           {showMediaStage && room.connected && (

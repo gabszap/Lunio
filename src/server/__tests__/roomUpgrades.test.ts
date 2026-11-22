@@ -163,7 +163,7 @@ describe('configurações da sala (nome, pública/privada, senha) e persistênci
   });
 });
 
-describe('trocar sala, reações e auto-pause em buffering', () => {
+describe('trocar sala e auto-pause em buffering', () => {
   it('trocar sala remove o socket da sala anterior antes de entrar na nova', () => {
     const s1 = connect('OLD1', 'u1', 'Pedro');
     const s2 = connect('OLD1', 'u2', 'Lucas');
@@ -174,29 +174,6 @@ describe('trocar sala, reações e auto-pause em buffering', () => {
     expect(rm.getRoomInfo('OLD1').members).toBe(1);
     expect(rm.getRoomInfo('NEW1').members).toBe(1);
     expect(s1.last('members:update').members).toHaveLength(1);
-  });
-
-  it('transmite reações válidas com cooldown anti-spam e ignora inválidas', () => {
-    vi.useFakeTimers();
-    const host = connect('RX1', 'h', 'Host');
-    const guest = connect('RX1', 'g', 'Gui');
-
-    send(guest, { type: 'reaction:send', kind: 'fire' });
-    expect(host.of('reaction:broadcast')).toHaveLength(1);
-    expect(host.last('reaction:broadcast').reaction).toMatchObject({ kind: 'fire', username: 'Gui' });
-
-    // Cooldown (< 500ms) bloqueia spam imediato
-    send(guest, { type: 'reaction:send', kind: 'heart' });
-    expect(host.of('reaction:broadcast')).toHaveLength(1);
-
-    // Após 600ms aceita novamente
-    vi.advanceTimersByTime(600);
-    send(guest, { type: 'reaction:send', kind: 'heart' });
-    expect(host.of('reaction:broadcast')).toHaveLength(2);
-
-    // Tipo inválido é ignorado
-    send(guest, { type: 'reaction:send', kind: 'invalid_emoji' });
-    expect(host.of('reaction:broadcast')).toHaveLength(2);
   });
 
   it('autoPauseOnBuffer pausa quando espectador trava e retoma quando volta a ficar pronto', () => {

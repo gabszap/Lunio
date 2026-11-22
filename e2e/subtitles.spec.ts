@@ -46,7 +46,7 @@ async function createRoomWithExternalSubtitle(page: Page, format: 'srt' | 'vtt')
   await expect(dialog).toBeHidden();
   await page.getByRole('button', { name: 'Criar sala', exact: true }).click();
   await submitName(page, 'Ana');
-  await expect(page).toHaveURL(/\?room=[A-Z0-9]+/);
+  await expect(page).toHaveURL(/\/room\/[A-Z0-9]+|\?room=[A-Z0-9]+/);
   await expect(page.locator('video')).toBeAttached();
 }
 

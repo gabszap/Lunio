@@ -14,8 +14,6 @@ import type {
   RoomMember,
   RoomMedia,
   RoomVisibility,
-  RoomReaction,
-  ReactionKind,
   ChatMessage,
   MemberPlaybackState,
   BannedMember,
@@ -63,7 +61,6 @@ class SyncManager implements ScreenSignals {
   private currentRoomId: string = '';
   private currentRoomPassword: string | undefined = undefined;
   private roomState: RoomState | null = null;
-  private reactionListeners = new Set<(reaction: RoomReaction) => void>();
   /** Votação para pular o capítulo atual (null = nenhuma). Vem do servidor. */
   private skipVote: import('../types/sync').SkipVoteState | null = null;
   private skipVoteListeners = new Set<SkipVoteListener>();
@@ -733,13 +730,6 @@ class SyncManager implements ScreenSignals {
         break;
       }
 
-      case 'reaction:broadcast': {
-        for (const listener of this.reactionListeners) {
-          listener(msg.reaction);
-        }
-        break;
-      }
-
       case 'error': {
         const errCode = (msg as any).code;
         logger.warn(`[Sala] Servidor: ${msg.message}`);
@@ -860,16 +850,6 @@ class SyncManager implements ScreenSignals {
   }) {
     if (!this.isConnected || !this.isRoomHost()) return;
     this.send({ type: 'room:settings', ...settings });
-  }
-
-  public emitReaction(kind: ReactionKind) {
-    if (!this.isConnected) return;
-    this.send({ type: 'reaction:send', kind });
-  }
-
-  public subscribeReaction(listener: (reaction: RoomReaction) => void): () => void {
-    this.reactionListeners.add(listener);
-    return () => this.reactionListeners.delete(listener);
   }
 
   public getPlaylist(): PlaylistItem[] {

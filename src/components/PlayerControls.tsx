@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Play,
   Pause,
@@ -14,10 +14,9 @@ import {
   SkipForward,
   ListVideo,
   RefreshCw,
-  X,
 } from 'lucide-react';
 import { Chapter, SubtitleTrack, AudioTrackOption, CatalogSeriesContext } from '../types/media';
-import { episodeTag, type CatalogEpisode } from '../lib/catalog';
+import type { CatalogEpisode } from '../lib/catalog';
 import type { StreamOption } from '../lib/streams';
 import { formatTime } from '../lib/chapters';
 import { SeekButtons } from './SeekButtons';
@@ -37,6 +36,7 @@ import {
   MenuItem,
   MenuPanel,
   MenuSection,
+  Slider,
   Spinner,
   cx,
   useDismiss,
@@ -95,6 +95,9 @@ interface PlayerControlsProps {
   onAddSubtitle?: () => void;
   seriesContext?: CatalogSeriesContext | null;
   onSelectEpisodeStream?: (episode: CatalogEpisode, stream: StreamOption) => void;
+  /** Abre o overlay de episódios diretamente em um episódio alvo (ex.: cartão "Próximo episódio"). */
+  externalEpisodesTarget?: CatalogEpisode | null;
+  onExternalEpisodesTargetConsumed?: () => void;
   /** Próximo da fila da sala (só existe dentro de uma sala, para o Host). Sem itens na fila o botão fica desativado. */
   onNext?: () => void;
   hasNext?: boolean;
@@ -251,6 +254,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   onAddSubtitle,
   seriesContext,
   onSelectEpisodeStream,
+  externalEpisodesTarget,
+  onExternalEpisodesTargetConsumed,
   onNext,
   hasNext = false,
   viewerBehindSec = 0,
@@ -259,7 +264,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
 }) => {
   const [openMenu, setOpenMenuState] = useState<MenuId>(null);
   const [episodesTarget, setEpisodesTarget] = useState<CatalogEpisode | null>(null);
-  const [dismissedNextFor, setDismissedNextFor] = useState<string | null>(null);
   const subMenuRef = useRef<HTMLDivElement>(null);
   const audioMenuRef = useRef<HTMLDivElement>(null);
   const episodesToggleRef = useRef<HTMLDivElement>(null);
@@ -272,6 +276,14 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     },
     [onMenuOpenChange]
   );
+
+  useEffect(() => {
+    if (!externalEpisodesTarget) return;
+    setEpisodesTarget(externalEpisodesTarget);
+    setOpenMenu('episodes');
+    onExternalEpisodesTargetConsumed?.();
+  }, [externalEpisodesTarget, setOpenMenu, onExternalEpisodesTargetConsumed]);
+
   const toggleMenu = (id: Exclude<MenuId, null>) => setOpenMenu(openMenu === id ? null : id);
   const closeMenu = useCallback(() => setOpenMenu(null), [setOpenMenu]);
 
@@ -286,20 +298,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   const episodeTitle = parsedMetadata?.episodeTitle ? String(parsedMetadata.episodeTitle) : '';
   const hasChapters = chapters.length > 0;
   const codecBadge = parsedMetadata?.codec ? String(parsedMetadata.codec).toUpperCase().replace('X265', 'HEVC').replace('X264', 'H.264') : null;
-
-  // Próximo episódio do catálogo (quando a fila está vazia e estamos nos últimos 15 s do vídeo)
-  const nextCatalogEpisode = (() => {
-    if (!seriesContext || !onSelectEpisodeStream || hasNext || isViewer) return null;
-    const idx = seriesContext.episodes.findIndex((e) => e.id === seriesContext.currentEpisodeId);
-    if (idx < 0 || idx + 1 >= seriesContext.episodes.length) return null;
-    return seriesContext.episodes[idx + 1];
-  })();
-  const showNextEpisodeCard =
-    Boolean(nextCatalogEpisode) &&
-    dismissedNextFor !== seriesContext?.currentEpisodeId &&
-    openMenu !== 'episodes' &&
-    duration > 30 &&
-    duration - currentTime <= 15;
 
   return (
     <div id="player-ui-overlay" className="absolute inset-0 flex flex-col justify-between pointer-events-none">
@@ -356,45 +354,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           initialTargetEpisode={episodesTarget}
           isViewer={isViewer}
         />
-      )}
-
-      {/* Cartão "Próximo episódio" nos últimos 15 s quando o vídeo veio do Catálogo e a fila está vazia */}
-      {showNextEpisodeCard && nextCatalogEpisode && (
-        <div
-          id="next-episode-prompt"
-          onClick={(e) => e.stopPropagation()}
-          className="pointer-events-auto absolute right-4 sm:right-6 bottom-24 sm:bottom-28 z-30 w-[min(340px,calc(100%-32px))] p-3.5 rounded-[16px] bg-lu-bg2/94 backdrop-blur-md border border-lu-border-strong shadow-[0_16px_40px_rgba(0,0,0,0.65)] flex flex-col gap-2.5"
-        >
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-lu-accent">
-                {t('Próximo episódio')} · {episodeTag(nextCatalogEpisode.season, nextCatalogEpisode.episode)}
-              </div>
-              <div className="text-[14px] font-semibold text-lu-text truncate mt-0.5">
-                {nextCatalogEpisode.title || t('Episódio {v1}', { v1: nextCatalogEpisode.episode })}
-              </div>
-            </div>
-            <button
-              type="button"
-              aria-label={t('Fechar')}
-              onClick={() => setDismissedNextFor(seriesContext?.currentEpisodeId ?? '')}
-              className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-lu-muted hover:text-lu-text hover:bg-white/8 flex-none"
-            >
-              <X size={15} />
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setEpisodesTarget(nextCatalogEpisode);
-              setOpenMenu('episodes');
-            }}
-            className="w-full h-9 px-3 rounded-[10px] inline-flex items-center justify-center gap-2 bg-lu-accent text-lu-bg hover:bg-lu-accent-hover text-[13px] font-semibold transition-colors"
-          >
-            <Play size={14} className="fill-current" />
-            <span>{t('Escolher fonte do próximo')}</span>
-          </button>
-        </div>
       )}
 
       {/* Centro: clique pausa, duplo clique tela cheia */}
@@ -555,7 +514,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   title={t('Legendas')}
                   meta={`${subtitles.length} ${subtitles.length === 1 ? 'faixa' : 'faixas'}`}
                   onClose={closeMenu}
-                  className="right-[-96px] w-[320px]"
+                  className="right-[-96px] w-[368px]"
                 >
                   <div role="radiogroup" aria-label={t('Faixa de legenda')} className="flex flex-col gap-0.5">
                     <MenuItem
@@ -584,14 +543,23 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                     <>
                       <MenuDivider />
                       <MenuSection title={t('Sincronia')} value={formatMs(subtitleDelay)}>
+                        <Slider
+                          id="slider-subtitle-delay"
+                          min="-5"
+                          max="5"
+                          step="0.05"
+                          value={Math.max(-5, Math.min(5, subtitleDelay))}
+                          aria-label={t('Sincronia')}
+                          onChange={(e) => onSubtitleDelayChange(parseFloat(e.target.value))}
+                        />
                         <ChipRow gap="tight">
-                          <Chip dense onClick={() => onSubtitleDelayChange(Number((subtitleDelay - 0.25).toFixed(2)))}>−250 ms</Chip>
-                          <Chip dense onClick={() => onSubtitleDelayChange(Number((subtitleDelay - 0.05).toFixed(2)))}>{t('−50 ms')}</Chip>
-                          <Chip dense selected={subtitleDelay === 0} onClick={() => onSubtitleDelayChange(0)}>
+                          <Chip dense className="!flex-auto px-2" onClick={() => onSubtitleDelayChange(Number((subtitleDelay - 0.25).toFixed(2)))}>−250 ms</Chip>
+                          <Chip dense className="!flex-auto px-2" onClick={() => onSubtitleDelayChange(Number((subtitleDelay - 0.05).toFixed(2)))}>{t('−50 ms')}</Chip>
+                          <Chip dense className="!flex-auto px-2" selected={subtitleDelay === 0} onClick={() => onSubtitleDelayChange(0)}>
                             {t('Redefinir')}
                           </Chip>
-                          <Chip dense onClick={() => onSubtitleDelayChange(Number((subtitleDelay + 0.05).toFixed(2)))}>{t('+50 ms')}</Chip>
-                          <Chip dense onClick={() => onSubtitleDelayChange(Number((subtitleDelay + 0.25).toFixed(2)))}>+250 ms</Chip>
+                          <Chip dense className="!flex-auto px-2" onClick={() => onSubtitleDelayChange(Number((subtitleDelay + 0.05).toFixed(2)))}>{t('+50 ms')}</Chip>
+                          <Chip dense className="!flex-auto px-2" onClick={() => onSubtitleDelayChange(Number((subtitleDelay + 0.25).toFixed(2)))}>+250 ms</Chip>
                         </ChipRow>
                       </MenuSection>
                     </>
