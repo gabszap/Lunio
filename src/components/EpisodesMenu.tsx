@@ -17,6 +17,8 @@ interface EpisodesOverlayProps {
   /** Botão que abre o overlay: um clique nele não conta como "fora" (senão o mousedown fecha e o click reabre). */
   toggleRef?: React.RefObject<HTMLElement | null>;
   onSelectEpisodeStream: (episode: CatalogEpisode, stream: StreamOption) => void;
+  /** Quando definido ao abrir, já pula direto para as fontes deste episódio (ex.: cartão "Próximo episódio"). */
+  initialTargetEpisode?: CatalogEpisode | null;
   isViewer?: boolean;
 }
 
@@ -32,13 +34,14 @@ export const EpisodesOverlay: React.FC<EpisodesOverlayProps> = ({
   onClose,
   toggleRef,
   onSelectEpisodeStream,
+  initialTargetEpisode = null,
   isViewer = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   useDismiss(open, onClose, containerRef, toggleRef);
 
   const [selectedSeason, setSelectedSeason] = useState<number>(seriesContext.season || 1);
-  const [targetEpisode, setTargetEpisode] = useState<CatalogEpisode | null>(null);
+  const [targetEpisode, setTargetEpisode] = useState<CatalogEpisode | null>(initialTargetEpisode);
   const [addons, setAddons] = useState<VideoAddon[]>([]);
   const { isWatched } = useWatchedEpisodes();
 
@@ -46,10 +49,14 @@ export const EpisodesOverlay: React.FC<EpisodesOverlayProps> = ({
   useEffect(() => {
     if (open) {
       setAddons(loadAddons());
+      if (initialTargetEpisode) {
+        setSelectedSeason(initialTargetEpisode.season);
+        setTargetEpisode(initialTargetEpisode);
+      }
     } else {
       setTargetEpisode(null);
     }
-  }, [open]);
+  }, [open, initialTargetEpisode]);
 
   // Sincroniza temporada ativa com o episódio em reprodução
   useEffect(() => {

@@ -20,6 +20,7 @@ import { audioBoost } from '../lib/audioBoost';
 import { normalizeChapters, getCurrentChapter, getSkippableChapter } from '../lib/chapters';
 import { useSkipVote } from './player/useSkipVote';
 import { logger } from '../lib/logger';
+import { t } from '../lib/i18n';
 import { formatTime } from '../lib/chapters';
 import { syncManager } from '../lib/sync';
 import {
@@ -494,6 +495,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const pausedByName =
     room.hostPausedInfo?.username || syncManager.getRoomState()?.members.find((m) => m.isHost)?.username || 'Host';
 
+  const expectedHostTime = isViewer ? syncManager.getExpectedPlaybackTime() : null;
+  const viewerBehindSec =
+    isViewer && expectedHostTime !== null && !paused ? expectedHostTime - currentTime : 0;
+  const handleViewerResync = () => {
+    const target = syncManager.getExpectedPlaybackTime();
+    if (target === null) return;
+    playback.handleSeek(target);
+    prefs.triggerOsdToast(t('Sincronizado com o Host'));
+  };
+
   return (
     <div
       id="video-player-root"
@@ -704,6 +715,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           onSelectEpisodeStream={onSelectEpisodeStream}
           onNext={syncStatus.isConnected && syncStatus.isHost ? playNextInQueue : undefined}
           hasNext={queueSize > 0}
+          viewerBehindSec={viewerBehindSec}
+          onResync={isViewer ? handleViewerResync : undefined}
           onMenuOpenChange={handleMenuOpenChange}
         />
       </div>

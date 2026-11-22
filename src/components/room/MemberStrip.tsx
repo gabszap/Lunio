@@ -44,8 +44,20 @@ export const MemberStrip: React.FC<MemberStripProps> = ({
               memberCardTint(member.id, member.isHost)
             )}
           >
-            <span className="absolute top-2 right-2">
-              <Dot tone={syncMeta.tone} />
+            <span className="absolute top-1.5 right-1.5 inline-flex items-center gap-1">
+              {syncMeta.buffering ? (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-lu-warning/15 border border-lu-warning/35 text-[9.5px] font-semibold text-lu-warning animate-pulse">
+                  <Dot tone="warning" />
+                  {t('Carregando…')}
+                </span>
+              ) : syncMeta.behindBadge ? (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-lu-warning/15 border border-lu-warning/35 text-[9.5px] font-semibold text-lu-warning tabular">
+                  <Dot tone="warning" />
+                  {syncMeta.behindBadge}
+                </span>
+              ) : (
+                <Dot tone={syncMeta.tone} />
+              )}
             </span>
 
             <div className="mb-6">

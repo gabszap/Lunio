@@ -16,6 +16,7 @@ import { MemberStrip } from './MemberStrip';
 import { RoomDock } from './RoomDock';
 import { RoomSidebar, type RoomSidebarTab } from './RoomSidebar';
 import { MediaPickerModal } from './MediaPickerModal';
+import { FloatingReactions } from './FloatingReactions';
 
 export interface RoomShellProps {
   onHome: () => void;
@@ -197,6 +198,8 @@ export const RoomShell: React.FC<RoomShellProps> = ({
     <div className="h-dvh w-full bg-lu-bg text-lu-text flex flex-col p-3 gap-3 overflow-hidden box-border">
       <RoomHeader
         roomCode={room.code}
+        roomName={roomState?.name}
+        visibility={roomState?.visibility}
         connected={room.connected}
         environment={environment}
         createdAt={createdAt}
@@ -219,6 +222,7 @@ export const RoomShell: React.FC<RoomShellProps> = ({
               fullscreenDock: <RoomDock {...dockProps} isFullscreen />,
               fullscreenSidebar: <RoomSidebar {...sidebarProps} isFullscreen />,
             })}
+            {room.connected && <FloatingReactions />}
           </div>
 
           {showMediaStage && room.connected && (
@@ -241,6 +245,7 @@ export const RoomShell: React.FC<RoomShellProps> = ({
         open={mediaPickerOpen}
         onClose={() => setMediaPickerOpen(false)}
         inRoom={room.connected}
+        isHost={room.isHost}
         roomCode={room.code}
         recentStreams={recentStreams}
         onRemoveRecent={onRemoveRecent}
@@ -250,6 +255,11 @@ export const RoomShell: React.FC<RoomShellProps> = ({
         ensureRoom={ensureRoom}
         requireName={requireName}
         onCommit={onCommitMedia}
+        onSuggestMedia={(item) => {
+          syncManager.emitRequestAdd(item);
+          onSidebarTabChange('requests');
+          if (!sidebarOpen) onToggleSidebar();
+        }}
         onPlayStream={onPlayCatalogStream}
       />
 

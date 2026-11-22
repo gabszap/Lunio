@@ -13,9 +13,11 @@ import {
   Plus,
   SkipForward,
   ListVideo,
+  RefreshCw,
+  X,
 } from 'lucide-react';
 import { Chapter, SubtitleTrack, AudioTrackOption, CatalogSeriesContext } from '../types/media';
-import type { CatalogEpisode } from '../lib/catalog';
+import { episodeTag, type CatalogEpisode } from '../lib/catalog';
 import type { StreamOption } from '../lib/streams';
 import { formatTime } from '../lib/chapters';
 import { SeekButtons } from './SeekButtons';
@@ -96,6 +98,9 @@ interface PlayerControlsProps {
   /** Próximo da fila da sala (só existe dentro de uma sala, para o Host). Sem itens na fila o botão fica desativado. */
   onNext?: () => void;
   hasNext?: boolean;
+  /** Diferença (s) do espectador para o Host (positivo = atrasado); clicando no selo sincroniza na hora. */
+  viewerBehindSec?: number;
+  onResync?: () => void;
   /** Avisado quando algum menu abre/fecha, para o player não esconder os controles com menu aberto. */
   onMenuOpenChange?: (open: boolean) => void;
 }
@@ -248,9 +253,13 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   onSelectEpisodeStream,
   onNext,
   hasNext = false,
+  viewerBehindSec = 0,
+  onResync,
   onMenuOpenChange,
 }) => {
   const [openMenu, setOpenMenuState] = useState<MenuId>(null);
+  const [episodesTarget, setEpisodesTarget] = useState<CatalogEpisode | null>(null);
+  const [dismissedNextFor, setDismissedNextFor] = useState<string | null>(null);
   const subMenuRef = useRef<HTMLDivElement>(null);
   const audioMenuRef = useRef<HTMLDivElement>(null);
   const episodesToggleRef = useRef<HTMLDivElement>(null);
@@ -258,6 +267,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   const setOpenMenu = useCallback(
     (id: MenuId) => {
       setOpenMenuState(id);
+      if (id !== 'episodes') setEpisodesTarget(null);
       onMenuOpenChange?.(id !== null);
     },
     [onMenuOpenChange]
@@ -276,6 +286,20 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   const episodeTitle = parsedMetadata?.episodeTitle ? String(parsedMetadata.episodeTitle) : '';
   const hasChapters = chapters.length > 0;
   const codecBadge = parsedMetadata?.codec ? String(parsedMetadata.codec).toUpperCase().replace('X265', 'HEVC').replace('X264', 'H.264') : null;
+
+  // Próximo episódio do catálogo (quando a fila está vazia e estamos nos últimos 15 s do vídeo)
+  const nextCatalogEpisode = (() => {
+    if (!seriesContext || !onSelectEpisodeStream || hasNext || isViewer) return null;
+    const idx = seriesContext.episodes.findIndex((e) => e.id === seriesContext.currentEpisodeId);
+    if (idx < 0 || idx + 1 >= seriesContext.episodes.length) return null;
+    return seriesContext.episodes[idx + 1];
+  })();
+  const showNextEpisodeCard =
+    Boolean(nextCatalogEpisode) &&
+    dismissedNextFor !== seriesContext?.currentEpisodeId &&
+    openMenu !== 'episodes' &&
+    duration > 30 &&
+    duration - currentTime <= 15;
 
   return (
     <div id="player-ui-overlay" className="absolute inset-0 flex flex-col justify-between pointer-events-none">
@@ -329,8 +353,48 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           onClose={closeMenu}
           toggleRef={episodesToggleRef}
           onSelectEpisodeStream={onSelectEpisodeStream}
+          initialTargetEpisode={episodesTarget}
           isViewer={isViewer}
         />
+      )}
+
+      {/* Cartão "Próximo episódio" nos últimos 15 s quando o vídeo veio do Catálogo e a fila está vazia */}
+      {showNextEpisodeCard && nextCatalogEpisode && (
+        <div
+          id="next-episode-prompt"
+          onClick={(e) => e.stopPropagation()}
+          className="pointer-events-auto absolute right-4 sm:right-6 bottom-24 sm:bottom-28 z-30 w-[min(340px,calc(100%-32px))] p-3.5 rounded-[16px] bg-lu-bg2/94 backdrop-blur-md border border-lu-border-strong shadow-[0_16px_40px_rgba(0,0,0,0.65)] flex flex-col gap-2.5"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-lu-accent">
+                {t('Próximo episódio')} · {episodeTag(nextCatalogEpisode.season, nextCatalogEpisode.episode)}
+              </div>
+              <div className="text-[14px] font-semibold text-lu-text truncate mt-0.5">
+                {nextCatalogEpisode.title || t('Episódio {v1}', { v1: nextCatalogEpisode.episode })}
+              </div>
+            </div>
+            <button
+              type="button"
+              aria-label={t('Fechar')}
+              onClick={() => setDismissedNextFor(seriesContext?.currentEpisodeId ?? '')}
+              className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-lu-muted hover:text-lu-text hover:bg-white/8 flex-none"
+            >
+              <X size={15} />
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setEpisodesTarget(nextCatalogEpisode);
+              setOpenMenu('episodes');
+            }}
+            className="w-full h-9 px-3 rounded-[10px] inline-flex items-center justify-center gap-2 bg-lu-accent text-lu-bg hover:bg-lu-accent-hover text-[13px] font-semibold transition-colors"
+          >
+            <Play size={14} className="fill-current" />
+            <span>{t('Escolher fonte do próximo')}</span>
+          </button>
+        </div>
       )}
 
       {/* Centro: clique pausa, duplo clique tela cheia */}
@@ -397,14 +461,32 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         <div className="flex items-center justify-between gap-1.5 flex-wrap sm:flex-nowrap">
           <div className="flex items-center gap-0.5 @[980px]:gap-1 min-w-0 flex-none">
             {isViewer ? (
-              <span
+              <button
                 id="viewer-sync-badge"
-                title={t('Sua reprodução é sincronizada automaticamente com o Host da sala.')}
-                className="inline-flex items-center gap-2 h-9 @[980px]:h-11 px-3 @[980px]:px-3.5 box-border rounded-[10px] bg-lu-success/10 border border-lu-success/28 text-lu-success text-[12px] @[980px]:text-[13px] font-semibold flex-none"
+                type="button"
+                onClick={onResync}
+                title={t('Clique para re-sincronizar imediatamente com o Host da sala.')}
+                className={cx(
+                  'inline-flex items-center gap-2 h-9 @[980px]:h-11 px-3 @[980px]:px-3.5 box-border rounded-[10px] border text-[12px] @[980px]:text-[13px] font-semibold flex-none transition-colors',
+                  Math.abs(viewerBehindSec) >= 1.5
+                    ? 'bg-lu-warning/12 border-lu-warning/35 text-lu-warning hover:bg-lu-warning/20'
+                    : 'bg-lu-success/10 border-lu-success/28 text-lu-success hover:bg-lu-success/18'
+                )}
               >
-                <Dot tone="success" />
-                {t('Ao vivo')}
-              </span>
+                {Math.abs(viewerBehindSec) >= 1.5 ? (
+                  <>
+                    <RefreshCw size={13} />
+                    <span className="tabular">
+                      {viewerBehindSec > 0 ? `−${Math.round(viewerBehindSec)}s` : `+${Math.round(Math.abs(viewerBehindSec))}s`} · {t('Sincronizar')}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Dot tone="success" />
+                    <span>{t('Ao vivo')}</span>
+                  </>
+                )}
+              </button>
             ) : (
               <>
                 <button

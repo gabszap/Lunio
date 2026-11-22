@@ -319,6 +319,36 @@ html.is-fullscreen .player-menu-panel {
   padding-bottom: var(--subtitle-bottom-offset, 5%);
 }
 
+@keyframes lu-reaction-float {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.86);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(-10px) scale(1);
+  }
+  80% {
+    opacity: 0.95;
+    transform: translateY(-150px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-195px) scale(0.94);
+  }
+}
+
+.lu-reaction-float {
+  animation: lu-reaction-float 2.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lu-reaction-float {
+    animation: none;
+    opacity: 1;
+  }
+}
+
 
 
 /* Enquanto a transmissão de tela cobre o vídeo da sala, a legenda do filme não aparece por cima da tela transmitida */

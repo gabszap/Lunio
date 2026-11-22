@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
-import { Ban, UserX } from 'lucide-react';
+import { Ban, Lock, UserX } from 'lucide-react';
 // Player (Vidstack, legendas, hooks) e Catálogo saem do pacote inicial: a Home abre sem baixá-los.
 const loadVideoPlayer = () => import('./components/VideoPlayer').then((m) => ({ default: m.VideoPlayer }));
 const VideoPlayer = lazy(loadVideoPlayer);
@@ -9,7 +9,7 @@ import type { RoomSidebarTab } from './components/room/RoomSidebar';
 import { RoomLobbyModal } from './components/RoomLobbyModal';
 import { UsernameModal, getLastUsername, shouldSkipNamePrompt } from './components/UsernameModal';
 import { SubtitleModal } from './components/SubtitleModal';
-import { Modal, PrimaryButton, Spinner } from './components/ui';
+import { Modal, ModalHeader, PrimaryButton, Spinner, TextButton, TextInput } from './components/ui';
 import { readDetailFromUrl, readSearchFromUrl, readSeasonFromUrl } from './lib/searchUrl';
 import { canonicalizeCatalogUrl, pushTabUrl, tabFromPath } from './lib/homeRoute';
 import { HomeLayout, HomeTab } from './components/home/HomeLayout';
@@ -95,7 +95,9 @@ export default function App() {
   const [sidebarTab, setSidebarTab] = useState<RoomSidebarTab>('chat');
   const [autoOpenScreenPicker, setAutoOpenScreenPicker] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
-  const [kickBanAlert, setKickBanAlert] = useState<{ title: string; message: string; type: 'kicked' | 'banned' } | null>(null);
+  const [kickBanAlert, setKickBanAlert] = useState<{ title: string; message: string; type: 'kicked' | 'banned' | 'locked' } | null>(null);
+  const [passwordPrompt, setPasswordPrompt] = useState<{ roomCode: string; error?: string } | null>(null);
+  const [passwordDraft, setPasswordDraft] = useState('');
   const [seriesContext, setSeriesContext] = useState<CatalogSeriesContext | null>(() => loadActiveSeriesContext());
 
   // Com a Home aberta e a rede livre, já baixa o player: entrar numa sala fica instantâneo
@@ -269,6 +271,8 @@ export default function App() {
       const room = syncManager.getRoomState();
       if (room) {
         wasInRoomRef.current = true;
+        setPasswordPrompt(null);
+        setPasswordDraft('');
         // "Voltar à sala" na Home: lembra a sala (no Discord a sala é a da atividade, não precisa)
         if (!discordManager.isDiscordActivity()) saveLastRoom(room.roomId);
       }
@@ -344,6 +348,25 @@ export default function App() {
           title: t('Você foi expulso da sala'),
           message: t('O Host removeu você da sala. Você voltou para a tela inicial.'),
           type: 'kicked',
+        });
+      } else if (code === 'password_required' || code === 'wrong_password') {
+        const targetRoom = syncManager.getStatus().roomId;
+        if (targetRoom) {
+          setPasswordPrompt({
+            roomCode: targetRoom,
+            error: code === 'wrong_password' ? t('Senha incorreta. Tente novamente.') : undefined,
+          });
+        }
+      } else if (code === 'room_locked') {
+        syncManager.leaveRoom();
+        setRoomInUrl(null);
+        setView('home');
+        setHomeTab('room');
+        setHomeStep('menu');
+        setKickBanAlert({
+          title: t('Sala trancada'),
+          message: t('Esta sala está trancada pelo Host e não aceita novos participantes agora.'),
+          type: 'locked',
         });
       }
     });
@@ -751,10 +774,69 @@ export default function App() {
         }}
       />
 
-      {/* Aviso · Expulso / Banido */}
+      {/* Senha para entrar em sala privada */}
+      <Modal
+        open={passwordPrompt !== null}
+        onClose={() => {
+          setPasswordPrompt(null);
+          setPasswordDraft('');
+          leaveToHome();
+        }}
+        label={t('Sala privada')}
+        width={400}
+        className="!p-6 !gap-4"
+      >
+        <ModalHeader
+          title={t('Sala privada')}
+          description={t('Digite a senha para entrar na sala {code}.', { code: passwordPrompt?.roomCode || '' })}
+          onClose={() => {
+            setPasswordPrompt(null);
+            setPasswordDraft('');
+            leaveToHome();
+          }}
+        />
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!passwordPrompt || !passwordDraft.trim()) return;
+            syncManager.joinRoom(passwordPrompt.roomCode, passwordDraft.trim());
+          }}
+          className="flex flex-col gap-3"
+        >
+          <TextInput
+            type="password"
+            maxLength={64}
+            placeholder={t('Senha da sala')}
+            value={passwordDraft}
+            onChange={(e) => setPasswordDraft(e.target.value)}
+            autoFocus
+          />
+          {passwordPrompt?.error && (
+            <p role="alert" className="m-0 text-[12.5px] text-lu-error">
+              {passwordPrompt.error}
+            </p>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <TextButton
+              onClick={() => {
+                setPasswordPrompt(null);
+                setPasswordDraft('');
+                leaveToHome();
+              }}
+            >
+              {t('Cancelar')}
+            </TextButton>
+            <PrimaryButton type="submit" disabled={!passwordDraft.trim()}>
+              {t('Entrar na sala')}
+            </PrimaryButton>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Aviso · Expulso / Banido / Trancada */}
       <Modal open={kickBanAlert !== null} onClose={() => setKickBanAlert(null)} label={kickBanAlert?.title || ''} width={400} alert className="items-center text-center !gap-4">
         <div className="w-14 h-14 rounded-full bg-lu-error/12 border border-lu-error/30 flex items-center justify-center text-lu-error">
-          {kickBanAlert?.type === 'banned' ? <Ban size={26} /> : <UserX size={26} />}
+          {kickBanAlert?.type === 'banned' ? <Ban size={26} /> : kickBanAlert?.type === 'locked' ? <Lock size={26} /> : <UserX size={26} />}
         </div>
         <div>
           <h2 className="m-0 text-[20px] font-semibold tracking-[-0.01em]">{kickBanAlert?.title}</h2>

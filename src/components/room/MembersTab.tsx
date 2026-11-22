@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Ban, Crown, Eye, PenLine, Shield, UserMinus, UserX } from 'lucide-react';
+import { ArrowRight, Ban, Check, Crown, Eye, Globe, Lock, PenLine, Settings2, Shield, UserMinus, UserX } from 'lucide-react';
 import { t } from '../../lib/i18n';
-import { roomCodeFrom } from '../../lib/roomCode';
+import { roomCodeFrom, setRoomInUrl } from '../../lib/roomCode';
 import { syncManager } from '../../lib/sync';
-import type { RoomMember, RoomState } from '../../types/sync';
+import type { RoomMember, RoomState, RoomVisibility } from '../../types/sync';
 import { setSkipNamePrompt, shouldSkipNamePrompt } from '../UsernameModal';
-import { Avatar, Dot, IconButton, PrimaryButton, TextButton, TextInput, cx } from '../ui';
+import { Avatar, Dot, IconButton, PrimaryButton, Segmented, TextButton, TextInput, cx } from '../ui';
 import { behindLabel, memberTransmitting, sortRoomMembers } from './memberUtils';
 
 export interface MembersTabProps {
@@ -22,8 +22,20 @@ export const MembersTab: React.FC<MembersTabProps> = ({ members, roomState, curr
   const [newUsernameInput, setNewUsernameInput] = useState(() => currentUser.username);
   const [isChangingRoom, setIsChangingRoom] = useState(false);
   const [customRoomInput, setCustomRoomInput] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [roomNameInput, setRoomNameInput] = useState(() => roomState?.name || '');
+  const [visibilityInput, setVisibilityInput] = useState<RoomVisibility>(() => roomState?.visibility || 'public');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [autoPauseInput, setAutoPauseInput] = useState(() => Boolean(roomState?.autoPauseOnBuffer));
+  const [settingsSaved, setSettingsSaved] = useState(false);
 
   const focusedRowRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setRoomNameInput(roomState?.name || '');
+    setVisibilityInput(roomState?.visibility || 'public');
+    setAutoPauseInput(Boolean(roomState?.autoPauseOnBuffer));
+  }, [roomState?.name, roomState?.visibility, roomState?.autoPauseOnBuffer]);
 
   useEffect(() => {
     if (focusMemberId && focusedRowRef.current) {
@@ -33,6 +45,27 @@ export const MembersTab: React.FC<MembersTabProps> = ({ members, roomState, curr
 
   const orderedMembers = sortRoomMembers(members, currentUser.id);
   const bannedMembers = roomState?.bannedMembers || [];
+
+  const handleSaveRoomSettings = (e: React.FormEvent) => {
+    e.preventDefault();
+    const payload: {
+      name?: string;
+      visibility?: RoomVisibility;
+      password?: string | null;
+      autoPauseOnBuffer?: boolean;
+    } = {
+      name: roomNameInput.trim(),
+      visibility: visibilityInput,
+      autoPauseOnBuffer: autoPauseInput,
+    };
+    if (visibilityInput === 'private' && passwordInput.trim()) {
+      payload.password = passwordInput.trim();
+    }
+    syncManager.emitRoomSettings(payload);
+    setPasswordInput('');
+    setSettingsSaved(true);
+    window.setTimeout(() => setSettingsSaved(false), 1800);
+  };
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,6 +86,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({ members, roomState, curr
     e.preventDefault();
     const code = roomCodeFrom(customRoomInput) || customRoomInput.trim().toUpperCase();
     if (code) {
+      setRoomInUrl(code);
       syncManager.joinRoom(code);
       setIsChangingRoom(false);
       setCustomRoomInput('');
@@ -90,7 +124,107 @@ export const MembersTab: React.FC<MembersTabProps> = ({ members, roomState, curr
           {isHost ? <Crown size={15} className="text-lu-accent" /> : <Eye size={15} className="text-lu-muted" />}
           {isHost ? t('Você é o Host') : t('Você é espectador')}
         </span>
+        {isHost && (
+          <TextButton
+            size="sm"
+            tone={settingsOpen ? 'accent' : 'muted'}
+            onClick={() => setSettingsOpen((v) => !v)}
+            className="!h-8 !px-2 text-[12px]"
+          >
+            <Settings2 size={14} />
+            <span>{t('Configurar sala')}</span>
+          </TextButton>
+        )}
       </div>
+
+      {/* Configurações da sala (somente Host): nome, pública/privada, senha e auto-pause */}
+      {isHost && settingsOpen && (
+        <form
+          onSubmit={handleSaveRoomSettings}
+          className="p-3.5 rounded-[14px] bg-lu-surface border border-lu-border flex flex-col gap-3"
+        >
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="room-settings-name" className="text-[12px] font-medium text-lu-muted">
+              {t('Nome da sala')}
+            </label>
+            <TextInput
+              id="room-settings-name"
+              maxLength={48}
+              placeholder={t('Ex.: Maratona de anime')}
+              value={roomNameInput}
+              onChange={(e) => setRoomNameInput(e.target.value)}
+              className="!h-9 text-[13px]"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[12px] font-medium text-lu-muted">{t('Privacidade')}</span>
+            <Segmented
+              label={t('Privacidade')}
+              size="sm"
+              value={visibilityInput}
+              onChange={(v) => setVisibilityInput(v as RoomVisibility)}
+              options={[
+                { value: 'public', label: t('Pública'), icon: <Globe size={13} /> },
+                { value: 'private', label: t('Privada'), icon: <Lock size={13} /> },
+              ]}
+            />
+          </div>
+
+          {visibilityInput === 'private' && (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <label htmlFor="room-settings-password" className="text-[12px] font-medium text-lu-muted">
+                  {t('Senha (opcional)')}
+                </label>
+                {roomState?.hasPassword && (
+                  <button
+                    type="button"
+                    onClick={() => syncManager.emitRoomSettings({ password: null })}
+                    className="text-[11px] font-medium text-lu-error hover:underline bg-transparent border-0 p-0"
+                  >
+                    {t('Remover senha')}
+                  </button>
+                )}
+              </div>
+              <TextInput
+                id="room-settings-password"
+                type="password"
+                maxLength={64}
+                placeholder={roomState?.hasPassword ? t('Digite para trocar a senha…') : t('Sem senha = sala trancada')}
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                className="!h-9 text-[13px]"
+              />
+            </div>
+          )}
+
+          <label className="flex items-start gap-2.5 text-[12.5px] text-lu-muted cursor-pointer select-none leading-snug">
+            <input
+              type="checkbox"
+              checked={autoPauseInput}
+              onChange={(e) => setAutoPauseInput(e.target.checked)}
+              className="w-4 h-4 mt-0.5 m-0 accent-[var(--color-lu-accent)] flex-none"
+            />
+            <span>{t('Pausar automaticamente se alguém travar carregando')}</span>
+          </label>
+
+          <div className="flex items-center justify-end gap-2 pt-0.5">
+            {settingsSaved && (
+              <span className="inline-flex items-center gap-1 text-[12px] font-medium text-lu-success mr-auto">
+                <Check size={14} />
+                {t('Salvo')}
+              </span>
+            )}
+            <TextButton size="sm" onClick={() => setSettingsOpen(false)} className="!h-8">
+              {t('Fechar')}
+            </TextButton>
+            <PrimaryButton type="submit" className="!h-8 !px-3.5 text-[12.5px]">
+              {t('Salvar')}
+            </PrimaryButton>
+          </div>
+        </form>
+      )}
 
       {/* Seu apelido */}
       <div className="p-3 pl-3.5 rounded-[14px] bg-lu-surface border border-lu-border">

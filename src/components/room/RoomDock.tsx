@@ -1,11 +1,12 @@
 import React, { useRef, useState } from 'react';
-import { Check, ChevronUp, Clock, Compass, Link2, LogOut, Share2, Terminal, Users } from 'lucide-react';
+import { Check, ChevronUp, Clock, Compass, Link2, LogOut, Share2, SmilePlus, Terminal, Users } from 'lucide-react';
 import { formatTime } from '../../lib/chapters';
 import { t } from '../../lib/i18n';
 import { copyText } from '../../lib/recent';
 import { syncManager } from '../../lib/sync';
 import { ScreenShareControl } from '../player/ScreenShare';
 import { cx, useDismiss } from '../ui';
+import { REACTION_ITEMS, reactionLabel } from './FloatingReactions';
 
 export interface RoomDockProps {
   connected: boolean;
@@ -39,15 +40,17 @@ export const RoomDock: React.FC<RoomDockProps> = ({
   onScreenOpenChange,
 }) => {
   const [shareOpen, setShareOpen] = useState(false);
+  const [reactionsOpen, setReactionsOpen] = useState(false);
   const [shareAt, setShareAt] = useState(0);
   const [copiedLink, setCopiedLink] = useState(false);
   const [hovered, setHovered] = useState(false);
 
   const shareRef = useRef<HTMLDivElement>(null);
+  const reactionsRef = useRef<HTMLDivElement>(null);
   useDismiss(shareOpen, () => setShareOpen(false), shareRef);
+  useDismiss(reactionsOpen, () => setReactionsOpen(false), reactionsRef);
 
-  const canChooseMedia = !connected || isHost;
-  const anyMenuOpen = shareOpen || screenOpen;
+  const anyMenuOpen = shareOpen || reactionsOpen || screenOpen;
   const revealDock = !isFullscreen || hovered || anyMenuOpen;
 
   const copyRoomLink = async (atSeconds?: number) => {
@@ -71,22 +74,65 @@ export const RoomDock: React.FC<RoomDockProps> = ({
         isFullscreen && (revealDock ? 'translate-y-0 opacity-100 pointer-events-auto' : 'translate-y-[calc(100%+20px)] opacity-0 pointer-events-none')
       )}
     >
-      {canChooseMedia && (
-        <button
-          id="btn-dock-choose-media"
-          type="button"
-          onClick={onOpenMediaPicker}
-          className={cx(
-            dockBtnBase,
-            'bg-lu-accent text-lu-bg hover:bg-lu-accent-hover font-semibold shadow-[0_4px_14px_rgba(167,139,250,0.22)]'
-          )}
-        >
-          <Compass size={16} />
-          <span className="hidden sm:inline">{t('Catálogo')}</span>
-        </button>
-      )}
+      <button
+        id="btn-dock-choose-media"
+        type="button"
+        onClick={onOpenMediaPicker}
+        title={connected && !isHost ? t('Explorar catálogo e pedir para a sala') : t('Catálogo')}
+        className={cx(
+          dockBtnBase,
+          'bg-lu-accent text-lu-bg hover:bg-lu-accent-hover font-semibold shadow-[0_4px_14px_rgba(167,139,250,0.22)]'
+        )}
+      >
+        <Compass size={16} />
+        <span className="hidden sm:inline">{t('Catálogo')}</span>
+      </button>
 
       <ScreenShareControl open={screenOpen} onOpenChange={onScreenOpenChange} variant="dock" />
+
+      {connected && (
+        <div ref={reactionsRef} className="relative">
+          <button
+            id="btn-dock-reactions"
+            type="button"
+            aria-label={t('Reações')}
+            title={t('Reações')}
+            aria-expanded={reactionsOpen}
+            onClick={() => setReactionsOpen((v) => !v)}
+            className={cx(
+              dockBtnBase,
+              reactionsOpen ? 'bg-white/14 text-lu-accent' : 'bg-white/6 text-lu-text hover:bg-white/10'
+            )}
+          >
+            <SmilePlus size={16} />
+          </button>
+
+          {reactionsOpen && (
+            <div
+              role="menu"
+              aria-label={t('Reações')}
+              className="absolute left-1/2 -translate-x-1/2 bottom-[calc(100%+10px)] z-50 flex items-center gap-1 p-1.5 rounded-full bg-lu-elevated border border-lu-border-strong shadow-[0_16px_40px_rgba(0,0,0,0.55)]"
+            >
+              {REACTION_ITEMS.map(({ kind, icon: Icon, tone }) => (
+                <button
+                  key={kind}
+                  type="button"
+                  role="menuitem"
+                  aria-label={reactionLabel(kind)}
+                  title={reactionLabel(kind)}
+                  onClick={() => {
+                    syncManager.emitReaction(kind);
+                    setReactionsOpen(false);
+                  }}
+                  className="w-9 h-9 rounded-full inline-flex items-center justify-center bg-transparent hover:bg-white/10 hover:scale-110 transition-all"
+                >
+                  <Icon size={18} className={tone} />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {connected && environment !== 'discord' && (
         <div ref={shareRef} className="relative">

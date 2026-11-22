@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, Copy, Keyboard, PanelRightClose, PanelRightOpen, Plus } from 'lucide-react';
+import { Check, Copy, Keyboard, Lock, PanelRightClose, PanelRightOpen, Plus } from 'lucide-react';
 import { formatRoomDuration } from '../../lib/roomDuration';
 import { copyText } from '../../lib/recent';
 import { t, msg } from '../../lib/i18n';
+import type { RoomVisibility } from '../../types/sync';
 import { Dot, IconButton, Kbd, Logo, cx, useDismiss } from '../ui';
 
 const SHORTCUTS: Array<{ group: string; items: Array<{ label: string; keys: string[]; accent?: boolean }> }> = [
@@ -37,6 +38,8 @@ const SHORTCUTS: Array<{ group: string; items: Array<{ label: string; keys: stri
 
 interface RoomHeaderProps {
   roomCode: string;
+  roomName?: string;
+  visibility?: RoomVisibility;
   connected: boolean;
   environment: 'discord' | 'web';
   /** Timestamp (ms) de criação/entrada na sala para o cronômetro de duração. */
@@ -60,6 +63,8 @@ interface RoomHeaderProps {
  */
 export const RoomHeader: React.FC<RoomHeaderProps> = ({
   roomCode,
+  roomName,
+  visibility = 'public',
   connected,
   environment,
   createdAt,
@@ -125,7 +130,14 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
           <span className="text-[14px] font-semibold truncate">{t('Canal de voz do Discord')}</span>
         ) : (
           <div className="inline-flex items-center gap-1.5 min-w-0">
-            <span className="text-[13px] font-medium text-lu-muted">{t('Sessão')}</span>
+            {visibility === 'private' && (
+              <span title={t('Sala privada')} aria-label={t('Sala privada')} className="text-lu-accent flex-none inline-flex">
+                <Lock size={13} />
+              </span>
+            )}
+            <span className="text-[13px] font-semibold text-lu-text max-w-[180px] truncate">
+              {roomName || t('Sessão')}
+            </span>
             <button
               id="btn-room-code-copy"
               type="button"
