@@ -25,4 +25,4 @@ export async function startHlsAudio(url: string, audio: number, fingerprint?: st
   }
 }
 
-export const isHlsStreamUrl = (url: string) => url.startsWith('/api/hls/');
+export const isHlsStreamUrl = (url: string) => url.startsWith('/api/hls/') || url.startsWith('/api/youtube/master/');

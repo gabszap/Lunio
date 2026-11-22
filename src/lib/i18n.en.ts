@@ -721,4 +721,6 @@ export const EN: Record<string, string> = {
   "Salvo": "Saved",
   "Explorar catálogo e pedir para a sala": "Browse catalog and request for room",
   "Sincronizado com o Host": "Synced with Host",
+  "Qualidade": "Quality",
+  "Auto": "Auto",
 };

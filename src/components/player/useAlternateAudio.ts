@@ -46,7 +46,7 @@ export function useAlternateAudio(args: {
     const s = source.src || '';
     if (!s.trim()) return '';
     const ytId = getYouTubeId(s);
-    if (ytId) return `youtube/${ytId}`;
+    if (ytId) return '';
     const isRemote = isRemoteSource(s);
     if (isRemote && !s.startsWith('/api/proxy')) {
       return `/api/proxy?url=${encodeURIComponent(s)}#.mp4`;

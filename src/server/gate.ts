@@ -47,6 +47,7 @@ const ROUTES: Record<string, { auth: AuthMode; rate: RateRule }> = {
   upload: { auth: 'host', rate: { max: 2500, windowMs: 10 * MIN } },
   uploads: { auth: 'any', rate: { max: 600, windowMs: MIN } },
   hls: { auth: 'any', rate: { max: 1200, windowMs: MIN } },
+  youtube: { auth: 'any', rate: { max: 2400, windowMs: MIN } },
 };
 
 export function apiGate(req: IncomingMessage, res: ServerResponse, next: (err?: unknown) => void) {

@@ -16,6 +16,7 @@ import { handleSubtitle } from './routes/subtitle';
 import { handleToken } from './routes/token';
 import { handleTracks } from './routes/tracks';
 import { handleUploadApi, handleUploadClaim, handleUploadServe, handleUploadStatus } from './routes/upload';
+import { handleYouTube } from './routes/youtube';
 
 /**
  * Todas as rotas da API num único Router do Express. Quem hospeda decide como plugá-lo:
@@ -54,6 +55,7 @@ export function createApiRouter(): Router {
   router.use('/api/fontmap', (req, res) => void handleFontMap(req, res));
   router.use('/api/font', (req, res) => void handleFont(req, res));
   router.use('/api/hls', (req, res) => void handleHls(req, res));
+  router.use('/api/youtube', (req, res) => void handleYouTube(req, res));
 
   return router;
 }

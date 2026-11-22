@@ -15,6 +15,7 @@ import { MediaSource, Chapter, SubtitleTrack, AudioTrackOption, VideoInfo, Catal
 import { episodeTag, type CatalogEpisode } from '../lib/catalog';
 import type { StreamOption } from '../lib/streams';
 import { PlayerControls } from './PlayerControls';
+import type { VideoQualityOption } from './SettingsMenu';
 import type { PlaylistItem, RoomState } from '../types/sync';
 import { MemberGrid } from './room/MemberGrid';
 import { audioBoost } from '../lib/audioBoost';
@@ -169,6 +170,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [nextEpisodeTarget, setNextEpisodeTarget] = useState<CatalogEpisode | null>(null);
   const [dismissedNextFor, setDismissedNextFor] = useState<string | null>(null);
   const [liveResolution, setLiveResolution] = useState<string | null>(null);
+  const [videoQualities, setVideoQualities] = useState<VideoQualityOption[]>([]);
+  const [autoQuality, setAutoQuality] = useState<boolean>(true);
 
   const hasSource = Boolean(source.src && source.src.trim());
 
@@ -510,6 +513,53 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     prefs.triggerOsdToast(t('Sincronizado com o Host'));
   };
 
+  const syncQualitiesFromPlayer = () => {
+    const list = playerRef.current?.qualities;
+    if (!list) {
+      setVideoQualities([]);
+      return;
+    }
+    const byHeight = new Map<number, { height: number; label: string; selected: boolean }>();
+    for (const q of list) {
+      if (!q.height || q.height <= 0) continue;
+      const label = q.height >= 2160 ? '4K' : `${q.height}p`;
+      const prev = byHeight.get(q.height);
+      byHeight.set(q.height, { height: q.height, label, selected: Boolean(prev?.selected || q.selected) });
+    }
+    const sorted = Array.from(byHeight.values()).sort((a, b) => b.height - a.height);
+    setVideoQualities(sorted);
+    setAutoQuality(list.auto);
+    const active = list.selected;
+    if (active?.height) {
+      setLiveResolution(active.height >= 2160 ? '4K' : `${active.height}p`);
+    }
+  };
+
+  const handleQualitySelect = (choice: number | 'auto') => {
+    const list = playerRef.current?.qualities;
+    if (!list) return;
+    if (choice === 'auto') {
+      list.autoSelect();
+      setAutoQuality(true);
+      logger.setting('Qualidade', 'Auto');
+    } else {
+      let best: any = null;
+      for (const q of list) {
+        if (q.height === choice && (!best || (q.bitrate || 0) > (best.bitrate || 0))) {
+          best = q;
+        }
+      }
+      if (best) {
+        best.selected = true;
+        setAutoQuality(false);
+        const label = choice >= 2160 ? '4K' : `${choice}p`;
+        setLiveResolution(label);
+        logger.setting('Qualidade', label);
+      }
+    }
+    syncQualitiesFromPlayer();
+  };
+
   const nextCatalogEpisode = (() => {
     if (!seriesContext || !onSelectEpisodeStream || queueSize > 0 || isViewer) return null;
     const idx = seriesContext.episodes.findIndex((e) => e.id === seriesContext.currentEpisodeId);
@@ -549,10 +599,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         // hls.js vem do próprio pacote (carregado só quando um áudio alternativo usa HLS), nunca de CDN
         onProviderChange={(provider) => {
           if (provider) providerReadyRef.current = true;
-          if (isHLSProvider(provider)) provider.library = () => import('hls.js');
+          if (isHLSProvider(provider)) {
+            provider.library = () => import('hls.js');
+            provider.config = {
+              capLevelToPlayerSize: false,
+              abrEwmaDefaultEstimate: 20_000_000,
+              startLevel: -1,
+            };
+          }
           const videoEl = getVideoElement(playerRef);
           if (videoEl) audioBoost.attachToElement(videoEl);
         }}
+        onQualitiesChange={syncQualitiesFromPlayer}
+        onQualityChange={syncQualitiesFromPlayer}
         // O MediaProvider do Vidstack (React) só carrega o provedor ao montar o <video>. Ao trocar de "video" para "hls"
         // (e voltar) o elemento é o mesmo, então pedimos o carregamento do provedor novo à mão.
         onProviderLoaderChange={(loader) => {
@@ -736,6 +795,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           isInspecting={isInspecting}
           parsedMetadata={parsedMetadata}
           liveResolution={liveResolution}
+          qualities={videoQualities}
+          autoQuality={autoQuality}
+          onQualitySelect={handleQualitySelect}
           volume={volume}
           muted={muted}
           playbackRate={playbackRate}

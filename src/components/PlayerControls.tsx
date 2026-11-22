@@ -21,7 +21,7 @@ import type { StreamOption } from '../lib/streams';
 import { formatTime } from '../lib/chapters';
 import { SeekButtons } from './SeekButtons';
 import { VolumeDisplay } from './VolumeDisplay';
-import { SettingsMenu, formatMs } from './SettingsMenu';
+import { SettingsMenu, formatMs, type VideoQualityOption } from './SettingsMenu';
 import { ChapterTimeline } from './ChapterTimeline';
 import { ChapterList } from './ChapterList';
 import { EpisodesOverlay } from './EpisodesMenu';
@@ -53,6 +53,9 @@ interface PlayerControlsProps {
   parsedMetadata?: any;
   /** Resolução detectada ao vivo (ex.: YouTube playbackQuality ou videoHeight real). */
   liveResolution?: string | null;
+  qualities?: VideoQualityOption[];
+  autoQuality?: boolean;
+  onQualitySelect?: (height: number | 'auto') => void;
   volume: number;
   muted: boolean;
   playbackRate: number;
@@ -214,6 +217,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   isInspecting,
   parsedMetadata,
   liveResolution,
+  qualities,
+  autoQuality,
+  onQualitySelect,
   volume,
   muted,
   playbackRate,
@@ -678,6 +684,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               onPlaybackRateChange={onPlaybackRateChange}
               volumeBoost={volumeBoost}
               onVolumeBoostChange={onVolumeBoostChange}
+              qualities={qualities}
+              autoQuality={autoQuality}
+              onQualitySelect={onQualitySelect}
               autoSkipIntro={autoSkipIntro}
               onAutoSkipIntroChange={isViewer ? undefined : onAutoSkipIntroChange}
               audioDelay={audioDelay}

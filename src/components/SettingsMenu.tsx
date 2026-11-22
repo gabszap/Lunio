@@ -4,11 +4,20 @@ import { logger } from '../lib/logger';
 import { Chip, ChipRow, IconButton, MenuDivider, MenuPanel, MenuSection, Slider, useDismiss } from './ui';
 import { t } from '../lib/i18n';
 
+export interface VideoQualityOption {
+  height: number;
+  label: string;
+  selected: boolean;
+}
+
 interface SettingsMenuProps {
   playbackRate: number;
   onPlaybackRateChange: (rate: number) => void;
   volumeBoost: number; // 100 to 200
   onVolumeBoostChange: (boost: number) => void;
+  qualities?: VideoQualityOption[];
+  autoQuality?: boolean;
+  onQualitySelect?: (height: number | 'auto') => void;
   audioDelay?: number; // 0.0 to 5.0 in seconds
   onAudioDelayChange?: (delay: number) => void;
   subtitleDelay?: number; // -10.0 to 10.0 in seconds
@@ -41,6 +50,9 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onPlaybackRateChange,
   volumeBoost,
   onVolumeBoostChange,
+  qualities,
+  autoQuality = true,
+  onQualitySelect,
   audioDelay = 0,
   onAudioDelayChange,
   autoSkipIntro = false,
@@ -79,6 +91,38 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
           onClose={() => onOpenChange(false)}
           className="right-0 w-[360px]"
         >
+          {qualities && qualities.length > 1 && onQualitySelect && (
+            <>
+              <MenuSection
+                title={t('Qualidade')}
+                value={autoQuality ? t('Auto') : qualities.find((q) => q.selected)?.label || t('Auto')}
+              >
+                <div className="flex flex-wrap gap-1.5">
+                  <Chip
+                    dense
+                    className="!flex-auto px-2.5"
+                    selected={autoQuality}
+                    onClick={() => onQualitySelect('auto')}
+                  >
+                    {t('Auto')}
+                  </Chip>
+                  {qualities.map((q) => (
+                    <Chip
+                      key={q.height}
+                      dense
+                      className="!flex-auto px-2.5"
+                      selected={!autoQuality && q.selected}
+                      onClick={() => onQualitySelect(q.height)}
+                    >
+                      {q.label}
+                    </Chip>
+                  ))}
+                </div>
+              </MenuSection>
+              <MenuDivider />
+            </>
+          )}
+
           <MenuSection title={t('Velocidade de reprodução')} value={formatRate(playbackRate)}>
             <Slider
               id="slider-playback-speed"

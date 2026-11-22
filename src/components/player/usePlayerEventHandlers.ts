@@ -6,6 +6,7 @@ import { apiFetch } from '../../lib/access';
 import { logger } from '../../lib/logger';
 import { describeSourceForLog } from '../../lib/mediaLog';
 import { isRemoteSource } from '../../lib/linkId';
+import { getYouTubeId } from '../../lib/media';
 import { sessionManager } from '../../lib/session';
 import { getVideoElement } from './dom';
 import { t } from '../../lib/i18n';
@@ -187,6 +188,14 @@ export function usePlayerEventHandlers(args: {
       // HLS compartilhado falhou (segmento, rede, codec): continua pelo remux em vez de mostrar erro
       fallbackToRemux();
       return;
+    }
+    if (resolvedStreamUrl.startsWith('/api/youtube/master/')) {
+      const ytId = getYouTubeId(source.src);
+      if (ytId) {
+        logger.warn('[Player] Stream HLS do YouTube falhou; alternando para embed');
+        setResolvedStreamUrl(`youtube/${ytId}`);
+        return;
+      }
     }
     if (isSwitchingAudioRef.current) {
       // Ignora erro transitório durante a reconexão da dublagem
