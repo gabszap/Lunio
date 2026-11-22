@@ -698,4 +698,6 @@ export const EN: Record<string, string> = {
   "A lista de pedidos está cheia.": "The request list is full.",
   "Tocar na sala": "Play in room",
   "Voltar para a sala": "Back to room",
+  "Sessão": "Session",
+  "Copiar código da sala": "Copy room code",
 };

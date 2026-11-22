@@ -1,9 +1,9 @@
 import React, { useRef } from 'react';
-import { BookmarkMinus } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { Chapter } from '../types/media';
 import { formatTime, getCurrentChapter } from '../lib/chapters';
 import { logger } from '../lib/logger';
-import { IconButton, MenuItem, MenuPanel, useDismiss } from './ui';
+import { MenuItem, MenuPanel, cx, useDismiss } from './ui';
 import { t } from '../lib/i18n';
 
 interface ChapterListProps {
@@ -15,6 +15,9 @@ interface ChapterListProps {
   disabled?: boolean;
 }
 
+/**
+ * Nome do capítulo atual clicável no topo esquerdo do player — abre a lista de capítulos para baixo.
+ */
 export const ChapterList: React.FC<ChapterListProps> = ({
   chapters,
   currentTime,
@@ -31,6 +34,7 @@ export const ChapterList: React.FC<ChapterListProps> = ({
   }
 
   const currentChapter = getCurrentChapter(currentTime, chapters);
+  const label = currentChapter?.title || t('Capítulos');
 
   const handleSelectChapter = (chap: Chapter) => {
     onSeek(chap.startTime);
@@ -38,19 +42,35 @@ export const ChapterList: React.FC<ChapterListProps> = ({
     onOpenChange(false);
   };
 
+  if (disabled) {
+    return (
+      <span id="player-active-chapter-badge" className="truncate text-[13px] text-lu-muted">
+        {label}
+      </span>
+    );
+  }
+
   return (
-    <div id="chapter-list-menu-container" className="relative hidden sm:block" ref={containerRef}>
-      <IconButton
+    <div id="chapter-list-menu-container" className="relative inline-flex min-w-0" ref={containerRef}>
+      <button
         id="btn-chapters-menu-toggle"
-        label={t('Capítulos')}
+        type="button"
+        aria-label={t('Capítulos')}
         aria-expanded={open}
-        active={open}
-        disabled={disabled}
-        onClick={() => onOpenChange(!open)}
-        className="!w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenChange(!open);
+        }}
+        className={cx(
+          'inline-flex items-center gap-1 max-w-full -ml-1.5 px-1.5 py-0.5 rounded-md text-[13px] transition-colors min-w-0',
+          open ? 'bg-white/10 text-lu-text' : 'text-lu-muted hover:text-lu-text hover:bg-white/8'
+        )}
       >
-        <BookmarkMinus size={18} />
-      </IconButton>
+        <span id="player-active-chapter-badge" className="truncate">
+          {label}
+        </span>
+        <ChevronDown size={14} className={cx('flex-none transition-transform', open && 'rotate-180')} />
+      </button>
 
       {open && (
         <MenuPanel
@@ -58,7 +78,7 @@ export const ChapterList: React.FC<ChapterListProps> = ({
           title={t('Capítulos')}
           meta={`${chapters.length} ${chapters.length === 1 ? t('capítulo') : t('capítulos')}`}
           onClose={() => onOpenChange(false)}
-          className="right-0 w-[340px]"
+          className="!top-full !bottom-auto !mt-2 !mb-0 left-0 w-[340px]"
         >
           <div className="flex flex-col gap-0.5 pb-1">
             {chapters.map((chap, idx) => {

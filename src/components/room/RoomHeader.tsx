@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Keyboard, PanelRightClose, PanelRightOpen, Plus } from 'lucide-react';
+import { Check, Copy, Keyboard, PanelRightClose, PanelRightOpen, Plus } from 'lucide-react';
 import { formatRoomDuration } from '../../lib/roomDuration';
+import { copyText } from '../../lib/recent';
 import { t, msg } from '../../lib/i18n';
 import { Dot, IconButton, Kbd, Logo, cx, useDismiss } from '../ui';
 
@@ -74,9 +75,18 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
   const [urlError, setUrlError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(() => Math.max(0, now() - createdAt));
+  const [copiedCode, setCopiedCode] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const shortcutsRef = useRef<HTMLDivElement>(null);
   useDismiss(shortcutsOpen, () => setShortcutsOpen(false), shortcutsRef);
+
+  const handleCopyCode = async () => {
+    if (!roomCode) return;
+    if (await copyText(roomCode)) {
+      setCopiedCode(true);
+      window.setTimeout(() => setCopiedCode(false), 1800);
+    }
+  };
 
   useEffect(() => {
     const tick = () => setElapsedMs(Math.max(0, now() - createdAt));
@@ -108,21 +118,35 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
   const urlPlaceholder = isHost ? t('Colar link de vídeo ou YouTube…') : t('Sugerir link de vídeo ou YouTube…');
 
   const roomPill = (
-    <div className="flex items-center justify-center gap-2.5 min-w-0">
+    <div className="flex items-center justify-center gap-2 min-w-0">
       <Dot tone={connected ? (environment === 'discord' ? 'accent' : 'success') : 'muted'} />
-      <span className="text-[14px] font-semibold truncate">
-        {connected ? (
-          environment === 'discord' ? (
-            t('Canal de voz do Discord')
-          ) : (
-            <>
-              {t('Sala')} <span className="tracking-[0.1em] tabular">{roomCode}</span>
-            </>
-          )
+      {connected ? (
+        environment === 'discord' ? (
+          <span className="text-[14px] font-semibold truncate">{t('Canal de voz do Discord')}</span>
         ) : (
-          t('Modo Solo')
-        )}
-      </span>
+          <div className="inline-flex items-center gap-1.5 min-w-0">
+            <span className="text-[13px] font-medium text-lu-muted">{t('Sessão')}</span>
+            <button
+              id="btn-room-code-copy"
+              type="button"
+              onClick={handleCopyCode}
+              title={t('Copiar código da sala')}
+              aria-label={t('Copiar código da sala')}
+              className={cx(
+                'inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg border text-[13px] font-semibold tracking-[0.09em] tabular transition-colors',
+                copiedCode
+                  ? 'bg-lu-success/12 border-lu-success/35 text-lu-success'
+                  : 'bg-lu-bg2 border-lu-border text-lu-text hover:bg-lu-surface hover:border-lu-border-strong'
+              )}
+            >
+              <span>{copiedCode ? t('Copiado') : roomCode}</span>
+              {copiedCode ? <Check size={13} /> : <Copy size={13} className="text-lu-muted" />}
+            </button>
+          </div>
+        )
+      ) : (
+        <span className="text-[14px] font-semibold truncate">{t('Modo Solo')}</span>
+      )}
       {connected && (
         <span
           aria-label={t('Duração da sala')}
@@ -197,7 +221,7 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
       </IconButton>
 
       {connected && (
-        <form onSubmit={handleSubmit} className={cx('relative flex-1 min-w-0', !sidebarOpen && 'sm:w-[240px] sm:flex-none')}>
+        <form onSubmit={handleSubmit} className="relative flex-1 min-w-0 sm:w-[240px] sm:flex-none lg:w-[256px]">
           <input
             type="text"
             value={urlInput}
@@ -236,36 +260,18 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
     </div>
   );
 
-  // Com barra lateral aberta no desktop, centraliza o nome da sala exatamente sobre o palco; fechada, centraliza na tela toda.
+  // Centraliza a pílula da sessão exatamente no meio do cabeçalho (sem pular ao abrir/fechar a barra lateral).
   return (
-    <header
-      className={cx(
-        'flex-none relative z-30 flex flex-wrap items-center justify-between gap-2 min-h-11',
-        sidebarOpen
-          ? 'sm:grid sm:grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_360px] sm:gap-3'
-          : 'sm:grid sm:grid-cols-[1fr_auto_1fr] sm:gap-3'
-      )}
-    >
-      {sidebarOpen ? (
-        <>
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 min-w-0 flex-1 sm:flex-initial">
-            <div className="justify-self-start">
-              <Logo onClick={onLogoClick} size={28} />
-            </div>
-            {roomPill}
-            <div aria-hidden="true" />
-          </div>
-          {rightControls}
-        </>
-      ) : (
-        <>
-          <div className="justify-self-start">
-            <Logo onClick={onLogoClick} size={28} />
-          </div>
-          {roomPill}
-          <div className="justify-self-end w-full sm:w-auto">{rightControls}</div>
-        </>
-      )}
+    <header className="flex-none relative z-30 flex flex-wrap items-center justify-between gap-2 min-h-11">
+      <div className="flex-none">
+        <Logo onClick={onLogoClick} size={28} />
+      </div>
+
+      <div className="md:absolute md:left-1/2 md:-translate-x-1/2 md:pointer-events-auto">
+        {roomPill}
+      </div>
+
+      <div className="w-full sm:w-auto flex-none">{rightControls}</div>
     </header>
   );
 };

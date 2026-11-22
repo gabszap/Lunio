@@ -17,7 +17,7 @@ import {
 import { Chapter, SubtitleTrack, AudioTrackOption, CatalogSeriesContext } from '../types/media';
 import type { CatalogEpisode } from '../lib/catalog';
 import type { StreamOption } from '../lib/streams';
-import { formatTime, getCurrentChapter } from '../lib/chapters';
+import { formatTime } from '../lib/chapters';
 import { SeekButtons } from './SeekButtons';
 import { VolumeDisplay } from './VolumeDisplay';
 import { SettingsMenu, formatMs } from './SettingsMenu';
@@ -265,32 +265,46 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   useDismiss(openMenu === 'audio', closeMenu, audioMenuRef);
 
   const isViewer = Boolean(isWatchPartyConnected && !isHost);
-  const currentChapter = getCurrentChapter(currentTime, chapters);
   const bufferAhead = getBufferAhead(currentTime, buffered, bufferedRanges);
   const showBuffer = duration > 0 || currentTime > 0 || buffered > 0;
   const bufferTone = bufferAhead >= 10 ? 'success' : bufferAhead >= 3 ? 'warning' : 'error';
 
-  const subtitleLine = [currentChapter?.title, parsedMetadata?.episodeTitle].filter(Boolean).join(' · ');
+  const episodeTitle = parsedMetadata?.episodeTitle ? String(parsedMetadata.episodeTitle) : '';
+  const hasChapters = chapters.length > 0;
   const codecBadge = parsedMetadata?.codec ? String(parsedMetadata.codec).toUpperCase().replace('X265', 'HEVC').replace('X264', 'H.264') : null;
 
   return (
     <div id="player-ui-overlay" className="absolute inset-0 flex flex-col justify-between pointer-events-none">
-      {/* Topo: título, capítulo atual e selos técnicos (ações da sala ficam no cabeçalho e na dock) */}
-      <div className="pointer-events-auto flex items-start justify-between gap-4 px-3 sm:px-6 pt-3 sm:pt-5 pb-14 bg-gradient-to-b from-lu-video/80 to-lu-video/0">
+      {/* Topo: título, capítulo atual clicável e selos técnicos (ações da sala ficam no cabeçalho e na dock) */}
+      <div className="pointer-events-auto relative z-20 flex items-start justify-between gap-4 px-3 sm:px-6 pt-3 sm:pt-5 pb-14 bg-gradient-to-b from-lu-video/80 to-lu-video/0">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <div className="min-w-0">
             <h2 id="player-media-title" className="m-0 text-[15px] sm:text-[16px] font-medium truncate">
               {title || t('Stream de vídeo')}
             </h2>
-            {(subtitleLine || isInspecting) && (
-              <div className="hidden sm:flex items-center gap-2 text-[13px] text-lu-muted min-w-0">
+            {(hasChapters || episodeTitle || isInspecting) && (
+              <div className="hidden sm:flex items-center gap-2 text-[13px] text-lu-muted min-w-0 mt-0.5">
                 {isInspecting && (
                   <span className="inline-flex items-center gap-1.5 text-lu-accent flex-none">
                     <Spinner size={13} />
                     {t('Lendo faixas…')}
                   </span>
                 )}
-                {subtitleLine && <span id="player-active-chapter-badge" className="truncate">{subtitleLine}</span>}
+                {hasChapters && (
+                  <ChapterList
+                    chapters={chapters}
+                    currentTime={currentTime}
+                    onSeek={onSeek}
+                    open={openMenu === 'chapters'}
+                    onOpenChange={(o) => setOpenMenu(o ? 'chapters' : null)}
+                    disabled={isViewer}
+                  />
+                )}
+                {episodeTitle && (
+                  <span className="truncate">
+                    {hasChapters ? `· ${episodeTitle}` : episodeTitle}
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -584,15 +598,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                 </IconButton>
               </div>
             )}
-
-            <ChapterList
-              chapters={chapters}
-              currentTime={currentTime}
-              onSeek={onSeek}
-              open={openMenu === 'chapters'}
-              onOpenChange={(o) => setOpenMenu(o ? 'chapters' : null)}
-              disabled={isViewer}
-            />
 
             <SettingsMenu
               playbackRate={playbackRate}
