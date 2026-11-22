@@ -212,7 +212,7 @@ export const RoomShell: React.FC<RoomShellProps> = ({
       <div className="flex-1 min-h-0 flex gap-3">
         {/* Coluna esquerda: Palco (Telas 2/4 ou Tela 3 16:9) + MemberStrip (Tela 3) + RoomDock */}
         <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-2.5">
-          <div className="flex-1 min-h-0 relative flex items-center justify-center [container-type:size]">
+          <div className="flex-1 min-h-0 relative z-0 flex items-center justify-center [container-type:size]">
             {renderPlayer({
               roomState,
               onSelectMember: handleSelectMember,

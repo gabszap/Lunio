@@ -75,7 +75,7 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
   const urlPlaceholder = isHost ? t('Colar link de vídeo ou YouTube…') : t('Sugerir link de vídeo ou YouTube…');
 
   return (
-    <header className="flex-none grid grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_340px] items-center gap-3 min-h-11">
+    <header className="flex-none relative z-30 grid grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_340px] items-center gap-3 min-h-11">
       <div className="flex items-center justify-between gap-3 min-w-0">
         <Logo onClick={onLogoClick} size={28} />
 

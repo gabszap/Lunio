@@ -269,5 +269,5 @@ export const RoomDock: React.FC<RoomDockProps> = ({
     );
   }
 
-  return <div className="flex-none flex items-center justify-center">{pill}</div>;
+  return <div className="flex-none relative z-40 flex items-center justify-center">{pill}</div>;
 };
