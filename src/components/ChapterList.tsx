@@ -51,7 +51,7 @@ export const ChapterList: React.FC<ChapterListProps> = ({
   }
 
   return (
-    <div id="chapter-list-menu-container" className="relative inline-flex min-w-0" ref={containerRef}>
+    <div id="chapter-list-menu-container" className="relative inline-flex max-w-full" ref={containerRef}>
       <button
         id="btn-chapters-menu-toggle"
         type="button"
@@ -62,7 +62,7 @@ export const ChapterList: React.FC<ChapterListProps> = ({
           onOpenChange(!open);
         }}
         className={cx(
-          'inline-flex items-center gap-1 max-w-full -ml-1.5 px-1.5 py-0.5 rounded-md text-[13px] transition-colors min-w-0',
+          'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[13px] transition-colors whitespace-nowrap max-w-[min(360px,55vw)]',
           open ? 'bg-white/10 text-lu-text' : 'text-lu-muted hover:text-lu-text hover:bg-white/8'
         )}
       >
