@@ -7,8 +7,10 @@ export function transformAssStyle(
   fontSizePercent: number,
   bottomOffsetPercent: number
 ): string {
-  const sizeScale = Math.max(0.5, Math.min(2.5, fontSizePercent / 100));
-  const clampedOffset = Math.max(0, Math.min(30, bottomOffsetPercent));
+  const safeFont = Number.isFinite(fontSizePercent) ? fontSizePercent : 100;
+  const safeOffset = Number.isFinite(bottomOffsetPercent) ? bottomOffsetPercent : 5;
+  const sizeScale = Math.max(0.5, Math.min(2.5, safeFont / 100));
+  const clampedOffset = Math.max(0, Math.min(30, safeOffset));
 
   if (Math.abs(sizeScale - 1) < 0.001 && clampedOffset === 5) {
     return assContent;
@@ -33,14 +35,12 @@ export function transformAssStyle(
   let fontsizeIdx = -1;
   let marginVIdx = -1;
   let alignmentIdx = -1;
-  let isV4Legacy = false;
 
   const out = lines.map((line) => {
     const trimmed = line.trim();
     if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
       const section = trimmed.toLowerCase();
       inStyles = section === '[v4+ styles]' || section === '[v4 styles]';
-      isV4Legacy = section === '[v4 styles]';
       fontsizeIdx = -1;
       marginVIdx = -1;
       alignmentIdx = -1;
@@ -76,8 +76,8 @@ export function transformAssStyle(
 
       if (marginVIdx >= 0 && marginVIdx < parts.length && marginDelta !== 0) {
         const alignRaw = alignmentIdx >= 0 && alignmentIdx < parts.length ? parseInt(parts[alignmentIdx], 10) : 2;
-        // Apenas estilos ancorados na base (ASS v4+: 1,2,3; SSA v4: 1,2,3) sobem/descem para não mover placas do topo
-        const isBottomAligned = !Number.isFinite(alignRaw) || (isV4Legacy ? alignRaw >= 1 && alignRaw <= 3 : alignRaw >= 1 && alignRaw <= 3);
+        // Apenas estilos ancorados na base (ASS v4+ e SSA v4: 1, 2, 3) sobem/descem para não mover placas do topo
+        const isBottomAligned = !Number.isFinite(alignRaw) || (alignRaw >= 1 && alignRaw <= 3);
         if (isBottomAligned) {
           const origMargin = parseInt(parts[marginVIdx], 10);
           if (Number.isFinite(origMargin)) {

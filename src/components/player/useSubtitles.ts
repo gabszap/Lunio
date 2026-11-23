@@ -107,10 +107,10 @@ export function useSubtitles(args: {
   }
   };
 
-  /** Fonte sem inspeção (arquivo local etc.): usa só as legendas informadas. */
-  const applyLocalSubtitles = () => {
-    setDetectedSubtitles(initialSubtitles);
-    const defaultTrack = initialSubtitles.find((s) => s.default) || initialSubtitles[0] || null;
+  /** Fonte sem inspeção (arquivo local, YouTube HLS etc.): usa as legendas informadas. */
+  const applyLocalSubtitles = (tracks: SubtitleTrack[] = initialSubtitles) => {
+    setDetectedSubtitles(tracks);
+    const defaultTrack = tracks.find((s) => s.default) || tracks[0] || null;
     setActiveSubtitle(defaultTrack);
     setReadiness((prev) => ({
       ...prev,

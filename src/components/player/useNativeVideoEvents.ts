@@ -1,4 +1,4 @@
-import { useEffect, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from 'react';
+import { useEffect, useRef, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from 'react';
 import type { MediaPlayerInstance } from '@vidstack/react';
 import type { Chapter } from '../../types/media';
 import { getCurrentChapter, formatTime } from '../../lib/chapters';
@@ -63,6 +63,9 @@ export function useNativeVideoEvents(args: {
     setBuffered, setBufferedRanges, setCurrentTime, setPaused, setIsBuffering, setResumePrompt, setLiveResolution,
   } = args;
 
+  const resumePromptRef = useRef(resumePrompt);
+  resumePromptRef.current = resumePrompt;
+
   // Detecta qualidade ao vivo no YouTube via postMessage oficial do iframe (onPlaybackQualityChange / infoDelivery)
   useEffect(() => {
     setLiveResolution?.(null);
@@ -84,7 +87,7 @@ export function useNativeVideoEvents(args: {
           : typeof payload.info?.playbackQuality === 'string'
           ? payload.info.playbackQuality
           : null;
-      if (rawQuality && YT_QUALITY_LABELS[rawQuality]) {
+      if (rawQuality && Object.hasOwn(YT_QUALITY_LABELS, rawQuality)) {
         setLiveResolution(YT_QUALITY_LABELS[rawQuality]);
       }
     };
@@ -94,9 +97,11 @@ export function useNativeVideoEvents(args: {
 
   // Sincronização direta e contínua do elemento <video> nativo (imune a dessincronias do Vidstack)
   useEffect(() => {
+    if (!resolvedStreamUrl || resolvedStreamUrl.startsWith('youtube/')) return;
     let active = true;
     let videoEl: HTMLVideoElement | null = null;
     let retryTimer: any = null;
+    let retryCount = 0;
 
     const updateBufferInfo = () => {
       if (!videoEl) return;
@@ -180,7 +185,7 @@ export function useNativeVideoEvents(args: {
       if (!videoEl.paused) {
         setPaused(false);
         setIsBuffering(false);
-        if (resumePrompt && actualTotalTime > 20) {
+        if (resumePromptRef.current && actualTotalTime > 20) {
           setResumePrompt(null);
         }
       }
@@ -314,12 +319,13 @@ export function useNativeVideoEvents(args: {
 
     const attachListeners = () => {
       if (!active) return;
-      videoEl =
-        playerRef.current?.el?.querySelector('video') ||
-        (document.querySelector('video') as HTMLVideoElement | null);
+      // Busca somente dentro do player para nunca prender listeners no <video> de prévia do ScreenShare
+      videoEl = (playerRef.current?.el?.querySelector('video') as HTMLVideoElement | null) || null;
 
       if (!videoEl) {
-        retryTimer = setTimeout(attachListeners, 100);
+        if (retryCount++ < 50) {
+          retryTimer = setTimeout(attachListeners, 100);
+        }
         return;
       }
 

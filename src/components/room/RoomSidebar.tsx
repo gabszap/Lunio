@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Users, X } from 'lucide-react';
 import { t } from '../../lib/i18n';
 import { syncManager } from '../../lib/sync';
@@ -78,16 +78,20 @@ export const RoomSidebar: React.FC<RoomSidebarProps> = ({
   const queueCount = roomState?.playlist?.length ?? syncManager.getPlaylist().length;
   const requests = (roomState as (RoomState & { requests?: PlaylistItem[] }) | null)?.requests ?? [];
 
-  const prevTabRef = useRef<RoomSidebarTab>(activeTab);
-  const directionRef = useRef<'right' | 'left' | null>(null);
-  if (prevTabRef.current !== activeTab) {
-    directionRef.current = SIDEBAR_TAB_ORDER[activeTab] >= SIDEBAR_TAB_ORDER[prevTabRef.current] ? 'right' : 'left';
-    prevTabRef.current = activeTab;
+  const [tabNav, setTabNav] = useState<{ tab: RoomSidebarTab; dir: 'right' | 'left' | null }>({
+    tab: activeTab,
+    dir: null,
+  });
+  if (tabNav.tab !== activeTab) {
+    setTabNav({
+      tab: activeTab,
+      dir: SIDEBAR_TAB_ORDER[activeTab] >= SIDEBAR_TAB_ORDER[tabNav.tab] ? 'right' : 'left',
+    });
   }
   const panelAnimClass =
-    directionRef.current === 'right'
+    tabNav.dir === 'right'
       ? 'lu-tab-panel-right'
-      : directionRef.current === 'left'
+      : tabNav.dir === 'left'
       ? 'lu-tab-panel-left'
       : undefined;
 

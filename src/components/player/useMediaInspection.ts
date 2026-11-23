@@ -105,8 +105,7 @@ export function useMediaInspection(args: {
             if (chaps.length > 0) setDetectedChapters(chaps);
             const ytSubs: SubtitleTrack[] = Array.isArray(info.subtitles) ? info.subtitles : [];
             const allSubs = [...initialSubtitles, ...ytSubs];
-            setDetectedSubtitles(allSubs);
-            applyLocalSubtitles();
+            applyLocalSubtitles(allSubs);
             setResolvedStreamUrl(info.masterUrl);
             logger.info(`[Mídia] YouTube via yt-dlp/HLS: ${info.title || ytId}`);
           } else {

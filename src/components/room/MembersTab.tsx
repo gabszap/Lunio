@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowRight, Ban, Check, Crown, Eye, Globe, Lock, PenLine, Settings2, Shield, UserMinus, UserX } from 'lucide-react';
 import { t } from '../../lib/i18n';
-import { roomCodeFrom, setRoomInUrl } from '../../lib/roomCode';
+import { roomCodeFrom } from '../../lib/roomCode';
 import { syncManager } from '../../lib/sync';
 import type { RoomMember, RoomState, RoomVisibility } from '../../types/sync';
 import { setSkipNamePrompt, shouldSkipNamePrompt } from '../UsernameModal';
@@ -30,6 +30,13 @@ export const MembersTab: React.FC<MembersTabProps> = ({ members, roomState, curr
   const [settingsSaved, setSettingsSaved] = useState(false);
 
   const focusedRowRef = useRef<HTMLDivElement>(null);
+  const savedTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current !== null) window.clearTimeout(savedTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     setRoomNameInput(roomState?.name || '');
@@ -64,7 +71,11 @@ export const MembersTab: React.FC<MembersTabProps> = ({ members, roomState, curr
     syncManager.emitRoomSettings(payload);
     setPasswordInput('');
     setSettingsSaved(true);
-    window.setTimeout(() => setSettingsSaved(false), 1800);
+    if (savedTimerRef.current !== null) window.clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = window.setTimeout(() => {
+      savedTimerRef.current = null;
+      setSettingsSaved(false);
+    }, 1800);
   };
 
   const handleSaveProfile = (e: React.FormEvent) => {
@@ -86,7 +97,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({ members, roomState, curr
     e.preventDefault();
     const code = roomCodeFrom(customRoomInput) || customRoomInput.trim().toUpperCase();
     if (code) {
-      setRoomInUrl(code);
+      // A URL só é atualizada quando o servidor confirmar a entrada na nova sala (App.tsx)
       syncManager.joinRoom(code);
       setIsChangingRoom(false);
       setCustomRoomInput('');

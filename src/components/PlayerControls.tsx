@@ -384,7 +384,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               </IconButton>
               <button
                 type="button"
-                aria-label={paused ? 'Reproduzir' : 'Pausar'}
+                aria-label={paused ? t('Reproduzir') : t('Pausar')}
                 onClick={onPlayToggle}
                 className="w-16 h-16 rounded-full inline-flex items-center justify-center bg-lu-surface/72 border border-white/12 backdrop-blur-md text-lu-text"
               >
@@ -524,7 +524,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                 <MenuPanel
                   id="subtitles-popover-menu"
                   title={t('Legendas')}
-                  meta={`${subtitles.length} ${subtitles.length === 1 ? 'faixa' : 'faixas'}`}
+                  meta={`${subtitles.length} ${subtitles.length === 1 ? t('faixa') : t('faixas')}`}
                   onClose={closeMenu}
                   className="right-0 w-[368px]"
                 >
@@ -644,7 +644,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   <MenuPanel
                     id="audio-tracks-popover-menu"
                     title={t('Faixas de áudio')}
-                    meta={`${audioTracks.length} ${audioTracks.length === 1 ? 'faixa' : 'faixas'}`}
+                    meta={`${audioTracks.length} ${audioTracks.length === 1 ? t('faixa') : t('faixas')}`}
                     onClose={closeMenu}
                     className="right-0 w-[320px]"
                   >
@@ -694,10 +694,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               onAutoSkipIntroChange={isViewer ? undefined : onAutoSkipIntroChange}
               audioDelay={audioDelay}
               onAudioDelayChange={onAudioDelayChange}
-              subtitleDelay={subtitleDelay}
-              onSubtitleDelayChange={onSubtitleDelayChange}
-              subtitleFontSize={subtitleFontSize}
-              onSubtitleFontSizeChange={onSubtitleFontSizeChange}
               canChangeRate={!isViewer}
               open={openMenu === 'settings'}
               onOpenChange={(o) => setOpenMenu(o ? 'settings' : null)}

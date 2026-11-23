@@ -20,10 +20,6 @@ interface SettingsMenuProps {
   onQualitySelect?: (height: number | 'auto') => void;
   audioDelay?: number; // 0.0 to 5.0 in seconds
   onAudioDelayChange?: (delay: number) => void;
-  subtitleDelay?: number; // -10.0 to 10.0 in seconds
-  onSubtitleDelayChange?: (delay: number) => void;
-  subtitleFontSize?: number; // 50 to 250 in percent
-  onSubtitleFontSizeChange?: (size: number) => void;
   /** Pular a abertura sozinho (Host/solo) ou votar sozinho (espectador). */
   autoSkipIntro?: boolean;
   onAutoSkipIntroChange?: (on: boolean) => void;

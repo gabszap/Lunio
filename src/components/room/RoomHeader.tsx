@@ -83,13 +83,24 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
   const [copiedCode, setCopiedCode] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const shortcutsRef = useRef<HTMLDivElement>(null);
+  const copiedTimerRef = useRef<number | null>(null);
   useDismiss(shortcutsOpen, () => setShortcutsOpen(false), shortcutsRef);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
 
   const handleCopyCode = async () => {
     if (!roomCode) return;
     if (await copyText(roomCode)) {
       setCopiedCode(true);
-      window.setTimeout(() => setCopiedCode(false), 1800);
+      if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = window.setTimeout(() => {
+        copiedTimerRef.current = null;
+        setCopiedCode(false);
+      }, 1800);
     }
   };
 

@@ -279,6 +279,7 @@ export function Segmented<T extends string>({
 export function useSlidingPill<T extends string>(activeKey: T, radius: number, layoutKey?: string | number) {
   const listRef = useRef<HTMLDivElement>(null);
   const buttonRefs = useRef<Map<T, HTMLButtonElement>>(new Map());
+  const refCallbacks = useRef<Map<T, (el: HTMLButtonElement | null) => void>>(new Map());
   const [clipPath, setClipPath] = useState<string | null>(null);
   const [animated, setAnimated] = useState(false);
 
@@ -312,13 +313,17 @@ export function useSlidingPill<T extends string>(activeKey: T, radius: number, l
     return () => ro.disconnect();
   }, [measure]);
 
-  const setButtonRef = useCallback(
-    (key: T) => (el: HTMLButtonElement | null) => {
-      if (el) buttonRefs.current.set(key, el);
-      else buttonRefs.current.delete(key);
-    },
-    []
-  );
+  const setButtonRef = useCallback((key: T) => {
+    let cb = refCallbacks.current.get(key);
+    if (!cb) {
+      cb = (el: HTMLButtonElement | null) => {
+        if (el) buttonRefs.current.set(key, el);
+        else buttonRefs.current.delete(key);
+      };
+      refCallbacks.current.set(key, cb);
+    }
+    return cb;
+  }, []);
 
   return { listRef, clipPath, animated, setButtonRef };
 }
@@ -338,7 +343,10 @@ export function PillTabs<T extends string>({
   label: string;
 }) {
   const radius = size === 'lg' ? 10 : 8;
-  const { listRef, clipPath, animated, setButtonRef } = useSlidingPill(value, radius, options.length);
+  const layoutKey = options
+    .map((o) => `${o.value}:${typeof o.label === 'string' || typeof o.label === 'number' ? o.label : ''}`)
+    .join('|');
+  const { listRef, clipPath, animated, setButtonRef } = useSlidingPill(value, radius, layoutKey);
 
   return (
     <div
@@ -517,15 +525,18 @@ export const Slider: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = ({ 
  * (o botão que abre o painel: sem isso o mousedown fecha e o click reabre).
  */
 export function useDismiss(open: boolean, onClose: () => void, ref: React.RefObject<HTMLElement | null>, alsoInside?: React.RefObject<HTMLElement | null>) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (alsoInside?.current?.contains(target)) return;
-      if (ref.current && !ref.current.contains(target)) onClose();
+      if (ref.current && !ref.current.contains(target)) onCloseRef.current();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -533,7 +544,7 @@ export function useDismiss(open: boolean, onClose: () => void, ref: React.RefObj
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open, onClose, ref, alsoInside]);
+  }, [open, ref, alsoInside]);
 }
 
 // ───────────────────────── Form fields ─────────────────────────
@@ -633,6 +644,23 @@ export const ClearButton: React.FC<{ onClick: () => void; label?: string }> = ({
 
 // ───────────────────────── Modal ─────────────────────────
 
+/** Alvo de portal seguro para `:fullscreen` nativo (elementos no `document.body` ficam atrás da top layer). */
+export function usePortalTarget(): Element | null {
+  const [target, setTarget] = useState<Element | null>(() =>
+    typeof document !== 'undefined' ? document.fullscreenElement ?? document.body : null
+  );
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const sync = () => setTarget(document.fullscreenElement ?? document.body);
+    sync();
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, []);
+
+  return target;
+}
+
 export const Modal: React.FC<{
   open: boolean;
   onClose?: () => void;
@@ -643,34 +671,40 @@ export const Modal: React.FC<{
   className?: string;
 }> = ({ open, onClose, label, width = 480, alert, children, className }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const portalTarget = usePortalTarget();
 
   useEffect(() => {
     if (!open) return;
     const prev = document.activeElement as HTMLElement | null;
-    const first = dialogRef.current?.querySelector<HTMLElement>(
-      'input:not([disabled]), button:not([disabled]), [href], select, textarea'
-    );
-    first?.focus();
+    if (dialogRef.current && !dialogRef.current.contains(document.activeElement)) {
+      const preferred = dialogRef.current.querySelector<HTMLElement>(
+        '[autofocus]:not([disabled]), input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled])'
+      );
+      const fallback = dialogRef.current.querySelector<HTMLElement>('button:not([disabled]), [href]');
+      (preferred || fallback)?.focus();
+    }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || !onClose) return;
+      if (e.key !== 'Escape' || !onCloseRef.current) return;
       // Quando há modais aninhados (ex.: SubtitleModal sobre MediaPickerModal), apenas o modal do topo responde ao Escape
       const dialogs = document.querySelectorAll('[role="dialog"], [role="alertdialog"]');
       if (dialogs.length > 0 && dialogs[dialogs.length - 1] !== dialogRef.current) return;
-      onClose();
+      onCloseRef.current();
     };
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
       prev?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
   const modalNode = (
     <div
       className="lu-modal-backdrop-enter fixed inset-0 z-[100] flex items-center justify-center p-4 bg-[rgba(3,4,7,0.92)]"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget && onClose) onClose();
+        if (e.target === e.currentTarget && onCloseRef.current) onCloseRef.current();
       }}
     >
       <div
@@ -688,7 +722,7 @@ export const Modal: React.FC<{
       </div>
     </div>
   );
-  return typeof document !== 'undefined' ? createPortal(modalNode, document.body) : modalNode;
+  return portalTarget ? createPortal(modalNode, portalTarget) : modalNode;
 };
 
 export const ModalHeader: React.FC<{ title: string; description?: React.ReactNode; onClose?: () => void }> = ({

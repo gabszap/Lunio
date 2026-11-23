@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useState } from 'react';
 import { Activity, Github, LayoutGrid, Users } from 'lucide-react';
 import { Logo, PillTabs, cx } from '../ui';
 import { LANGS, setLang, t, msg, useLang } from '../../lib/i18n';
@@ -55,19 +55,20 @@ const LanguageSwitch: React.FC = () => {
 };
 
 export const HomeLayout: React.FC<HomeLayoutProps> = ({ tab, stepKey, onTabChange, onLogo, children, centered }) => {
-  const prevRef = useRef<{ tab: HomeTab; stepKey?: string }>({ tab, stepKey });
-  const directionRef = useRef<'right' | 'left' | null>(null);
-  if (prevRef.current.tab !== tab) {
-    directionRef.current = TAB_ORDER[tab] >= TAB_ORDER[prevRef.current.tab] ? 'right' : 'left';
-    prevRef.current = { tab, stepKey };
-  } else if (prevRef.current.stepKey !== stepKey) {
-    directionRef.current = stepKey === 'menu' ? 'left' : 'right';
-    prevRef.current = { tab, stepKey };
+  const [nav, setNav] = useState<{ tab: HomeTab; stepKey?: string; dir: 'right' | 'left' | null }>({
+    tab,
+    stepKey,
+    dir: null,
+  });
+  if (nav.tab !== tab) {
+    setNav({ tab, stepKey, dir: TAB_ORDER[tab] >= TAB_ORDER[nav.tab] ? 'right' : 'left' });
+  } else if (nav.stepKey !== stepKey) {
+    setNav({ tab, stepKey, dir: stepKey === 'menu' ? 'left' : 'right' });
   }
   const panelAnimClass =
-    directionRef.current === 'right'
+    nav.dir === 'right'
       ? 'lu-tab-panel-right'
-      : directionRef.current === 'left'
+      : nav.dir === 'left'
       ? 'lu-tab-panel-left'
       : undefined;
 

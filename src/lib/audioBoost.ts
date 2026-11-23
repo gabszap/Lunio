@@ -161,6 +161,7 @@ export class AudioBoostManager {
     if (this.currentElement && (typeof this.currentElement.isConnected !== 'boolean' || this.currentElement.isConnected)) {
       return this.currentElement;
     }
+    this.currentElement = null;
     if (typeof document !== 'undefined') {
       const video = document.querySelector('#video-player-root video') as HTMLMediaElement | null;
       if (video) {
@@ -168,7 +169,7 @@ export class AudioBoostManager {
         return video;
       }
     }
-    return this.currentElement;
+    return null;
   }
 
   public setBoost(percent: number) {

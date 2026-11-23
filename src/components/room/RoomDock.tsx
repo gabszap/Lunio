@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Check, ChevronUp, Clock, Compass, Link2, LogOut, Share2, Terminal, Users } from 'lucide-react';
 import { formatTime } from '../../lib/chapters';
 import { t } from '../../lib/i18n';
@@ -44,7 +44,14 @@ export const RoomDock: React.FC<RoomDockProps> = ({
   const [hovered, setHovered] = useState(false);
 
   const shareRef = useRef<HTMLDivElement>(null);
+  const copiedTimerRef = useRef<number | null>(null);
   useDismiss(shareOpen, () => setShareOpen(false), shareRef);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
 
   const anyMenuOpen = shareOpen || screenOpen;
   const revealDock = !isFullscreen || hovered || anyMenuOpen;
@@ -55,7 +62,11 @@ export const RoomDock: React.FC<RoomDockProps> = ({
     setShareOpen(false);
     if (await copyText(url.toString())) {
       setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2000);
+      if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = window.setTimeout(() => {
+        copiedTimerRef.current = null;
+        setCopiedLink(false);
+      }, 2000);
     }
   };
 

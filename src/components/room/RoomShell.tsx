@@ -254,9 +254,23 @@ export const RoomShell: React.FC<RoomShellProps> = ({
         requireName={requireName}
         onCommit={onCommitMedia}
         onSuggestMedia={(item) => {
-          syncManager.emitRequestAdd(item);
-          onSidebarTabChange('requests');
-          if (!sidebarOpen) onToggleSidebar();
+          const requests = syncManager.getRequests();
+          const playlist = syncManager.getPlaylist();
+          if (requests.length >= REQUESTS_MAX_ITEMS) return;
+          void prepareMediaLink(
+            item.url,
+            [...requests.map((r) => r.url), ...playlist.map((p) => p.url)],
+            Number.POSITIVE_INFINITY
+          ).then((res) => {
+            if ('error' in res) return;
+            syncManager.emitRequestAdd({
+              ...res.item,
+              title: item.title || res.item.title,
+              mimeType: item.mimeType || res.item.mimeType,
+            });
+            onSidebarTabChange('requests');
+            if (!sidebarOpen) onToggleSidebar();
+          });
         }}
         onPlayStream={onPlayCatalogStream}
       />

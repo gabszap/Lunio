@@ -205,6 +205,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     initialAudioTracks,
   });
   const { detectedAudioTracks, activeAudioTrack, resolvedStreamUrl, setResolvedStreamUrl } = audio;
+  const isYouTubeSource = Boolean(getYouTubeId(source.src));
+
+  // Reseta a lista de qualidades ao trocar de stream (ex.: HLS -> fallback embed ou troca de áudio)
+  useEffect(() => {
+    setVideoQualities([]);
+    setAutoQuality(true);
+  }, [resolvedStreamUrl]);
 
   // Leitura das faixas ao mudar a fonte
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
@@ -374,6 +381,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     isFullscreen: fullscreen.isFullscreen,
     syncStatus,
     skippableChapter,
+    isYouTube: isYouTubeSource,
     subtitleDelay: prefs.subtitleDelay,
     audioDelay: prefs.audioDelay,
     lastKnownTimeRef,
@@ -614,10 +622,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onQualitiesChange={syncQualitiesFromPlayer}
         onQualityChange={syncQualitiesFromPlayer}
         // O MediaProvider do Vidstack (React) só carrega o provedor ao montar o <video>. Ao trocar de "video" para "hls"
-        // (e voltar) o elemento é o mesmo, então pedimos o carregamento do provedor novo à mão.
+        // (e voltar) o elemento é o mesmo, então pedimos o carregamento do provedor novo à mão (exceto YouTube iframe).
         onProviderLoaderChange={(loader) => {
           if (!loader || !providerReadyRef.current) return;
-          requestAnimationFrame(() => mediaProviderRef.current?.load(getVideoElement(playerRef)));
+          if (resolvedStreamUrl.startsWith('youtube/') || loader.name === 'youtube') return;
+          requestAnimationFrame(() => {
+            const videoEl = playerRef.current?.el?.querySelector('video') as HTMLVideoElement | null;
+            if (videoEl) mediaProviderRef.current?.load(videoEl);
+          });
         }}
         playsInline
         logLevel="warn"
@@ -677,6 +689,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           onBack={onBack}
           onReconnect={() => {
             setPlaybackError(null);
+            const ytId = getYouTubeId(source.src);
+            if (ytId) {
+              setResolvedStreamUrl(`youtube/${ytId}`);
+              return;
+            }
             setResolvedStreamUrl(`/api/proxy?url=${encodeURIComponent(source.src)}#.mp4`);
             const videoEl = playerRef.current?.el?.querySelector('video');
             if (videoEl) {
@@ -799,7 +816,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           qualities={videoQualities}
           autoQuality={autoQuality}
           onQualitySelect={handleQualitySelect}
-          isYouTube={Boolean(getYouTubeId(source.src))}
+          isYouTube={isYouTubeSource}
           volume={volume}
           muted={muted}
           playbackRate={playbackRate}

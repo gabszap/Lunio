@@ -447,6 +447,7 @@ export const EN: Record<string, string> = {
   "Participantes": "Participants",
   "Passar Host": "Make Host",
   "Passar o controle da sala para {name}?": "Hand room control to {name}?",
+  "Pausar": "Pause",
   "Pausar (Espaço)": "Pause (Space)",
   "Pedido inválido.": "Invalid request.",
   "Perguntar o apelido ao criar ou entrar numa sala": "Ask for a nickname when creating or joining a room",
@@ -723,4 +724,7 @@ export const EN: Record<string, string> = {
   "Sincronizado com o Host": "Synced with Host",
   "Qualidade": "Quality",
   "Auto": "Auto",
+  "faixa": "track",
+  "faixas": "tracks",
+  "Muitas tentativas de senha. Aguarde um momento.": "Too many password attempts. Please wait a moment.",
 };

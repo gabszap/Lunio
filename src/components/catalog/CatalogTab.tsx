@@ -84,6 +84,11 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({
   const [calendarSeasonMalId, setCalendarSeasonMalId] = useState<string>();
   const [myList, setMyList] = useState<CatalogItem[]>(() => getMyList());
   const [myListOpen, setMyListOpen] = useState(() => (syncUrl ? isLibraryPath(window.location.pathname) : false));
+  const [returnTick, setReturnTick] = useState(0);
+  const [subViewDir, setSubViewDir] = useState<'forward' | 'back'>('forward');
+  const markBackToCatalog = () => {
+    setReturnTick((n) => n + 1);
+  };
   const myListScroll = useRef(0);
   const openMyList = () => {
     myListScroll.current = 0;
@@ -237,11 +242,6 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
-  const [returnTick, setReturnTick] = useState(0);
-  const [subViewDir, setSubViewDir] = useState<'forward' | 'back'>('forward');
-  const markBackToCatalog = () => {
-    setReturnTick((n) => n + 1);
-  };
   const closeDetail = () => {
     setSubViewDir('back');
     setEpisodeId(null);

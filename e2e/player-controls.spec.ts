@@ -233,12 +233,17 @@ test('abas da Home e da barra lateral da sala animam indicador deslizante e troc
     expect(clipInitialHome).toContain('inset(');
 
     // Home abre em "Sala": Sala → Status (direita) → Catálogo (esquerda) → Sala (direita)
-    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.getByRole('tab', { name: 'Status' }).click();
     await expect.poll(() => indicator.evaluate((el) => getComputedStyle(el).clipPath)).not.toBe(clipInitialHome);
     await expect(indicator).toHaveCSS('transition-property', /clip-path/);
     await expect(page.locator('main')).toHaveClass(/lu-tab-panel-right/);
     await expect(page.locator('main')).toHaveCSS('animation-name', 'lu-tab-enter-right');
+
+    // Respeita prefers-reduced-motion: reduce (desativa animações espaciais)
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await expect(page.locator('main')).toHaveCSS('animation-name', 'none');
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
 
     await page.getByRole('tab', { name: 'Catálogo' }).click();
     await expect(page.locator('main')).toHaveClass(/lu-tab-panel-left/);
@@ -297,5 +302,46 @@ test('abas da Home e da barra lateral da sala animam indicador deslizante e troc
     await expect(sidebar.locator('.lu-tab-panel-left')).toBeVisible();
   } finally {
     await context.close();
+  }
+});
+
+test('modal de senha mantém o foco ao digitar e permite entrar em sala privada', async ({ browser }) => {
+  const host = await newUser(browser);
+  const guest = await newUser(browser);
+  try {
+    const code = await createRoom(host.page, 'Ana', FIXTURE_URL);
+
+    // Host configura sala privada com senha
+    const hostSidebar = host.page.locator('aside[aria-label="Watch Party"]');
+    await hostSidebar.getByRole('tab', { name: /Membros/ }).click();
+    await hostSidebar.getByRole('button', { name: 'Configurar sala' }).click();
+    await hostSidebar.getByRole('tab', { name: 'Privada' }).click();
+    await hostSidebar.locator('#room-settings-password').fill('segredo42');
+    await hostSidebar.getByRole('button', { name: 'Salvar' }).click();
+    await expect(hostSidebar.getByText('Salvo')).toBeVisible();
+
+    // Convidado entra pelo link direto /room/:code e digita a senha caractere a caractere (não pode perder foco pro X)
+    await guest.page.goto(`/room/${code}`);
+    const nameDialog = guest.page.getByRole('dialog', { name: 'Escolha seu apelido' });
+    if (await nameDialog.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await nameDialog.getByRole('textbox').fill('Bia');
+      await nameDialog.getByRole('button', { name: 'Entrar na sala' }).click();
+    }
+
+    const pwDialog = guest.page.getByRole('dialog', { name: 'Sala privada' });
+    await expect(pwDialog).toBeVisible();
+    const pwInput = pwDialog.getByPlaceholder('Senha da sala');
+    await expect(pwInput).toBeFocused();
+    await guest.page.keyboard.type('segredo42');
+    await expect(pwInput).toHaveValue('segredo42');
+    await expect(pwInput).toBeFocused();
+    await guest.page.keyboard.press('Enter');
+
+    await expect(pwDialog).toBeHidden();
+    await expect(guest.page).toHaveURL(new RegExp(`/room/${code}$`));
+    await expect(host.page.locator('aside[aria-label="Watch Party"]')).toContainText('Bia');
+  } finally {
+    await host.context.close();
+    await guest.context.close();
   }
 });

@@ -66,7 +66,7 @@ export function isEndingChapter(chapter: Chapter | null): boolean {
   const title = chapter.title.trim().toLowerCase();
   return (
     /^(ed|ending|encerramento|outro)(\s*\d+)?$/i.test(title) ||
-    /\b(ending\s+theme|tema\s+de\s+encerramento|encerramento|outro)\b/i.test(title) ||
+    /\b(ending\s+theme|tema\s+de\s+encerramento|encerramento|outro\s+(theme|song|music))\b/i.test(title) ||
     title === 'ed' ||
     title.startsWith('ed ') ||
     title.startsWith('ed:') ||

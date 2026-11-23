@@ -112,6 +112,13 @@ export default function App() {
 
   // Já recebeu o estado da sala nesta conexão? (entrada recusada por ban nunca chega a recebê-lo)
   const wasInRoomRef = useRef(false);
+  const activeRoomIdRef = useRef<string | null>(null);
+  const initialRoomPendingRef = useRef<boolean>(
+    typeof window !== 'undefined' && !discordManager.isDiscordActivity() && Boolean(readRoomFromUrl())
+  );
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const leaveToHomeRef = useRef<() => void>(() => {});
   const isWatchPartyOpenRef = useRef(isWatchPartyOpen);
   isWatchPartyOpenRef.current = isWatchPartyOpen;
   const sidebarTabRef = useRef(sidebarTab);
@@ -139,8 +146,8 @@ export default function App() {
   // A aba vai para a rota. Dentro do Discord a Activity roda sob o proxy do Discord: ali o endereço não muda.
   useEffect(() => {
     if (view !== 'home' || discordManager.getState().isEmbedded) return;
-    // Preserva /room/:code (ou ?room=...) na abertura/recarregamento até o efeito de entrada na sala rodar
-    if (homeTab === 'room' && readRoomFromUrl()) return;
+    // Preserva /room/:code (ou ?room=...) apenas enquanto o check inicial de auto-entrada está em andamento
+    if (homeTab === 'room' && initialRoomPendingRef.current && readRoomFromUrl()) return;
     if (homeTab === 'catalog' && tabFromPath(window.location.pathname) !== 'catalog') canonicalizeCatalogUrl();
     else pushTabUrl(homeTab);
     // Sair do catálogo (para a Sala ou o Status) e voltar abre o catálogo limpo, não a busca ou o título do endereço da abertura
@@ -151,9 +158,12 @@ export default function App() {
     }
   }, [homeTab, view]);
 
-  // Voltar/avançar do navegador entre as abas
+  // Voltar/avançar do navegador entre as abas (e sair do player ao voltar de /room/:code)
   useEffect(() => {
     const onPop = () => {
+      if (viewRef.current === 'player' && !readRoomFromUrl()) {
+        leaveToHomeRef.current();
+      }
       const tab = tabFromPath(window.location.pathname);
       setHomeTab((current) => (current === tab ? current : tab));
     };
@@ -198,8 +208,10 @@ export default function App() {
     saveActiveSeriesContext(ctx);
   }, []);
 
-  /** Sai da sala de verdade: desconecta, limpa ?room=, descarrega o vídeo e volta para a tela inicial. */
+  /** Sai da sala de verdade: desconecta, limpa /room/:code, descarrega o vídeo e volta para a tela inicial. */
   const leaveToHome = useCallback(() => {
+    initialRoomPendingRef.current = false;
+    activeRoomIdRef.current = null;
     const leftCode = syncManager.getRoomState()?.roomId;
     if (leftCode && !discordManager.isDiscordActivity()) saveLastRoom(leftCode, Date.now(), true); // a hora de agora é a de sair
     if (!discordManager.isDiscordActivity()) syncManager.leaveRoom();
@@ -210,6 +222,7 @@ export default function App() {
     setUnreadChatCount(0);
     goHome('room');
   }, [goHome, updateSeriesContext]);
+  leaveToHomeRef.current = leaveToHome;
 
   /** Entra numa sala, pedindo o apelido antes se for preciso. */
   const requestJoin = useCallback(
@@ -250,11 +263,16 @@ export default function App() {
 
     discordManager.initialize();
 
+    let cancelled = false;
+
     // No navegador: /room/CODE (ou ?room=CODE legado) entra direto na sala (ou mostra erro em "Entrar na sala")
     if (!discordManager.isDiscordActivity()) {
       const validCode = readRoomFromUrl();
       if (validCode) {
         checkRoom(validCode).then((info) => {
+          initialRoomPendingRef.current = false;
+          // Se o usuário já trocou de aba ou saiu da URL da sala enquanto verificávamos, não sequestra a navegação
+          if (cancelled || readRoomFromUrl() !== validCode) return;
           if (info && !info.exists) {
             setRoomInUrl(null);
             setJoinPrefill({ code: validCode, error: info.closed ? 'closed' : 'not_found' });
@@ -265,6 +283,8 @@ export default function App() {
             requestJoin(validCode);
           }
         });
+      } else {
+        initialRoomPendingRef.current = false;
       }
     }
 
@@ -272,11 +292,37 @@ export default function App() {
       setSyncStatus(syncManager.getStatus());
       const room = syncManager.getRoomState();
       if (room) {
+        const switchedRoom = Boolean(activeRoomIdRef.current && activeRoomIdRef.current !== room.roomId);
+        activeRoomIdRef.current = room.roomId;
         wasInRoomRef.current = true;
         setPasswordPrompt(null);
         setPasswordDraft('');
-        // "Voltar à sala" na Home: lembra a sala (no Discord a sala é a da atividade, não precisa)
-        if (!discordManager.isDiscordActivity()) saveLastRoom(room.roomId);
+        if (!discordManager.isDiscordActivity()) {
+          if (readRoomFromUrl() !== room.roomId) setRoomInUrl(room.roomId);
+          // "Voltar à sala" na Home: lembra a sala (no Discord a sala é a da atividade, não precisa)
+          saveLastRoom(room.roomId);
+        }
+        // Ao trocar de sala pelo painel ("Trocar sala"), limpa vídeo/episódio/chat não lido da sala anterior
+        if (switchedRoom) {
+          updateSeriesContext(null);
+          setPendingSubtitles([]);
+          setUnreadChatCount(0);
+          if (room.media?.url) {
+            currentUrlRef.current = room.media.url;
+            setCurrentPayload({
+              url: room.media.url,
+              title: room.media.title,
+              mimeType: 'video/x-matroska',
+              chapters: room.media.chapters || [],
+              subtitles: room.media.subtitles || [],
+              audioTracks: room.media.audioTracks || [],
+              fingerprint: room.media.fingerprint,
+            });
+          } else {
+            currentUrlRef.current = '';
+            setCurrentPayload(EMPTY_PAYLOAD);
+          }
+        }
       }
       // Player vazio numa sala que já tem vídeo (ex.: o Host recarregou a página): carrega o vídeo da sala.
       // O listener de mídia só cobre espectadores, porque assume que o Host já está com o vídeo aberto.
@@ -351,20 +397,28 @@ export default function App() {
           message: t('O Host removeu você da sala. Você voltou para a tela inicial.'),
           type: 'kicked',
         });
-      } else if (code === 'password_required' || code === 'wrong_password') {
+      } else if (code === 'password_required' || code === 'wrong_password' || code === 'rate_limited') {
         const targetRoom = syncManager.getStatus().roomId;
         if (targetRoom) {
           setPasswordPrompt({
             roomCode: targetRoom,
-            error: code === 'wrong_password' ? t('Senha incorreta. Tente novamente.') : undefined,
+            error:
+              code === 'wrong_password'
+                ? t('Senha incorreta. Tente novamente.')
+                : code === 'rate_limited'
+                ? t('Muitas tentativas de senha. Aguarde um momento.')
+                : undefined,
           });
         }
       } else if (code === 'room_locked') {
-        syncManager.leaveRoom();
-        setRoomInUrl(null);
-        setView('home');
-        setHomeTab('room');
-        setHomeStep('menu');
+        const currentRoom = syncManager.getRoomState();
+        if (!currentRoom) {
+          syncManager.leaveRoom();
+          setRoomInUrl(null);
+          setView('home');
+          setHomeTab('room');
+          setHomeStep('menu');
+        }
         setKickBanAlert({
           title: t('Sala trancada'),
           message: t('Esta sala está trancada pelo Host e não aceita novos participantes agora.'),
@@ -374,6 +428,7 @@ export default function App() {
     });
 
     return () => {
+      cancelled = true;
       unsubDiscord();
       unsubSync();
       unsubMedia();
@@ -783,7 +838,7 @@ export default function App() {
         onClose={() => {
           setPasswordPrompt(null);
           setPasswordDraft('');
-          leaveToHome();
+          if (!syncManager.getRoomState()) leaveToHome();
         }}
         label={t('Sala privada')}
         width={400}
@@ -795,7 +850,7 @@ export default function App() {
           onClose={() => {
             setPasswordPrompt(null);
             setPasswordDraft('');
-            leaveToHome();
+            if (!syncManager.getRoomState()) leaveToHome();
           }}
         />
         <form
@@ -824,7 +879,7 @@ export default function App() {
               onClick={() => {
                 setPasswordPrompt(null);
                 setPasswordDraft('');
-                leaveToHome();
+                if (!syncManager.getRoomState()) leaveToHome();
               }}
             >
               {t('Cancelar')}

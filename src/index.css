@@ -486,6 +486,23 @@ html.is-fullscreen .player-menu-panel {
 
 
 
+@media (prefers-reduced-motion: reduce) {
+  .lu-pill-indicator-animated,
+  .lu-pill-btn,
+  .lu-source-card,
+  .lu-source-card-icon,
+  .lu-action-btn {
+    transition: none;
+  }
+  .lu-tab-panel-right,
+  .lu-tab-panel-left,
+  .lu-view-enter,
+  .lu-modal-backdrop-enter,
+  .lu-modal-enter {
+    animation: none;
+  }
+}
+
 /* Enquanto a transmissão de tela cobre o vídeo da sala, a legenda do filme não aparece por cima da tela transmitida */
 .screen-covering canvas.JASSUB,
 .screen-covering .JASSUB,

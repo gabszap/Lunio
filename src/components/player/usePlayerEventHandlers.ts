@@ -193,6 +193,8 @@ export function usePlayerEventHandlers(args: {
       const ytId = getYouTubeId(source.src);
       if (ytId) {
         logger.warn('[Player] Stream HLS do YouTube falhou; alternando para embed');
+        setIsBuffering(false);
+        setPlaybackError(null);
         setResolvedStreamUrl(`youtube/${ytId}`);
         return;
       }

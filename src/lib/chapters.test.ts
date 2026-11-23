@@ -7,7 +7,7 @@ describe('isEndingChapter', () => {
     for (const title of ['ED', 'ED 1', 'ED: Ending', 'Ending', 'Ending Theme', 'Encerramento', 'Outro']) {
       expect(isEndingChapter({ startTime: 1200, endTime: 1290, title })).toBe(true);
     }
-    for (const title of ['OP', 'Opening', 'Episódio', 'Part 01', 'Preview', 'Créditos iniciais']) {
+    for (const title of ['OP', 'Opening', 'Episódio', 'Part 01', 'Preview', 'Créditos iniciais', 'Outro mundo', 'O outro lado', 'Outro exemplo']) {
       expect(isEndingChapter({ startTime: 0, endTime: 90, title })).toBe(false);
     }
   });

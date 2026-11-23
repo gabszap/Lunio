@@ -573,6 +573,9 @@ export class SubtitleManager {
   private subtitleDelaySec = 0; // -10.0s to +10.0s
   private fontSizePercent = 100; // 50% to 250%
   private bottomOffsetPercent = 5; // 0% to 30%
+  private appearanceGeneration = 0;
+  private appearanceTimer: ReturnType<typeof setTimeout> | null = null;
+  private nativeCuePositionModified = false;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -645,24 +648,36 @@ export class SubtitleManager {
 
   private reapplySubtitleAppearance() {
     this.applyCssVariables();
+    this.applyNativeCuePosition();
+    const gen = ++this.appearanceGeneration;
+    if (this.appearanceTimer) {
+      clearTimeout(this.appearanceTimer);
+      this.appearanceTimer = null;
+    }
     const instance = this.jassubInstance;
-    if (instance && this.currentTrack?.content) {
-      const styled = transformAssStyle(this.currentTrack.content, this.fontSizePercent, this.bottomOffsetPercent);
+    const track = this.currentTrack;
+    if (!instance || !track?.content || (track.type !== 'ass' && track.type !== 'ssa')) {
+      return;
+    }
+    this.appearanceTimer = setTimeout(() => {
+      this.appearanceTimer = null;
+      if (gen !== this.appearanceGeneration || this.jassubInstance !== instance || this.currentTrack !== track) return;
+      const styled = transformAssStyle(track.content!, this.fontSizePercent, this.bottomOffsetPercent);
       void Promise.resolve(instance.ready)
         .then(async () => {
-          if (this.jassubInstance !== instance) return;
+          if (gen !== this.appearanceGeneration || this.jassubInstance !== instance || this.currentTrack !== track) return;
           if (instance.renderer && typeof instance.renderer.setTrack === 'function') {
             await instance.renderer.setTrack(styled);
           } else if (typeof instance.setTrack === 'function') {
             await instance.setTrack(styled);
           }
+          if (gen !== this.appearanceGeneration || this.jassubInstance !== instance) return;
           await this.forceJassubRepaint(instance);
         })
         .catch(() => {
           // fallback silencioso se o worker ainda estiver iniciando ou for descartado
         });
-    }
-    this.applyNativeCuePosition();
+    }, 16);
   }
 
   private async forceJassubRepaint(instance: any) {
@@ -692,6 +707,9 @@ export class SubtitleManager {
   private applyNativeCuePosition() {
     const track = this.nativeTrackEl?.track;
     if (!track?.cues) return;
+    // No valor padrão (5%), preserva o posicionamento original definido pelo autor da legenda VTT (ex.: placas no topo)
+    if (this.bottomOffsetPercent === 5 && !this.nativeCuePositionModified) return;
+    this.nativeCuePositionModified = this.bottomOffsetPercent !== 5;
     const line = Math.max(50, Math.min(98, 100 - this.bottomOffsetPercent));
     for (const cue of Array.from(track.cues)) {
       const vttCue = cue as VTTCue;
@@ -815,7 +833,13 @@ export class SubtitleManager {
     const assertCurrent = () => {
       if (signal?.aborted || generation !== this.preparationGeneration) throw new DOMException('Aborted', 'AbortError');
     };
-    // Destrói instância anterior e limpa canvas residual
+    // Destrói instância anterior e limpa canvas residual (zera currentTrack para evitar race com reapplySubtitleAppearance)
+    this.currentTrack = null;
+    this.appearanceGeneration++;
+    if (this.appearanceTimer) {
+      clearTimeout(this.appearanceTimer);
+      this.appearanceTimer = null;
+    }
     if (this.jassubInstance) {
       const previous = this.jassubInstance;
       this.jassubInstance = null;
@@ -920,7 +944,9 @@ export class SubtitleManager {
       }));
       assertCurrent();
 
-      const styledAssContent = transformAssStyle(subContent, this.fontSizePercent, this.bottomOffsetPercent);
+      const appliedFontSize = this.fontSizePercent;
+      const appliedBottomOffset = this.bottomOffsetPercent;
+      const styledAssContent = transformAssStyle(subContent, appliedFontSize, appliedBottomOffset);
 
       const opts: any = {
         video,
@@ -949,6 +975,9 @@ export class SubtitleManager {
       instance.timeOffset = effectiveSubtitleOffset(this.timelineOriginSec, this.subtitleDelaySec);
 
       this.currentTrack = track;
+      if (this.fontSizePercent !== appliedFontSize || this.bottomOffsetPercent !== appliedBottomOffset) {
+        this.reapplySubtitleAppearance();
+      }
 
       // Posiciona o canvas perfeitamente sobre a camada de vídeo com fundo 100% transparente
       const setupCanvas = () => {
@@ -1077,6 +1106,8 @@ export class SubtitleManager {
   public destroyNativeTrack() {
     this.cancelNativeLoad?.();
     this.nativeOriginalCues = [];
+    this.nativeCuePositionModified = false;
+    if (!this.jassubInstance) this.currentTrack = null;
     if (this.nativeTrackEl) {
       try {
         if (this.nativeTrackEl.track) {
@@ -1147,6 +1178,12 @@ export class SubtitleManager {
   }
 
   public destroyDirectJassub() {
+    this.appearanceGeneration++;
+    if (this.appearanceTimer) {
+      clearTimeout(this.appearanceTimer);
+      this.appearanceTimer = null;
+    }
+    if (!this.nativeTrackEl) this.currentTrack = null;
     if (this.jassubInstance) {
       this.disposeJassub(this.jassubInstance);
       this.jassubInstance = null;

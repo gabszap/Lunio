@@ -1,4 +1,5 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronLeft, Compass, FolderOpen, Link, Upload, X, Youtube } from 'lucide-react';
 import { StreamStep } from '../home/StreamStep';
 import { UploadStep } from '../home/UploadStep';
@@ -8,10 +9,11 @@ import type { CommitMode, CommitOptions, SourceCommit } from '../home/types';
 import type { WatchIntent } from '../catalog/CatalogTab';
 import type { RecentStream } from '../../lib/recent';
 import type { StreamOption } from '../../lib/streams';
+import { streamMediaInfo } from '../../lib/streamMime';
 import type { CatalogSeriesContext, MediaPayload } from '../../types/media';
 import type { CatalogRef } from '../../lib/continueWatching';
 import { t, msg } from '../../lib/i18n';
-import { Dot, IconButton, PillTabs, Spinner, cx } from '../ui';
+import { Dot, IconButton, PillTabs, Spinner, cx, usePortalTarget } from '../ui';
 
 const CatalogTab = lazy(() => import('../catalog/CatalogTab').then((m) => ({ default: m.CatalogTab })));
 
@@ -105,7 +107,8 @@ const MediaPickerPage: React.FC<Omit<MediaPickerModalProps, 'open'>> = ({
     movie?: CatalogRef
   ) => {
     if (isViewerSuggesting && onSuggestMedia) {
-      onSuggestMedia({ url: stream.url, title });
+      const { mimeType } = streamMediaInfo(stream.url, stream.filename);
+      onSuggestMedia({ url: stream.url, title, mimeType });
       setWatchIntent(null);
       onClose();
       return;
@@ -238,6 +241,8 @@ const MediaPickerPage: React.FC<Omit<MediaPickerModalProps, 'open'>> = ({
  * Tela inteira do Catálogo / fontes de mídia aberta por cima da sala, preservando a conexão e o player vivos por baixo.
  */
 export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({ open, ...rest }) => {
+  const portalTarget = usePortalTarget();
   if (!open) return null;
-  return <MediaPickerPage {...rest} />;
+  const page = <MediaPickerPage {...rest} />;
+  return portalTarget ? createPortal(page, portalTarget) : page;
 };

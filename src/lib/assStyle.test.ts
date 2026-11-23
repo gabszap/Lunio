@@ -41,4 +41,8 @@ describe('transformAssStyle', () => {
     // 40 - 54 = -14 -> clampado em 0
     expect(out).toContain(',2,20,20,0,1');
   });
+
+  it('trata NaN/Infinity como valores padrão sem corromper o ASS', () => {
+    expect(transformAssStyle(SAMPLE_ASS, Number.NaN, Number.POSITIVE_INFINITY)).toBe(SAMPLE_ASS);
+  });
 });
