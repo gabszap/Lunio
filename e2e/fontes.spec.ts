@@ -171,7 +171,7 @@ test.describe('Streams no detalhe (Onde assistir)', () => {
 
     await h264.click();
     await submitName(page, 'Ana');
-    await expect(page).toHaveURL(/\?room=[A-Z0-9]+/);
+    await expect(page).toHaveURL(/\/room\/[A-Z0-9]+|\?room=[A-Z0-9]+/);
     await expect(page.locator('video')).toBeAttached();
     await page.close();
   });
@@ -251,7 +251,7 @@ async function playEpisodeOne(page: Page) {
   await page.goto('/detail/series/tt2/tt2%3A1%3A1');
   await page.getByRole('button', { name: /Filme\.1080p\.H264\.mkv/ }).click();
   await submitName(page, 'Ana');
-  await expect(page).toHaveURL(/\?room=[A-Z0-9]+/);
+  await expect(page).toHaveURL(/\/room\/[A-Z0-9]+|\?room=[A-Z0-9]+/);
   await expect(page.locator('video')).toBeAttached();
 }
 
@@ -285,7 +285,7 @@ test.describe('Menu de episódios no player', () => {
     await page.getByRole('textbox', { name: 'URL do stream' }).fill(FIXTURE_URL);
     await page.getByRole('button', { name: 'Criar sala' }).click();
     await submitName(page, 'Ana');
-    await expect(page).toHaveURL(/\?room=[A-Z0-9]+/);
+    await expect(page).toHaveURL(/\/room\/[A-Z0-9]+|\?room=[A-Z0-9]+/);
     await expect(page.locator('video')).toBeAttached();
     await page.mouse.move(640, 360); // mostra os controles
     await expect(episodesToggle(page)).toHaveCount(0);

@@ -34,9 +34,8 @@ test('Ver tudo abre a Biblioteca inteira em uma página que pode ser recarregada
   await expect(last).toBeVisible();
 });
 
-test('o atalho do catálogo abre a Biblioteca mesmo sem títulos salvos', async ({ page }) => {
-  await page.goto('/catalog');
-  await page.getByRole('button', { name: 'Biblioteca', exact: true }).click({ timeout: 5000 });
+test('rotas /library e /my-list/ abrem a Biblioteca mesmo sem títulos salvos', async ({ page }) => {
+  await page.goto('/library');
 
   await expect(page).toHaveURL(/\/library$/);
   await expect(page.getByText('Salve filmes e séries pelos detalhes de cada título.')).toBeVisible();

@@ -10,7 +10,7 @@ test.describe('Voltar à última sala', () => {
     await waitReady(host.page);
 
     await host.page.locator('#btn-dock-leave').click();
-    await expect(host.page).not.toHaveURL(/room=/);
+    await expect(host.page).not.toHaveURL(/\/room\/|room=/);
 
     const card = host.page.locator('section', { hasText: `Voltar à sala ${code}` });
     await expect(card).toBeVisible();
@@ -19,7 +19,7 @@ test.describe('Voltar à última sala', () => {
 
     await card.getByRole('button', { name: 'Voltar', exact: true }).click();
     await submitName(host.page, 'Ana');
-    await expect(host.page).toHaveURL(new RegExp(`room=${code}`));
+    await expect(host.page).toHaveURL(new RegExp(`/room/${code}|room=${code}`));
     await expect(host.page.locator('video')).toBeAttached();
 
     await host.context.close();

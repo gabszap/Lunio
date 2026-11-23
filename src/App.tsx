@@ -139,6 +139,8 @@ export default function App() {
   // A aba vai para a rota. Dentro do Discord a Activity roda sob o proxy do Discord: ali o endereço não muda.
   useEffect(() => {
     if (view !== 'home' || discordManager.getState().isEmbedded) return;
+    // Preserva /room/:code (ou ?room=...) na abertura/recarregamento até o efeito de entrada na sala rodar
+    if (homeTab === 'room' && readRoomFromUrl()) return;
     if (homeTab === 'catalog' && tabFromPath(window.location.pathname) !== 'catalog') canonicalizeCatalogUrl();
     else pushTabUrl(homeTab);
     // Sair do catálogo (para a Sala ou o Status) e voltar abre o catálogo limpo, não a busca ou o título do endereço da abertura
