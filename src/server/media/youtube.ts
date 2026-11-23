@@ -1,14 +1,24 @@
 import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import type { Chapter, SubtitleTrack } from '../../types/media';
+import { config } from '../config';
+import { tryAcquireProcessSlot } from '../limits';
+import { checkUrlSyntax, readText, safeRequest } from '../security';
 
 const YT_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 const YTDLP_TIMEOUT_MS = 25_000;
 const YTDLP_MAX_BUFFER = 20 * 1024 * 1024;
+const MAX_YTDLP_CONCURRENT = 4;
 const INFO_TTL_VOD_MS = 2 * 60 * 60 * 1000;
 const INFO_TTL_LIVE_MS = 10 * 60 * 1000;
+const MASTER_CACHE_TTL_MS = 60 * 1000;
 const URL_TTL_MS = 6 * 60 * 60 * 1000;
+const MAX_INFO_ENTRIES = 1_000;
 const MAX_URL_ENTRIES = 50_000;
+const MAX_PLAYLIST_BYTES = 2 * 1024 * 1024;
+const ALLOWED_YT_HOST_RE = /(^|\.)(googlevideo\.com|youtube\.com|ytimg\.com|ggpht\.com|googleapis\.com)$/i;
+
+export type YouTubeProxyKind = 'hls' | 'seg' | 'sub';
 
 export class YouTubeError extends Error {
   constructor(
@@ -30,9 +40,13 @@ export interface YouTubeResolved {
   chapters: Chapter[];
   subtitles: SubtitleTrack[];
   expiresAt: number;
+  rawMasterManifest?: string;
+  rawMasterBaseUrl?: string;
+  rawMasterFetchedAt?: number;
 }
 
 interface StoredTarget {
+  kind: YouTubeProxyKind;
   url: string;
   headers: Record<string, string>;
   expiresAt: number;
@@ -41,6 +55,7 @@ interface StoredTarget {
 const infoCache = new Map<string, YouTubeResolved>();
 const inflight = new Map<string, Promise<YouTubeResolved>>();
 const urlStore = new Map<string, StoredTarget>();
+let activeYtDlpProcs = 0;
 
 function ytDlpBin(): string {
   return process.env.YT_DLP_PATH?.trim() || 'yt-dlp';
@@ -51,8 +66,36 @@ function ytDlpCookies(): string | undefined {
   return c || undefined;
 }
 
-function registerTargetUrl(url: string, headers: Record<string, string>): string {
-  const token = crypto.createHash('sha256').update(url).digest('hex').slice(0, 24);
+export function isAllowedYouTubeUrl(raw: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = checkUrlSyntax(raw);
+  } catch {
+    return false;
+  }
+  if (config.allowPrivateUrls && (parsed.protocol === 'http:' || parsed.protocol === 'https:')) {
+    return true;
+  }
+  if (parsed.protocol !== 'https:') return false;
+  const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  return ALLOWED_YT_HOST_RE.test(host);
+}
+
+function resolveUpstreamUrl(uri: string, baseUrl?: string): string | null {
+  try {
+    const resolved = baseUrl ? new URL(uri, baseUrl).href : new URL(uri).href;
+    return isAllowedYouTubeUrl(resolved) ? resolved : null;
+  } catch {
+    return null;
+  }
+}
+
+function registerTargetUrl(kind: YouTubeProxyKind, url: string, headers: Record<string, string>): string {
+  const token = crypto
+    .createHmac('sha256', config.sessionSecret)
+    .update(`${kind}\0${url}`)
+    .digest('hex')
+    .slice(0, 24);
   if (urlStore.size >= MAX_URL_ENTRIES) {
     const now = Date.now();
     for (const [k, v] of urlStore) {
@@ -64,14 +107,17 @@ function registerTargetUrl(url: string, headers: Record<string, string>): string
       urlStore.delete(oldest);
     }
   }
-  urlStore.set(token, { url, headers, expiresAt: Date.now() + URL_TTL_MS });
+  urlStore.set(token, { kind, url, headers, expiresAt: Date.now() + URL_TTL_MS });
   return token;
 }
 
-export function getYouTubeProxyTarget(token: string): { url: string; headers: Record<string, string> } | null {
+export function getYouTubeProxyTarget(
+  token: string,
+  expectedKind: YouTubeProxyKind
+): { url: string; headers: Record<string, string> } | null {
   if (!/^[a-f0-9]{24}$/.test(token)) return null;
   const entry = urlStore.get(token);
-  if (!entry) return null;
+  if (!entry || entry.kind !== expectedKind) return null;
   if (entry.expiresAt <= Date.now()) {
     urlStore.delete(token);
     return null;
@@ -79,9 +125,45 @@ export function getYouTubeProxyTarget(token: string): { url: string; headers: Re
   return { url: entry.url, headers: entry.headers };
 }
 
+function setInfoCache(videoId: string, resolved: YouTubeResolved) {
+  infoCache.delete(videoId);
+  if (infoCache.size >= MAX_INFO_ENTRIES) {
+    const now = Date.now();
+    for (const [k, v] of infoCache) {
+      if (v.expiresAt <= now) infoCache.delete(k);
+    }
+    while (infoCache.size >= MAX_INFO_ENTRIES) {
+      const oldest = infoCache.keys().next().value;
+      if (!oldest) break;
+      infoCache.delete(oldest);
+    }
+  }
+  infoCache.set(videoId, resolved);
+}
+
 function runYtDlpJson(videoId: string): Promise<any> {
+  if (activeYtDlpProcs >= MAX_YTDLP_CONCURRENT) {
+    return Promise.reject(
+      new YouTubeError('busy', 503, 'Servidor ocupado processando outros vídeos do YouTube. Tente novamente em instantes.')
+    );
+  }
+  const releaseSlot = tryAcquireProcessSlot();
+  if (!releaseSlot) {
+    return Promise.reject(
+      new YouTubeError('busy', 503, 'Servidor ocupado no momento. Tente novamente em instantes.')
+    );
+  }
+  activeYtDlpProcs++;
+  let freed = false;
+  const release = () => {
+    if (freed) return;
+    freed = true;
+    activeYtDlpProcs--;
+    releaseSlot();
+  };
+
   return new Promise((resolve, reject) => {
-    const args = ['--no-playlist', '--no-warnings', '--no-check-certificates', '-J'];
+    const args = ['--no-playlist', '--no-warnings', '-J'];
     const cookies = ytDlpCookies();
     if (cookies) args.push('--cookies', cookies);
     args.push('--', `https://www.youtube.com/watch?v=${videoId}`);
@@ -91,10 +173,20 @@ function runYtDlpJson(videoId: string): Promise<any> {
       args,
       { timeout: YTDLP_TIMEOUT_MS, maxBuffer: YTDLP_MAX_BUFFER, windowsHide: true },
       (err, stdout, stderr) => {
+        release();
         if (err) {
-          const msg = (stderr || err.message || '').trim();
-          const code = (err as any).code === 'ENOENT' ? 'yt_dlp_missing' : 'yt_dlp_failed';
-          reject(new YouTubeError(code, 503, msg.slice(0, 300)));
+          const isMissing = (err as NodeJS.ErrnoException).code === 'ENOENT';
+          const serverDetail = (stderr || err.message || '').trim().slice(0, 400);
+          console.warn(`[YouTube] yt-dlp falhou (${videoId}): ${serverDetail}`);
+          reject(
+            new YouTubeError(
+              isMissing ? 'yt_dlp_missing' : 'yt_dlp_failed',
+              503,
+              isMissing
+                ? 'yt-dlp não está disponível no servidor.'
+                : 'Não foi possível obter o stream deste vídeo do YouTube.'
+            )
+          );
           return;
         }
         try {
@@ -118,7 +210,8 @@ function sanitizeHeaders(raw: unknown): Record<string, string> {
     }
   }
   if (!Object.keys(out).some((k) => k.toLowerCase() === 'user-agent')) {
-    out['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+    out['User-Agent'] =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
   }
   return out;
 }
@@ -130,10 +223,14 @@ function extractSubtitles(rawSubs: any, headers: Record<string, string>): Subtit
   const tracks: Array<SubtitleTrack & { priority: number }> = [];
   for (const [lang, list] of Object.entries(rawSubs as Record<string, any>)) {
     if (!Array.isArray(list)) continue;
-    const vtt = list.find((item) => item && item.ext === 'vtt' && typeof item.url === 'string' && item.url.startsWith('https://'));
+    const vtt = list.find(
+      (item) => item && item.ext === 'vtt' && typeof item.url === 'string' && isAllowedYouTubeUrl(item.url)
+    );
     if (!vtt) continue;
-    const tok = registerTargetUrl(vtt.url, headers);
-    const idx = SUB_LANG_PRIORITY.findIndex((p) => p.toLowerCase() === lang.toLowerCase() || lang.toLowerCase().startsWith(`${p.toLowerCase()}-`));
+    const tok = registerTargetUrl('sub', vtt.url, headers);
+    const idx = SUB_LANG_PRIORITY.findIndex(
+      (p) => p.toLowerCase() === lang.toLowerCase() || lang.toLowerCase().startsWith(`${p.toLowerCase()}-`)
+    );
     tracks.push({
       id: `yt_sub_${lang}`,
       src: `/api/youtube/sub/${tok}`,
@@ -166,6 +263,8 @@ export async function resolveYouTube(videoId: string): Promise<YouTubeResolved> 
   if (cached && cached.expiresAt > Date.now()) {
     return cached;
   }
+  if (cached) infoCache.delete(videoId);
+
   const running = inflight.get(videoId);
   if (running) return running;
 
@@ -173,9 +272,13 @@ export async function resolveYouTube(videoId: string): Promise<YouTubeResolved> 
     const data = await runYtDlpJson(videoId);
     const formats: any[] = Array.isArray(data?.formats) ? data.formats : [];
     const hlsFormat = formats.find(
-      (f) => typeof f?.manifest_url === 'string' && f.manifest_url.startsWith('https://') && String(f.protocol || '').includes('m3u8')
+      (f) =>
+        typeof f?.manifest_url === 'string' &&
+        isAllowedYouTubeUrl(f.manifest_url) &&
+        String(f.protocol || '').includes('m3u8')
     );
-    const fallbackManifest = typeof data?.manifest_url === 'string' && data.manifest_url.startsWith('https://') ? data.manifest_url : null;
+    const fallbackManifest =
+      typeof data?.manifest_url === 'string' && isAllowedYouTubeUrl(data.manifest_url) ? data.manifest_url : null;
     const masterManifestUrl: string | null = hlsFormat?.manifest_url || fallbackManifest;
 
     if (!masterManifestUrl) {
@@ -195,7 +298,7 @@ export async function resolveYouTube(videoId: string): Promise<YouTubeResolved> 
       subtitles: extractSubtitles(data?.subtitles, httpHeaders),
       expiresAt: Date.now() + (isLive ? INFO_TTL_LIVE_MS : INFO_TTL_VOD_MS),
     };
-    infoCache.set(videoId, resolved);
+    setInfoCache(videoId, resolved);
     return resolved;
   })();
 
@@ -221,7 +324,8 @@ function readAttr(line: string, name: string): string | null {
 export function filterAndRewriteMasterManifest(
   raw: string,
   registerUrl: (upstreamUrl: string) => string,
-  tokenQuery: string
+  tokenQuery: string,
+  baseUrl?: string
 ): { playlist: string; streamCount: number } {
   const lines = raw.split(/\r?\n/);
   const mediaLines: Array<{ line: string; groupId: string | null }> = [];
@@ -241,6 +345,8 @@ export function filterAndRewriteMasterManifest(
       const nextUrl = (lines[i + 1] || '').trim();
       i++;
       if (!nextUrl || nextUrl.startsWith('#')) continue;
+      const resolvedUrl = resolveUpstreamUrl(nextUrl, baseUrl);
+      if (!resolvedUrl) continue;
 
       const codecs = (readAttr(line, 'CODECS') || '').toLowerCase();
       // O YouTube inclui segmentos VP9/AV1 em WebM/fMP4 não-padrão dentro do HLS (.ts com wft/1) que o hls.js rejeita.
@@ -251,7 +357,7 @@ export function filterAndRewriteMasterManifest(
       const bw = parseInt(readAttr(line, 'BANDWIDTH') || '0', 10) || 0;
       const audioGroup = readAttr(line, 'AUDIO');
       const key = res ? `${res}@${fps}` : `bw_${bw}_${variants.length}`;
-      variants.push({ inf: line, url: nextUrl, key, bandwidth: bw, audioGroup });
+      variants.push({ inf: line, url: resolvedUrl, key, bandwidth: bw, audioGroup });
       continue;
     }
 
@@ -277,11 +383,17 @@ export function filterAndRewriteMasterManifest(
 
   for (const m of mediaLines) {
     if (m.groupId && usedAudioGroups.size > 0 && !usedAudioGroups.has(m.groupId)) continue;
+    let validUri = true;
     const rewritten = m.line.replace(/URI="([^"]+)"/, (_all, uri: string) => {
-      const tok = registerUrl(uri);
+      const resolvedUri = resolveUpstreamUrl(uri, baseUrl);
+      if (!resolvedUri) {
+        validUri = false;
+        return '';
+      }
+      const tok = registerUrl(resolvedUri);
       return `URI="/api/youtube/hls/${tok}.m3u8${tokenQuery}"`;
     });
-    out.push(rewritten);
+    if (validUri) out.push(rewritten);
   }
 
   for (const v of kept) {
@@ -296,7 +408,8 @@ export function filterAndRewriteMasterManifest(
 export function rewriteVariantPlaylist(
   raw: string,
   registerUrl: (upstreamUrl: string) => string,
-  tokenQuery: string
+  tokenQuery: string,
+  baseUrl?: string
 ): string {
   const lines = raw.split(/\r?\n/);
   const out: string[] = [];
@@ -304,23 +417,27 @@ export function rewriteVariantPlaylist(
     const line = rawLine.trim();
     if (!line) continue;
     if (line.startsWith('#EXT-X-MAP:')) {
-      out.push(
-        line.replace(/URI="([^"]+)"/, (_all, uri: string) => {
-          const tok = registerUrl(uri);
-          return `URI="/api/youtube/seg/${tok}.ts${tokenQuery}"`;
-        })
-      );
+      let validUri = true;
+      const rewritten = line.replace(/URI="([^"]+)"/, (_all, uri: string) => {
+        const resolvedUri = resolveUpstreamUrl(uri, baseUrl);
+        if (!resolvedUri) {
+          validUri = false;
+          return '';
+        }
+        const tok = registerUrl(resolvedUri);
+        return `URI="/api/youtube/seg/${tok}.ts${tokenQuery}"`;
+      });
+      if (validUri) out.push(rewritten);
       continue;
     }
     if (line.startsWith('#')) {
       out.push(line);
       continue;
     }
-    if (/^https?:\/\//i.test(line)) {
-      const tok = registerUrl(line);
+    const resolvedUri = resolveUpstreamUrl(line, baseUrl);
+    if (resolvedUri) {
+      const tok = registerUrl(resolvedUri);
       out.push(`/api/youtube/seg/${tok}.ts${tokenQuery}`);
-    } else {
-      out.push(line);
     }
   }
   return `${out.join('\n')}\n`;
@@ -328,16 +445,40 @@ export function rewriteVariantPlaylist(
 
 export async function getYouTubeMasterPlaylist(videoId: string, tokenQuery: string): Promise<string> {
   const resolved = await resolveYouTube(videoId);
-  const res = await fetch(resolved.masterManifestUrl, { headers: resolved.httpHeaders });
-  if (!res.ok) {
-    infoCache.delete(videoId);
-    throw new YouTubeError('upstream_failed', 502, `YouTube manifest HTTP ${res.status}`);
+  let raw = resolved.rawMasterManifest;
+  let baseUrl = resolved.rawMasterBaseUrl || resolved.masterManifestUrl;
+
+  if (!raw || !resolved.rawMasterFetchedAt || Date.now() - resolved.rawMasterFetchedAt > MASTER_CACHE_TTL_MS) {
+    if (!isAllowedYouTubeUrl(resolved.masterManifestUrl)) {
+      infoCache.delete(videoId);
+      throw new YouTubeError('upstream_blocked', 403, 'URL de manifesto não permitida.');
+    }
+    const res = await safeRequest(resolved.masterManifestUrl, {
+      headers: resolved.httpHeaders,
+      timeoutMs: 15_000,
+    });
+    if (res.status < 200 || res.status >= 300) {
+      res.body.resume();
+      infoCache.delete(videoId);
+      throw new YouTubeError('upstream_failed', 502, 'Falha ao carregar o manifesto do YouTube.');
+    }
+    if (!isAllowedYouTubeUrl(res.url)) {
+      res.body.resume();
+      infoCache.delete(videoId);
+      throw new YouTubeError('upstream_blocked', 403, 'Redirecionamento não permitido.');
+    }
+    raw = await readText(res.body, MAX_PLAYLIST_BYTES);
+    baseUrl = res.url;
+    resolved.rawMasterManifest = raw;
+    resolved.rawMasterBaseUrl = baseUrl;
+    resolved.rawMasterFetchedAt = Date.now();
   }
-  const raw = await res.text();
+
   const { playlist, streamCount } = filterAndRewriteMasterManifest(
     raw,
-    (u) => registerTargetUrl(u, resolved.httpHeaders),
-    tokenQuery
+    (u) => registerTargetUrl('hls', u, resolved.httpHeaders),
+    tokenQuery,
+    baseUrl
   );
   if (streamCount === 0) {
     throw new YouTubeError('no_compatible_streams', 503, 'Nenhuma qualidade H.264 compatível encontrada.');
@@ -346,10 +487,20 @@ export async function getYouTubeMasterPlaylist(videoId: string, tokenQuery: stri
 }
 
 export async function getYouTubeVariantPlaylist(token: string, tokenQuery: string): Promise<string> {
-  const target = getYouTubeProxyTarget(token);
+  const target = getYouTubeProxyTarget(token, 'hls');
   if (!target) throw new YouTubeError('not_found', 404, 'Playlist expirada ou desconhecida.');
-  const res = await fetch(target.url, { headers: target.headers });
-  if (!res.ok) throw new YouTubeError('upstream_failed', 502, `YouTube variant HTTP ${res.status}`);
-  const raw = await res.text();
-  return rewriteVariantPlaylist(raw, (u) => registerTargetUrl(u, target.headers), tokenQuery);
+  if (!isAllowedYouTubeUrl(target.url)) {
+    throw new YouTubeError('upstream_blocked', 403, 'URL de playlist não permitida.');
+  }
+  const res = await safeRequest(target.url, { headers: target.headers, timeoutMs: 15_000 });
+  if (res.status < 200 || res.status >= 300) {
+    res.body.resume();
+    throw new YouTubeError('upstream_failed', 502, 'Falha ao carregar a variante HLS do YouTube.');
+  }
+  if (!isAllowedYouTubeUrl(res.url)) {
+    res.body.resume();
+    throw new YouTubeError('upstream_blocked', 403, 'Redirecionamento não permitido.');
+  }
+  const raw = await readText(res.body, MAX_PLAYLIST_BYTES);
+  return rewriteVariantPlaylist(raw, (u) => registerTargetUrl('seg', u, target.headers), tokenQuery, res.url);
 }

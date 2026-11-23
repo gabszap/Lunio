@@ -1,10 +1,12 @@
 import crypto from 'node:crypto';
+import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Server as HttpsServer } from 'node:https';
-import { issueRoomToken } from './access';
+import { issueRoomToken, verifyToken } from './access';
 import { config } from './config';
 import { isOriginAllowed } from './cors';
+import { checkRate, clientIp } from './limits';
 import { PLAYLIST_MAX_ITEMS, REQUESTS_MAX_ITEMS, playlistUrlKey } from '../types/sync';
 import { warmUpMedia } from './media/resolver';
 import { pruneRoomUploads, uploadIdFromUrl } from './media/uploads';
@@ -28,17 +30,19 @@ import type {
   PlaylistItem,
 } from '../types/sync';
 
-function hashRoomPassword(password: string): string {
+const scryptAsync = promisify(crypto.scrypt) as (password: string, salt: string, keylen: number) => Promise<Buffer>;
+
+async function hashRoomPassword(password: string): Promise<string> {
   const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(password, salt, 32).toString('hex');
-  return `${salt}:${hash}`;
+  const derived = await scryptAsync(password, salt, 32);
+  return `${salt}:${derived.toString('hex')}`;
 }
 
-function verifyRoomPassword(password: string, stored: string): boolean {
+async function verifyRoomPassword(password: string, stored: string): Promise<boolean> {
   const [salt, expectedHex] = stored.split(':');
   if (!salt || !expectedHex) return false;
   try {
-    const derived = crypto.scryptSync(password, salt, 32);
+    const derived = await scryptAsync(password, salt, 32);
     const expected = Buffer.from(expectedHex, 'hex');
     if (derived.length !== expected.length) return false;
     return crypto.timingSafeEqual(derived, expected);
@@ -76,6 +80,7 @@ interface RoomInternal {
   autoPauseOnBuffer: boolean;
   autoPausedBy?: string;
   autoPauseTimer?: NodeJS.Timeout;
+  lastAutoPauseAt?: number;
   createdAt: number;
   media: RoomMedia | null;
   playlist: PlaylistItem[];
@@ -134,6 +139,7 @@ const PERSISTED_MESSAGES = new Set<string>([
   'playback:play', 'playback:pause', 'playback:seek', 'playback:rate', 'playback:timeline',
 ]);
 const AUTO_PAUSE_MAX_MS = 15_000;
+const AUTO_PAUSE_COOLDOWN_MS = 10_000;
 /** O Host manda a posição a cada poucos segundos: gravar no máximo a cada 5 s por sala. */
 const TIMELINE_PERSIST_GAP_MS = 5000;
 /** Servidor parado por mais que isto: a sala volta pausada (não finge que o vídeo andou o tempo todo). */
@@ -147,6 +153,8 @@ const FINGERPRINT_RE = /^(ih|vh):[\w:|.\- ]{1,300}$/i;
 export class RoomManager {
   private rooms = new Map<string, RoomInternal>();
   private sessions = new WeakMap<WebSocket, ClientSession>();
+  private socketIps = new WeakMap<WebSocket, string>();
+  private socketQueues = new WeakMap<WebSocket, Promise<void>>();
   // Salas removidas por inatividade (para a Home distinguir "encerrada" de "código errado")
   private closedRooms = new Map<string, number>();
   private persistTimers = new Map<string, NodeJS.Timeout>();
@@ -154,6 +162,20 @@ export class RoomManager {
   private pendingSaves = new Set<Promise<void>>();
 
   constructor(private readonly store: RoomStore = roomStore) {}
+
+  public setSocketIp(ws: WebSocket, ip: string) {
+    this.socketIps.set(ws, ip);
+  }
+
+  private enqueueSocketOp(ws: WebSocket, op: () => Promise<void>): Promise<void> {
+    const prev = this.socketQueues.get(ws) ?? Promise.resolve();
+    const next = prev.catch(() => {}).then(op);
+    this.socketQueues.set(ws, next);
+    void next.finally(() => {
+      if (this.socketQueues.get(ws) === next) this.socketQueues.delete(ws);
+    });
+    return next;
+  }
 
   public getRoomInfo(roomId: string): {
     exists: boolean;
@@ -342,16 +364,22 @@ export class RoomManager {
    * assim que todos voltarem a ficar prontos (com teto de 15 s para uma conexão caída não travar a sala).
    */
   private evaluateAutoPause(room: RoomInternal, trigger: ClientSession) {
-    if (!room.autoPauseOnBuffer || !room.media || room.clients.size < 2) return;
+    if (!room.autoPauseOnBuffer || !room.media || room.clients.size < 2) {
+      if (room.autoPausedBy) this.clearAutoPause(room);
+      return;
+    }
     const isStalling = trigger.state === 'stalled' || (trigger.state === 'loading' && !trigger.ready);
 
     if (room.playback.playing && isStalling) {
+      const now = Date.now();
+      if (room.lastAutoPauseAt && now - room.lastAutoPauseAt < AUTO_PAUSE_COOLDOWN_MS) return;
+      room.lastAutoPauseAt = now;
       const pos = this.calculateCurrentPosition(room.playback);
       room.playback = {
         playing: false,
         position: pos,
         rate: room.playback.rate,
-        updatedAt: Date.now(),
+        updatedAt: now,
       };
       room.autoPausedBy = trigger.username;
       if (room.autoPauseTimer) clearTimeout(room.autoPauseTimer);
@@ -372,11 +400,12 @@ export class RoomManager {
       }, AUTO_PAUSE_MAX_MS);
       room.autoPauseTimer.unref?.();
 
+      // Usa `triggeredBy: 'system'` para pausar também o player de quem travou (evitando dessincronia ao recuperar buffer)
       this.broadcast(room, {
         type: 'playback:sync',
         playback: room.playback,
         action: 'pause',
-        triggeredBy: trigger.userId,
+        triggeredBy: 'system',
         username: trigger.username,
       });
       return;
@@ -388,6 +417,30 @@ export class RoomManager {
       );
       if (!anyoneStalling) {
         this.clearAutoPause(room);
+        room.playback = { ...room.playback, playing: true, updatedAt: Date.now() };
+        this.broadcast(room, {
+          type: 'playback:sync',
+          playback: room.playback,
+          action: 'play',
+          triggeredBy: 'system',
+          username: 'Sistema',
+        });
+      }
+    }
+  }
+
+  private recheckAutoPauseAfterLeave(room: RoomInternal) {
+    if (!room.autoPausedBy) return;
+    if (room.clients.size === 0) {
+      this.clearAutoPause(room);
+      return;
+    }
+    const anyoneStalling =
+      room.clients.size >= 2 &&
+      Array.from(room.clients.values()).some((c) => c.state === 'stalled' || (c.state === 'loading' && !c.ready));
+    if (!anyoneStalling) {
+      this.clearAutoPause(room);
+      if (!room.playback.playing) {
         room.playback = { ...room.playback, playing: true, updatedAt: Date.now() };
         this.broadcast(room, {
           type: 'playback:sync',
@@ -526,38 +579,101 @@ export class RoomManager {
     ws: WebSocket,
     roomId: string,
     user: { id: string; username: string; avatarUrl?: string; platform?: 'discord' | 'web' },
-    password?: string
-  ) {
-    // Se o socket já está em outra sala ("Trocar sala"), sai formalmente da anterior primeiro
+    password?: string,
+    accessToken?: string
+  ): void | Promise<void> {
     const prevSession = this.sessions.get(ws);
-    if (prevSession && prevSession.roomId !== roomId) {
-      this.handleLeave(ws, true);
+    const existing = this.rooms.get(roomId);
+    const uid = baseUserId(user.id);
+
+    // 1. Checa banimento ANTES de senha/tranca e ANTES de sair da sala anterior (evita oráculo de senha e ejeção indevida)
+    if (existing?.bannedMembers?.has(uid)) {
+      console.log(`[WatchParty] ⛔ Usuário banido "${user.username}" (${user.id}) tentou entrar na sala "${roomId}".`);
+      this.send(ws, { type: 'error', message: 'Você foi banido desta sala pelo Host.', code: 'banned' });
+      if (!prevSession) {
+        try {
+          ws.close(4002, 'Banned by host');
+        } catch {}
+      }
+      return;
     }
 
-    // Controle de acesso para salas privadas já existentes (Host ou reconexão passam direto)
-    const existing = this.rooms.get(roomId);
+    // 2. Controle de acesso para salas privadas já existentes:
+    // reconexão privilegiada só passa com token assinado pelo servidor (impede spoofing de `user.id`)
     if (existing && existing.visibility === 'private') {
-      const uid = baseUserId(user.id);
+      const tokenPayload = verifyToken(accessToken);
+      const hasValidRoomToken =
+        tokenPayload?.k === 'room' && tokenPayload.r === roomId && baseUserId(tokenPayload.u) === uid;
       const isExistingHost = Boolean(existing.hostId) && uid === baseUserId(existing.hostId);
       const isAlreadyMember =
-        existing.pendingLeaves.has(user.id) ||
-        Array.from(existing.clients.values()).some((c) => baseUserId(c.userId) === uid);
-      if (!isExistingHost && !isAlreadyMember) {
+        Array.from(existing.clients.values()).some((c) => baseUserId(c.userId) === uid) ||
+        Array.from(existing.pendingLeaves.values()).some(
+          (p) => !p.session.removedByHost && baseUserId(p.session.userId) === uid
+        );
+      const authorizedByToken = hasValidRoomToken && (isExistingHost || isAlreadyMember);
+
+      if (!authorizedByToken) {
         if (existing.passwordHash) {
-          const pw = typeof password === 'string' ? password : '';
+          const pw = typeof password === 'string' ? password.trim().slice(0, 64) : '';
           if (!pw) {
             this.send(ws, { type: 'error', message: 'Esta sala é privada e exige senha.', code: 'password_required' });
             return;
           }
-          if (!verifyRoomPassword(pw, existing.passwordHash)) {
-            this.send(ws, { type: 'error', message: 'Senha incorreta.', code: 'wrong_password' });
+          const ip = this.socketIps.get(ws) || 'ws';
+          if (
+            checkRate(ip, `ws-pw:${roomId}`, { max: 10, windowMs: 60_000 }) !== null ||
+            checkRate(ip, 'ws-pw-global', { max: 30, windowMs: 60_000 }) !== null
+          ) {
+            this.send(ws, {
+              type: 'error',
+              message: 'Muitas tentativas de senha. Aguarde um momento.',
+              code: 'rate_limited',
+            });
             return;
           }
+          const expectedHash = existing.passwordHash;
+          return this.enqueueSocketOp(ws, async () => {
+            const ok = await verifyRoomPassword(pw, expectedHash);
+            if (ws.readyState !== WebSocket.OPEN) return;
+            const current = this.rooms.get(roomId);
+            if (current?.bannedMembers?.has(uid)) {
+              this.send(ws, { type: 'error', message: 'Você foi banido desta sala pelo Host.', code: 'banned' });
+              return;
+            }
+            if (!ok) {
+              this.send(ws, { type: 'error', message: 'Senha incorreta.', code: 'wrong_password' });
+              return;
+            }
+            if (current && current.visibility === 'private' && current.passwordHash && current.passwordHash !== expectedHash) {
+              // Senha mudou durante o scrypt
+              this.send(ws, { type: 'error', message: 'Senha incorreta.', code: 'wrong_password' });
+              return;
+            }
+            if (current && current.visibility === 'private' && !current.passwordHash) {
+              this.send(ws, { type: 'error', message: 'Esta sala está trancada pelo Host.', code: 'room_locked' });
+              return;
+            }
+            this.completeJoin(ws, roomId, user);
+          });
         } else {
           this.send(ws, { type: 'error', message: 'Esta sala está trancada pelo Host.', code: 'room_locked' });
           return;
         }
       }
+    }
+
+    this.completeJoin(ws, roomId, user);
+  }
+
+  private completeJoin(
+    ws: WebSocket,
+    roomId: string,
+    user: { id: string; username: string; avatarUrl?: string; platform?: 'discord' | 'web' }
+  ) {
+    // Só sai da sala anterior depois que a entrada na nova sala foi autorizada
+    const prevSession = this.sessions.get(ws);
+    if (prevSession && prevSession.roomId !== roomId) {
+      this.handleLeave(ws, true);
     }
 
     const room = this.getOrCreateRoom(roomId, user.id);
@@ -691,6 +807,7 @@ export class RoomManager {
       if (session) {
         room.clients.delete(ws);
         this.sessions.delete(ws);
+        this.recheckAutoPauseAfterLeave(room);
         console.log(`[WatchParty] 🔌 Socket de "${session.username}" desconectado na sala "${roomId}". Restam ativos: ${room.clients.size}`);
 
         const hasRemainingConnection = Array.from(room.clients.values()).some((s) => s.userId === session.userId);
@@ -1030,7 +1147,7 @@ export class RoomManager {
     }
   }
 
-  public handleClientMessage(ws: WebSocket, raw: string) {
+  public handleClientMessage(ws: WebSocket, raw: string): void | Promise<void> {
     let msg: ClientMessage;
     try {
       msg = JSON.parse(raw);
@@ -1054,9 +1171,15 @@ export class RoomManager {
         this.send(ws, { type: 'error', message: 'Dados de entrada inválidos.', code: 'bad_request' });
         return;
       }
-      const pw = typeof msg.password === 'string' ? msg.password.slice(0, 64) : undefined;
-      this.handleJoin(ws, msg.roomId, { ...user, username: user.username.trim().slice(0, 32) || 'Espectador' }, pw);
-      return;
+      const pw = typeof msg.password === 'string' ? msg.password.trim().slice(0, 64) : undefined;
+      const accessToken = typeof msg.accessToken === 'string' ? msg.accessToken : undefined;
+      return this.handleJoin(
+        ws,
+        msg.roomId,
+        { ...user, username: user.username.trim().slice(0, 32) || 'Espectador' },
+        pw,
+        accessToken
+      );
     }
 
     // Localiza a sessão do cliente
@@ -1095,19 +1218,33 @@ export class RoomManager {
             currentRoom.passwordHash = undefined;
           }
         }
+        if (typeof msg.autoPauseOnBuffer === 'boolean') {
+          currentRoom.autoPauseOnBuffer = msg.autoPauseOnBuffer;
+          if (!msg.autoPauseOnBuffer) {
+            this.clearAutoPause(currentRoom);
+          }
+        }
         if (msg.password === null) {
           currentRoom.passwordHash = undefined;
         } else if (typeof msg.password === 'string') {
           const pw = msg.password.trim().slice(0, 64);
           if (pw) {
-            currentRoom.passwordHash = hashRoomPassword(pw);
-            currentRoom.visibility = 'private';
-          }
-        }
-        if (typeof msg.autoPauseOnBuffer === 'boolean') {
-          currentRoom.autoPauseOnBuffer = msg.autoPauseOnBuffer;
-          if (!msg.autoPauseOnBuffer) {
-            this.clearAutoPause(currentRoom);
+            const roomRef = currentRoom;
+            const hostUserId = clientSession.userId;
+            return this.enqueueSocketOp(ws, async () => {
+              const hashed = await hashRoomPassword(pw);
+              if (this.rooms.get(roomRef.roomId) !== roomRef || roomRef.hostId !== hostUserId) return;
+              roomRef.passwordHash = hashed;
+              roomRef.visibility = 'private';
+              this.broadcast(roomRef, {
+                type: 'room:settings_update',
+                name: roomRef.name,
+                visibility: roomRef.visibility,
+                hasPassword: Boolean(roomRef.passwordHash),
+                autoPauseOnBuffer: roomRef.autoPauseOnBuffer,
+              });
+              this.schedulePersist(roomRef, 250);
+            });
           }
         }
         this.broadcast(currentRoom, {
@@ -1369,6 +1506,7 @@ export class RoomManager {
         };
 
         this.clearSkipVote(currentRoom);
+        this.clearAutoPause(currentRoom);
         console.log(`[WatchParty] 🎬 Nova mídia definida na sala "${currentRoom.roomId}": "${msg.media.title}"`);
         // Trocou de vídeo: o envio que estava tocando (e mais nenhum item da sala) pode sair do disco
         pruneRoomUploads(currentRoom.roomId, this.referencedUploadIds(currentRoom.roomId));
@@ -1446,8 +1584,7 @@ export class RoomManager {
         clientSession.lastPing =
           typeof msg.rtt === 'number' && msg.rtt >= 0 && msg.rtt < 60_000 ? Math.round(msg.rtt / 2) : Math.max(0, now - msg.clientTime);
         clientSession.currentTime = msg.currentTime;
-        clientSession.state = msg.state;
-        this.evaluateAutoPause(currentRoom, clientSession);
+        // Heartbeat transporta apenas telemetria/liveness; o estado de prontidão/stalled é gerido por `client:readiness`
         this.updateBehind(currentRoom, clientSession, now);
 
         this.send(ws, {
@@ -1582,7 +1719,7 @@ export class RoomManager {
               targetWs.close(4001, 'Kicked by host');
             } catch {}
             targetSession.removedByHost = true;
-            this.handleLeave(targetWs);
+            this.handleLeave(targetWs, true);
             this.requestKeyRotation(currentRoom); // o expulso ainda tem a chave: gira já, sem esperar a saída de vez
             this.dropScreenViewer(currentRoom, targetSession.userId);
           }
@@ -1615,7 +1752,7 @@ export class RoomManager {
               targetWs.close(4002, 'Banned by host');
             } catch {}
             targetSession.removedByHost = true;
-            this.handleLeave(targetWs);
+            this.handleLeave(targetWs, true);
             this.requestKeyRotation(currentRoom); // o banido ainda tem a chave: gira já
             this.dropScreenViewer(currentRoom, targetSession.userId);
           }
@@ -1678,7 +1815,7 @@ export class RoomManager {
       }
 
       case 'chat:send': {
-        const text = (msg.text || '').trim();
+        const text = (msg.text || '').trim().slice(0, 1000);
         if (!text) return;
 
         const chatMsg: ChatMessage = {
@@ -1738,10 +1875,11 @@ export function setupWebSocketServer(httpServer: any) {
   });
 
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+    roomManager.setSocketIp(ws, clientIp(req));
     console.log('[WatchParty] 🔌 Nova conexão WebSocket estabelecida de:', req.url);
 
     ws.on('message', (data) => {
-      roomManager.handleClientMessage(ws, data.toString());
+      void roomManager.handleClientMessage(ws, data.toString());
     });
 
     ws.on('close', () => {

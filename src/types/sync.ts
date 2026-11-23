@@ -127,6 +127,8 @@ export type ClientMessage =
       type: 'room:join';
       roomId: string;
       password?: string;
+      /** Token assinado da sala emitido anteriormente (prova reconexão legítima em salas privadas/trancadas). */
+      accessToken?: string;
       user: {
         id: string;
         username: string;
@@ -421,5 +423,5 @@ export type ServerMessage =
   | {
       type: 'error';
       message: string;
-      code?: 'kicked' | 'banned' | 'password_required' | 'wrong_password' | 'room_locked' | string;
+      code?: 'kicked' | 'banned' | 'password_required' | 'wrong_password' | 'room_locked' | 'rate_limited' | string;
     };

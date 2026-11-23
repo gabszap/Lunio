@@ -37,18 +37,44 @@ export function getAccessToken(): string {
   return roomToken || soloToken;
 }
 
+const ROOM_TOKEN_PREFIX = 'lunio_room_token_';
+
 /** Chamado pelo `syncManager` quando o servidor entrega (ou renova) o token da sala. */
 export function setRoomToken(roomId: string, token: string) {
   const hadAny = Boolean(soloToken || roomToken);
   roomToken = token;
   roomTokenRoomId = roomId;
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem(`${ROOM_TOKEN_PREFIX}${roomId}`, token);
+    }
+  } catch {}
   for (const w of roomWaiters) w(roomId, token);
   if (!hadAny) emit();
 }
 
-export function clearRoomToken() {
+/** Recupera o token salvo desta aba para reconexão em sala privada/trancada. */
+export function getSavedRoomToken(roomId: string): string | undefined {
+  if (!roomId) return undefined;
+  if (roomToken && roomTokenRoomId === roomId) return roomToken;
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      return sessionStorage.getItem(`${ROOM_TOKEN_PREFIX}${roomId}`) || undefined;
+    }
+  } catch {}
+  return undefined;
+}
+
+export function clearRoomToken(forgetRoomId?: string) {
   roomToken = '';
   roomTokenRoomId = '';
+  if (forgetRoomId) {
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.removeItem(`${ROOM_TOKEN_PREFIX}${forgetRoomId}`);
+      }
+    } catch {}
+  }
 }
 
 /** Espera o token de Host/membro da sala `roomId` (a entrada pelo WebSocket é assíncrona). */

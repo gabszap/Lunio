@@ -1,5 +1,12 @@
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { describe, expect, it } from 'vitest';
-import { filterAndRewriteMasterManifest, rewriteVariantPlaylist } from './youtube';
+import {
+  filterAndRewriteMasterManifest,
+  getYouTubeProxyTarget,
+  isAllowedYouTubeUrl,
+  rewriteVariantPlaylist,
+} from './youtube';
+import { handleYouTube } from '../routes/youtube';
 
 const SAMPLE_MASTER = `#EXTM3U
 #EXT-X-INDEPENDENT-SEGMENTS
@@ -15,7 +22,39 @@ https://manifest.googlevideo.com/v/1080_avc.m3u8
 https://manifest.googlevideo.com/v/1080_vp9.m3u8
 `;
 
-describe('YouTube HLS manifest rewriter', () => {
+function mockReqRes(method: string, url: string) {
+  const headers: Record<string, string> = {};
+  let body = '';
+  const res = {
+    statusCode: 200,
+    headersSent: false,
+    writableEnded: false,
+    destroyed: false,
+    setHeader(k: string, v: string) {
+      headers[k.toLowerCase()] = String(v);
+    },
+    end(chunk?: string) {
+      if (chunk) body += chunk;
+      this.headersSent = true;
+      this.writableEnded = true;
+    },
+  };
+  const req = {
+    method,
+    url,
+    headers: {},
+    once() {},
+  };
+  return {
+    req: req as unknown as IncomingMessage,
+    res: res as unknown as ServerResponse,
+    headers,
+    getBody: () => body,
+    getStatus: () => res.statusCode,
+  };
+}
+
+describe('YouTube HLS manifest rewriter & security', () => {
   it('mantém apenas faixas H.264 (avc1), deduplica por resolução preferindo áudio 234 e reescreve URIs com token', () => {
     const seen = new Map<string, string>();
     let seq = 0;
@@ -38,19 +77,63 @@ describe('YouTube HLS manifest rewriter', () => {
     expect(seen.get('tok_3')).toBe('https://manifest.googlevideo.com/v/1080_avc.m3u8');
   });
 
-  it('reescreve segmentos e #EXT-X-MAP na playlist variante', () => {
-    let seq = 0;
+  it('resolve URIs relativas contra a base permitida e descarta hosts não autorizados', () => {
+    const seen: string[] = [];
     const raw = `#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-MAP:URI="https://rr1.googlevideo.com/init.mp4"
+#EXT-X-MAP:URI="init.mp4"
 #EXTINF:5.0,
-https://rr1.googlevideo.com/seg0.ts
+seg0.ts
 #EXTINF:5.0,
-https://rr1.googlevideo.com/seg1.ts
+http://169.254.169.254/latest/meta-data/
+#EXTINF:5.0,
+https://evil.example.com/steal.ts
 #EXT-X-ENDLIST`;
-    const out = rewriteVariantPlaylist(raw, () => `s${++seq}`, '?t=xyz');
+    const out = rewriteVariantPlaylist(
+      raw,
+      (u) => {
+        seen.push(u);
+        return `s${seen.length}`;
+      },
+      '?t=xyz',
+      'https://rr1.googlevideo.com/videoplayback/index.m3u8'
+    );
+    expect(seen).toEqual([
+      'https://rr1.googlevideo.com/videoplayback/init.mp4',
+      'https://rr1.googlevideo.com/videoplayback/seg0.ts',
+    ]);
     expect(out).toContain('#EXT-X-MAP:URI="/api/youtube/seg/s1.ts?t=xyz"');
     expect(out).toContain('/api/youtube/seg/s2.ts?t=xyz');
-    expect(out).toContain('/api/youtube/seg/s3.ts?t=xyz');
+    expect(out).not.toContain('169.254.169.254');
+    expect(out).not.toContain('evil.example.com');
+  });
+
+  it('valida estritamente URLs permitidas do YouTube (rejeita SSRF, HTTP e domínios externos)', () => {
+    expect(isAllowedYouTubeUrl('https://rr1---sn-abc.googlevideo.com/videoplayback')).toBe(true);
+    expect(isAllowedYouTubeUrl('https://www.youtube.com/api/timedtext?v=abc')).toBe(true);
+    expect(isAllowedYouTubeUrl('http://rr1.googlevideo.com/videoplayback')).toBe(false);
+    expect(isAllowedYouTubeUrl('https://169.254.169.254/latest/meta-data/')).toBe(false);
+    expect(isAllowedYouTubeUrl('https://localhost/secret')).toBe(false);
+    expect(isAllowedYouTubeUrl('https://googlevideo.com.evil.example/seg.ts')).toBe(false);
+  });
+
+  it('rejeita tokens inválidos ou com tipo incorreto', () => {
+    expect(getYouTubeProxyTarget('not-hex', 'seg')).toBeNull();
+    expect(getYouTubeProxyTarget('a'.repeat(24), 'hls')).toBeNull();
+  });
+
+  it('handleYouTube recusa métodos diferentes de GET/HEAD e valida IDs/tokens', async () => {
+    const post = mockReqRes('POST', '/info?id=dQw4w9WgXcQ');
+    await handleYouTube(post.req, post.res);
+    expect(post.getStatus()).toBe(405);
+    expect(post.headers.allow).toBe('GET, HEAD');
+
+    const badId = mockReqRes('GET', '/info?id=invalido');
+    await handleYouTube(badId.req, badId.res);
+    expect(badId.getStatus()).toBe(400);
+    expect(JSON.parse(badId.getBody()).code).toBe('invalid_video_id');
+
+    const missingSeg = mockReqRes('GET', `/seg/${'a'.repeat(24)}.ts`);
+    await handleYouTube(missingSeg.req, missingSeg.res);
+    expect(missingSeg.getStatus()).toBe(404);
   });
 });

@@ -1,8 +1,8 @@
 import { discordManager } from './discord';
-import { clearRoomToken, setRoomToken } from './access';
+import { clearRoomToken, getSavedRoomToken, setRoomToken } from './access';
 import { logger } from './logger';
 import { t } from './/i18n';
-import { readRoomFromUrl } from './roomCode';
+import { readRoomFromUrl, setRoomInUrl } from './roomCode';
 import { ServerClock } from './serverClock';
 import type { ScreenSignals } from './screen/signals';
 import type { ScreenKeyMaterial } from './screen/wire';
@@ -91,6 +91,7 @@ class SyncManager implements ScreenSignals {
   private errorListeners = new Set<ErrorListener>();
   private requestPlayListeners = new Set<(item: PlaylistItem) => void>();
   private chatHistory: ChatMessage[] = [];
+  private localPlaybackState: MemberPlaybackState = 'waiting';
   private getCurrentTimeCallback: (() => number) | null = null;
 
   public registerTimeGetter(fn: () => number) {
@@ -225,11 +226,19 @@ class SyncManager implements ScreenSignals {
    * Conecta ao servidor WebSocket da Watch Party
    */
   public connect(customRoomId?: string, password?: string) {
+    const switching = Boolean(customRoomId && this.currentRoomId && customRoomId !== this.currentRoomId);
     if (password !== undefined) this.currentRoomPassword = password || undefined;
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+    else if (switching) this.currentRoomPassword = undefined;
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       if (customRoomId && (customRoomId !== this.currentRoomId || password !== undefined)) {
         this.joinRoom(customRoomId, password);
       }
+      return;
+    }
+    if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+      // A conexão ainda está abrindo: apenas atualiza o alvo que `ws.onopen` enviará (evita recursão com joinRoom)
+      if (customRoomId) this.currentRoomId = customRoomId;
       return;
     }
 
@@ -302,6 +311,7 @@ class SyncManager implements ScreenSignals {
           type: 'room:join',
           roomId: this.currentRoomId,
           password: this.currentRoomPassword,
+          accessToken: getSavedRoomToken(this.currentRoomId),
           user: this.user,
         });
 
@@ -310,8 +320,6 @@ class SyncManager implements ScreenSignals {
           const pending = this.messageQueue.shift()!;
           this.send(pending);
         }
-
-        this.startHeartbeat();
       };
 
       this.ws.onmessage = (event) => {
@@ -400,7 +408,7 @@ class SyncManager implements ScreenSignals {
   }
 
   private sendHeartbeat() {
-    if (!this.isConnected || this.ws?.readyState !== WebSocket.OPEN) return;
+    if (!this.isConnected || !this.roomState || this.ws?.readyState !== WebSocket.OPEN) return;
     const curTime = this.getCurrentTimeCallback ? this.getCurrentTimeCallback() : 0;
     // O `clientTime` é a chave da resposta: duas batidas no mesmo milissegundo não podem repeti-lo
     let clientTime = Date.now();
@@ -412,7 +420,7 @@ class SyncManager implements ScreenSignals {
       type: 'client:heartbeat',
       clientTime,
       currentTime: Math.max(0, curTime),
-      state: 'ready',
+      state: this.localPlaybackState,
       rtt: this.clock.synced ? Math.round(this.clock.rtt) : undefined,
     });
   }
@@ -435,21 +443,26 @@ class SyncManager implements ScreenSignals {
   }
 
   public joinRoom(roomId: string, password?: string) {
+    const switching = Boolean(this.currentRoomId && this.currentRoomId !== roomId);
     this.currentRoomId = roomId;
     if (password !== undefined) this.currentRoomPassword = password || undefined;
-    if (this.isConnected) {
+    else if (switching) this.currentRoomPassword = undefined;
+
+    if (this.isConnected && this.ws?.readyState === WebSocket.OPEN) {
       this.send({
         type: 'room:join',
         roomId,
         password: this.currentRoomPassword,
+        accessToken: getSavedRoomToken(roomId),
         user: this.user,
       });
     } else {
-      this.connect(roomId, password);
+      this.connect(roomId, this.currentRoomPassword);
     }
   }
 
   public leaveRoom() {
+    const prevRoomId = this.currentRoomId || this.roomState?.roomId;
     if (this.isConnected) {
       this.send({ type: 'room:leave' });
     }
@@ -463,6 +476,7 @@ class SyncManager implements ScreenSignals {
     this.isConnecting = false;
     this.currentRoomId = '';
     this.currentRoomPassword = undefined;
+    this.localPlaybackState = 'waiting';
     const hadScreen = Boolean(this.roomState?.screen);
     this.roomState = null;
     this.screenKeys = [];
@@ -470,7 +484,7 @@ class SyncManager implements ScreenSignals {
     if (hadScreen) this.notifyScreen(null);
     this.setSkipVote(null);
     this.chatHistory = [];
-    clearRoomToken();
+    clearRoomToken(prevRoomId);
     this.stopHeartbeat();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -478,11 +492,7 @@ class SyncManager implements ScreenSignals {
     }
 
     try {
-      if (typeof window !== 'undefined' && window.location.search) {
-        const url = new URL(window.location.href);
-        url.searchParams.delete('room');
-        window.history.replaceState(null, '', url.pathname + (url.search ? url.search : ''));
-      }
+      setRoomInUrl(null);
     } catch {}
 
     logger.info('[Sala] Você saiu da sala');
@@ -521,10 +531,21 @@ class SyncManager implements ScreenSignals {
             sessionStorage.setItem('lunio_watchparty_user', JSON.stringify(this.user));
           } catch {}
         }
-        const prevMedia = this.roomState?.media;
+        const prevRoomId = this.roomState?.roomId;
+        const switchedRoom = Boolean(prevRoomId && prevRoomId !== msg.state.roomId);
+        if (switchedRoom) {
+          this.chatHistory = [];
+          this.setSkipVote(null);
+          this.localPlaybackState = 'waiting';
+          this.screenKeys = [];
+          this.screenViewers = [];
+        }
+        const prevMedia = switchedRoom ? null : this.roomState?.media;
         const prevScreen = this.roomState?.screen ?? null;
-        const isFirstState = !this.roomState;
+        const isFirstState = !this.roomState || switchedRoom;
+        this.currentRoomId = msg.state.roomId;
         this.roomState = msg.state;
+        if (!this.heartbeatInterval) this.startHeartbeat();
         this.afterScreenChange(prevScreen, msg.state.screen ?? null);
         if (isFirstState) {
           const host = msg.state.members.find((m) => m.isHost);
@@ -805,6 +826,7 @@ class SyncManager implements ScreenSignals {
   }
 
   public emitReadiness(ready: boolean, state: MemberPlaybackState, currentTime: number) {
+    this.localPlaybackState = state;
     this.send({
       type: 'client:readiness',
       ready,

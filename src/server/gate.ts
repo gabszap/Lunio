@@ -66,6 +66,15 @@ export function apiGate(req: IncomingMessage, res: ServerResponse, next: (err?: 
     return sendApiError(res, 429, 'rate_limited');
   }
 
+  // `/api/youtube/info` e `/api/youtube/master` disparam yt-dlp — têm teto bem menor que os segmentos `.ts`
+  if (match[1] === 'youtube' && /^\/api\/youtube\/(info|master)(?:\/|$)/.test(url.pathname)) {
+    const ytWait = checkRate(clientIp(req), 'youtube-resolve', { max: 25, windowMs: MIN });
+    if (ytWait !== null) {
+      res.setHeader('Retry-After', String(ytWait));
+      return sendApiError(res, 429, 'rate_limited');
+    }
+  }
+
   if (route.auth === 'none') return next();
 
   const payload = verifyToken(tokenFromRequest(req, url));

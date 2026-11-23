@@ -101,7 +101,16 @@ export function parsePersistedRoom(raw: unknown): PersistedRoom | null {
   if (Array.isArray(r.chatHistory)) {
     for (const entry of r.chatHistory.slice(-50)) {
       const c = entry as Record<string, unknown>;
-      if (!isString(c?.id, 128) || !isString(c.userId, 128) || !isString(c.username, 128) || !isString(c.text, 1000) || typeof c.timestamp !== 'number') continue;
+      if (
+        !isString(c?.id, 128) ||
+        !isString(c.userId, 128) ||
+        !isString(c.username, 128) ||
+        !isString(c.text, 1000) ||
+        typeof c.timestamp !== 'number' ||
+        !Number.isFinite(c.timestamp)
+      ) {
+        continue;
+      }
       chatHistory.push({
         id: c.id,
         userId: c.userId,
@@ -140,7 +149,8 @@ export function parsePersistedRoom(raw: unknown): PersistedRoom | null {
   const createdAt = typeof r.createdAt === 'number' && Number.isFinite(r.createdAt) && r.createdAt > 0 ? r.createdAt : r.savedAt;
   const name = isString(r.name, 64) && r.name.trim() ? r.name.trim() : undefined;
   const visibility: RoomVisibility = r.visibility === 'private' ? 'private' : 'public';
-  const passwordHash = isString(r.passwordHash, 256) && r.passwordHash.includes(':') ? r.passwordHash : undefined;
+  const passwordHash =
+    isString(r.passwordHash, 256) && /^[a-f0-9]{32}:[a-f0-9]{64}$/.test(r.passwordHash) ? r.passwordHash : undefined;
   const autoPauseOnBuffer = r.autoPauseOnBuffer === true;
 
   return {
