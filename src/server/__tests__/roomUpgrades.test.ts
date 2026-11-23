@@ -259,7 +259,7 @@ describe('trocar sala e auto-pause em buffering', () => {
 
     // Heartbeat do espectador NÃO sobrescreve o estado nem retoma a sala prematuramente
     host.clear();
-    await send(guest, { type: 'client:heartbeat', clientTime: Date.now(), currentTime: 10, state: 'ready', rtt: 40 });
+    await send(guest, { type: 'client:heartbeat', clientTime: Date.now(), currentTime: 10, rtt: 40 });
     expect(host.last('playback:sync')).toBeUndefined();
 
     // Espectador volta a ready -> retoma automaticamente

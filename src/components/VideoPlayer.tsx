@@ -47,7 +47,7 @@ import { useMediaInspection } from './player/useMediaInspection';
 import { useVideoCodecNotice } from './player/useVideoCodecNotice';
 import { useDiscordPresence } from './player/useDiscordPresence';
 import { useNativeVideoEvents } from './player/useNativeVideoEvents';
-import { usePlaybackControls } from './player/usePlaybackControls';
+import { usePlaybackControls, type PlayerSeek } from './player/usePlaybackControls';
 import { usePlaybackReadiness } from './player/usePlaybackReadiness';
 import { usePlayerEventHandlers } from './player/usePlayerEventHandlers';
 import { usePlayerPrefs } from './player/usePlayerPrefs';
@@ -134,7 +134,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const pendingPlayRef = useRef<boolean>(false);
   const lastKnownTimeRef = useRef<number>(0);
   const isExplicitSeekingRef = useRef<boolean>(false);
-  const handleSeekRef = useRef<(time: number) => void>(() => {});
+  const handleSeekRef = useRef<PlayerSeek>(() => {});
   const currentChapterRef = useRef<Chapter | null>(null);
 
   // Playback error diagnostics
@@ -242,6 +242,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     playerRef,
     lastKnownTimeRef,
     isSwitchingAudioRef,
+    isExplicitSeekingRef,
     audioOffsetRef,
     handleSeekRef,
     paused,
@@ -251,6 +252,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setPlaybackRate,
     readiness,
     isBuffering,
+    sourceUrl: source.src,
     detectedAudioTracks,
     detectedSubtitles,
     onMediaChangeRequested,
@@ -355,7 +357,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setVolumeBoost: prefs.setVolumeBoost,
   });
 
-  usePlaybackReadiness({ readiness, autoPlay, paused, setPaused, playerRef, source, handleSeekRef, pendingPlayRef });
+  usePlaybackReadiness({
+    readiness, autoPlay, paused, setPaused, setPlaybackRate, playerRef, source,
+    handleSeekRef, lastKnownTimeRef, pendingPlayRef, syncStatus,
+  });
 
   const skipVote = useSkipVote({
     skippableChapter,

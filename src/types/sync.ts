@@ -187,12 +187,13 @@ export type ClientMessage =
       ready: boolean;
       state: MemberPlaybackState;
       currentTime: number;
+      /** Geração da mídia do player. Clientes anteriores podem omitir o campo. */
+      generation?: number;
     }
   | {
       type: 'client:heartbeat';
       clientTime: number;
       currentTime: number;
-      state: MemberPlaybackState;
       /** Ida e volta até o servidor medida por quem envia (ms); só vai depois da primeira medição. */
       rtt?: number;
     }

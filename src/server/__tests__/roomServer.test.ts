@@ -277,6 +277,22 @@ describe('Host autoritativo', () => {
     expect(stateOf('SALA1').playback.position).toBeCloseTo(15, 0);
   });
 
+  it('entrega posição, pausa e velocidade à pessoa que entra no meio do vídeo', () => {
+    const host = connect('SALA1', 'u1');
+    send(host, { type: 'media:set', media: { url: 'https://cdn.test/ep.mkv', title: 'Episódio' } });
+    send(host, { type: 'playback:play', position: 60 });
+    send(host, { type: 'playback:rate', rate: 1.5 });
+    vi.advanceTimersByTime(4000);
+
+    const guest = connect('SALA1', 'u2');
+    expect(guest.last('room:state').state.playback).toMatchObject({ playing: true, position: 66, rate: 1.5 });
+
+    send(host, { type: 'playback:pause', position: 67 });
+    vi.advanceTimersByTime(4000);
+    const lateGuest = connect('SALA1', 'u3');
+    expect(lateGuest.last('room:state').state.playback).toMatchObject({ playing: false, position: 67, rate: 1.5 });
+  });
+
   it('heartbeat é só telemetria: não mexe na timeline da sala', () => {
     const host = connect('SALA1', 'u1');
     const guest = connect('SALA1', 'u2');
@@ -323,19 +339,24 @@ describe('Host autoritativo', () => {
 });
 
 describe('passar o Host', () => {
-  it('o Host entrega o controle; o antigo Host perde o poder', () => {
+  it('transfere o controle durante a reprodução e só aceita comandos do novo Host', () => {
     const host = connect('SALA1', 'u1');
     const guest = connect('SALA1', 'u2');
+    send(host, { type: 'playback:play', position: 10 });
+    vi.advanceTimersByTime(5000);
     send(host, { type: 'room:transfer_host', newHostId: 'u2' });
     expect(stateOf('SALA1').hostId).toBe('u2');
+    expect(stateOf('SALA1').playback).toMatchObject({ playing: true, position: 15 });
     expect(rm.isHostMember('SALA1', 'u2')).toBe(true);
     expect(rm.isHostMember('SALA1', 'u1')).toBe(false);
 
     guest.clear();
-    send(host, { type: 'playback:play', position: 5 });
-    expect(guest.of('playback:sync')).toHaveLength(0);
-    send(guest, { type: 'playback:play', position: 5 });
-    expect(guest.last('playback:sync')).toMatchObject({ action: 'play' });
+    send(host, { type: 'playback:pause', position: 4 });
+    send(guest, { type: 'playback:seek', position: 25 });
+    send(host, { type: 'playback:seek', position: 5 });
+    expect(guest.of('playback:sync')).toHaveLength(1);
+    expect(guest.last('playback:sync')).toMatchObject({ action: 'seek', triggeredBy: 'u2' });
+    expect(stateOf('SALA1').playback).toMatchObject({ playing: true, position: 25 });
   });
 
   it('espectador não consegue passar o Host', () => {

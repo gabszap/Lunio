@@ -499,13 +499,14 @@ export class RoomManager {
     return room;
   }
 
-  public getRoomState(room: RoomInternal): RoomState {
-    const currentPos = this.calculateCurrentPosition(room.playback);
-    const uniqueClientsMap = new Map<string, ClientSession>();
-    for (const session of room.clients.values()) {
-      uniqueClientsMap.set(session.userId, session);
-    }
-    const members: RoomMember[] = Array.from(uniqueClientsMap.values()).map((c) => ({
+  private memberSessions(room: RoomInternal): ClientSession[] {
+    const byUserId = new Map<string, ClientSession>();
+    for (const client of room.clients.values()) byUserId.set(client.userId, client);
+    return [...byUserId.values()];
+  }
+
+  private toRoomMember(room: RoomInternal, c: ClientSession): RoomMember {
+    return {
       id: c.userId,
       username: c.username,
       avatarUrl: c.avatarUrl,
@@ -517,7 +518,12 @@ export class RoomManager {
       ping: c.lastPing,
       watchingScreen: room.screen?.viewers.has(baseUserId(c.userId)) ? true : undefined,
       behindMs: room.playback.playing && c.userId !== room.hostId && c.ready ? c.behindMs : undefined,
-    }));
+    };
+  }
+
+  public getRoomState(room: RoomInternal): RoomState {
+    const currentPos = this.calculateCurrentPosition(room.playback);
+    const members = this.memberSessions(room).map((client) => this.toRoomMember(room, client));
 
     return {
       roomId: room.roomId,
@@ -1090,24 +1096,9 @@ export class RoomManager {
   }
 
   public broadcastMembersUpdate(room: RoomInternal) {
-    const uniqueClientsMap = new Map<string, ClientSession>();
-    for (const session of room.clients.values()) {
-      uniqueClientsMap.set(session.userId, session);
-    }
-    const members: RoomMember[] = Array.from(uniqueClientsMap.values()).map((c) => ({
-      id: c.userId,
-      username: c.username,
-      avatarUrl: c.avatarUrl,
-      platform: c.platform || 'web',
-      isHost: c.userId === room.hostId,
-      ready: c.ready,
-      state: c.state,
-      currentTime: c.currentTime,
-      ping: c.lastPing,
-      watchingScreen: room.screen?.viewers.has(baseUserId(c.userId)) ? true : undefined,
-      behindMs: room.playback.playing && c.userId !== room.hostId && c.ready ? c.behindMs : undefined,
-    }));
-    for (const c of uniqueClientsMap.values()) c.behindShownMs = c.behindMs;
+    const clients = this.memberSessions(room);
+    const members = clients.map((client) => this.toRoomMember(room, client));
+    for (const client of clients) client.behindShownMs = client.behindMs;
 
     this.broadcast(room, {
       type: 'members:update',
@@ -1504,6 +1495,13 @@ export class RoomManager {
           rate: 1.0,
           updatedAt: Date.now(),
         };
+        for (const client of currentRoom.clients.values()) {
+          client.ready = false;
+          client.state = 'waiting';
+          client.currentTime = 0;
+          client.behindMs = undefined;
+          client.behindShownMs = undefined;
+        }
 
         this.clearSkipVote(currentRoom);
         this.clearAutoPause(currentRoom);
@@ -1570,9 +1568,11 @@ export class RoomManager {
       }
 
       case 'client:readiness': {
+        if (msg.generation !== undefined && msg.generation !== currentRoom.media?.generation) return;
         clientSession.ready = msg.ready;
         clientSession.state = msg.state;
         clientSession.currentTime = msg.currentTime;
+        if (!clientSession.ready) clientSession.behindMs = undefined;
         this.evaluateAutoPause(currentRoom, clientSession);
         this.broadcastMembersUpdate(currentRoom);
         break;
@@ -1584,7 +1584,6 @@ export class RoomManager {
         clientSession.lastPing =
           typeof msg.rtt === 'number' && msg.rtt >= 0 && msg.rtt < 60_000 ? Math.round(msg.rtt / 2) : Math.max(0, now - msg.clientTime);
         clientSession.currentTime = msg.currentTime;
-        // Heartbeat transporta apenas telemetria/liveness; o estado de prontidão/stalled é gerido por `client:readiness`
         this.updateBehind(currentRoom, clientSession, now);
 
         this.send(ws, {

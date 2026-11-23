@@ -4,6 +4,8 @@ import { logger } from './logger';
 import { t } from './/i18n';
 import { readRoomFromUrl, setRoomInUrl } from './roomCode';
 import { ServerClock } from './serverClock';
+import { decideDrift, type DriftCorrectionResult } from './playbackDrift';
+import { syncDiagnostics } from './syncDiagnostics';
 import type { ScreenSignals } from './screen/signals';
 import type { ScreenKeyMaterial } from './screen/wire';
 import type { RoomScreen, ScreenQualityId } from '../types/screen';
@@ -20,11 +22,7 @@ import type {
   PlaylistItem,
 } from '../types/sync';
 
-export interface DriftCorrectionResult {
-  drift: number;
-  action: 'none' | 'rate_speedup' | 'rate_slowdown' | 'seek';
-  targetTime: number;
-}
+export type { DriftCorrectionResult } from './playbackDrift';
 
 export type SyncStateListener = (state: RoomState | null) => void;
 export type PlaybackSyncListener = (
@@ -61,6 +59,7 @@ class SyncManager implements ScreenSignals {
   private currentRoomId: string = '';
   private currentRoomPassword: string | undefined = undefined;
   private roomState: RoomState | null = null;
+  private confirmedPlayback: { generation: number } | null = null;
   /** Votação para pular o capítulo atual (null = nenhuma). Vem do servidor. */
   private skipVote: import('../types/sync').SkipVoteState | null = null;
   private skipVoteListeners = new Set<SkipVoteListener>();
@@ -91,7 +90,6 @@ class SyncManager implements ScreenSignals {
   private errorListeners = new Set<ErrorListener>();
   private requestPlayListeners = new Set<(item: PlaylistItem) => void>();
   private chatHistory: ChatMessage[] = [];
-  private localPlaybackState: MemberPlaybackState = 'waiting';
   private getCurrentTimeCallback: (() => number) | null = null;
 
   public registerTimeGetter(fn: () => number) {
@@ -195,6 +193,13 @@ class SyncManager implements ScreenSignals {
 
   public getRoomState(): RoomState | null {
     return this.roomState;
+  }
+
+  /** A identidade muda após confirmar uma reconexão ou receber a timeline de outra geração. */
+  public getConfirmedPlayback(sourceUrl: string): Readonly<{ generation: number }> | null {
+    const media = this.roomState?.media;
+    if (this.roomState?.roomId !== this.currentRoomId || !media || media.url !== sourceUrl) return null;
+    return this.confirmedPlayback?.generation === media.generation ? this.confirmedPlayback : null;
   }
 
   public getRoomId(): string {
@@ -379,6 +384,8 @@ class SyncManager implements ScreenSignals {
     this.isConnected = false;
     this.isConnecting = false;
     this.stopHeartbeat();
+    this.confirmedPlayback = null;
+    syncDiagnostics?.resetConnection();
 
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -420,7 +427,6 @@ class SyncManager implements ScreenSignals {
       type: 'client:heartbeat',
       clientTime,
       currentTime: Math.max(0, curTime),
-      state: this.localPlaybackState,
       rtt: this.clock.synced ? Math.round(this.clock.rtt) : undefined,
     });
   }
@@ -444,6 +450,7 @@ class SyncManager implements ScreenSignals {
 
   public joinRoom(roomId: string, password?: string) {
     const switching = Boolean(this.currentRoomId && this.currentRoomId !== roomId);
+    this.confirmedPlayback = null;
     this.currentRoomId = roomId;
     if (password !== undefined) this.currentRoomPassword = password || undefined;
     else if (switching) this.currentRoomPassword = undefined;
@@ -476,9 +483,11 @@ class SyncManager implements ScreenSignals {
     this.isConnecting = false;
     this.currentRoomId = '';
     this.currentRoomPassword = undefined;
-    this.localPlaybackState = 'waiting';
     const hadScreen = Boolean(this.roomState?.screen);
     this.roomState = null;
+    this.confirmedPlayback = null;
+    syncDiagnostics?.resetConnection();
+    syncDiagnostics?.resetMedia();
     this.screenKeys = [];
     this.screenViewers = [];
     if (hadScreen) this.notifyScreen(null);
@@ -536,16 +545,25 @@ class SyncManager implements ScreenSignals {
         if (switchedRoom) {
           this.chatHistory = [];
           this.setSkipVote(null);
-          this.localPlaybackState = 'waiting';
           this.screenKeys = [];
           this.screenViewers = [];
         }
         const prevMedia = switchedRoom ? null : this.roomState?.media;
         const prevScreen = this.roomState?.screen ?? null;
         const isFirstState = !this.roomState || switchedRoom;
+        if (this.roomState?.roomId !== msg.state.roomId || prevMedia?.generation !== msg.state.media?.generation) {
+          syncDiagnostics?.resetMedia();
+        }
+        const generation = msg.state.media?.generation;
+        if (generation === undefined) {
+          this.confirmedPlayback = null;
+        } else if (this.roomState?.roomId !== msg.state.roomId || this.confirmedPlayback?.generation !== generation) {
+          this.confirmedPlayback = { generation };
+        }
         this.currentRoomId = msg.state.roomId;
         this.roomState = msg.state;
         if (!this.heartbeatInterval) this.startHeartbeat();
+        syncDiagnostics?.markTimeline();
         this.afterScreenChange(prevScreen, msg.state.screen ?? null);
         if (isFirstState) {
           const host = msg.state.members.find((m) => m.isHost);
@@ -574,6 +592,7 @@ class SyncManager implements ScreenSignals {
       case 'playback:sync': {
         if (!this.roomState) return;
         this.roomState.playback = msg.playback;
+        syncDiagnostics?.markTimeline();
 
         // Notifica listeners para aplicar no player local (se não foi o próprio disparador)
         if (msg.triggeredBy !== this.user.id) {
@@ -602,7 +621,8 @@ class SyncManager implements ScreenSignals {
       }
 
       case 'media:sync': {
-        if (!this.roomState) return;
+        if (!this.roomState || msg.generation <= (this.roomState.media?.generation ?? 0)) return;
+        syncDiagnostics?.resetMedia();
         this.roomState.media = msg.media;
 
         if (msg.triggeredBy !== this.user.id) {
@@ -724,6 +744,7 @@ class SyncManager implements ScreenSignals {
         if (sentAt !== undefined) {
           this.pendingBeats.delete(msg.clientTime);
           this.clock.add(sentAt, performance.now(), msg.serverTime);
+          if (this.clock.synced) syncDiagnostics?.setRtt(this.clock.rtt);
         }
         break;
       }
@@ -735,6 +756,7 @@ class SyncManager implements ScreenSignals {
           this.roomState.playback.rate = msg.rate;
         }
         this.roomState.playback.updatedAt = msg.updatedAt || Date.now();
+        syncDiagnostics?.markTimeline();
         break;
       }
 
@@ -825,13 +847,13 @@ class SyncManager implements ScreenSignals {
     });
   }
 
-  public emitReadiness(ready: boolean, state: MemberPlaybackState, currentTime: number) {
-    this.localPlaybackState = state;
+  public emitReadiness(ready: boolean, state: MemberPlaybackState, currentTime: number, generation: number) {
     this.send({
       type: 'client:readiness',
       ready,
       state,
       currentTime,
+      generation,
     });
   }
 
@@ -991,65 +1013,12 @@ class SyncManager implements ScreenSignals {
     return Math.max(0, position + elapsed * rate);
   }
 
-  /**
-   * Avalia a discrepância (drift) do cliente em relação ao Host
-   * Regras rigorosas de sincronização da sala:
-   *  - O espectador NUNCA deve correr na frente do Host (tolerância máx 0.5s).
-   *  - Se drift > 0.5s (adiantado): seek corretivo imediato para a posição exata do Host.
-   *  - Se 0.12s < drift <= 0.5s (levemente adiantado): desacelera (slowdown 0.85x) até o Host alcançar.
-   *  - Se drift < -1.2s (muito atrasado): seek corretivo para a posição calculada.
-   *  - Se -1.2s <= drift < -0.25s (atrasado): micro-aceleração (speedup 1.08x).
-   *  - Se -0.25s <= drift <= 0.12s: sincronia perfeita, reprodução normal (1.0x).
-   */
+  /** Calcula a correção local usando a posição autoritativa da sala. */
   public calculateDrift(localCurrentTime: number): DriftCorrectionResult {
     if (!this.roomState || this.isRoomHost()) {
       return { drift: 0, action: 'none', targetTime: localCurrentTime };
     }
-
-    const expected = this.getExpectedPosition();
-    const drift = localCurrentTime - expected;
-
-    // Se o espectador estiver adiantado em relação ao Host (drift positivo)
-    if (drift > 0.5) {
-      return {
-        drift,
-        action: 'seek',
-        targetTime: expected,
-      };
-    }
-
-    if (drift > 0.12) {
-      // Espectador adiantado: desacelera para esperar o Host
-      return {
-        drift,
-        action: 'rate_slowdown',
-        targetTime: expected,
-      };
-    }
-
-    // Se o espectador estiver atrasado em relação ao Host (drift negativo)
-    if (drift < -1.2) {
-      return {
-        drift,
-        action: 'seek',
-        targetTime: expected,
-      };
-    }
-
-    if (drift < -0.25) {
-      // Espectador atrasado: acelera suavemente
-      return {
-        drift,
-        action: 'rate_speedup',
-        targetTime: expected,
-      };
-    }
-
-    return {
-      drift,
-      action: 'none',
-      targetTime: expected,
-    };
+    return decideDrift(localCurrentTime, this.getExpectedPosition());
   }
 
   // --- Inscrições de Eventos ---

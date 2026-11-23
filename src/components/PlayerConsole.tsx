@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Terminal, Trash2, ArrowDownToLine, Copy, Check, FileText, Download, List, ChevronDown } from 'lucide-react';
 import { LogEntry, LogLevel } from '../types/media';
 import { logger, safeStringify } from '../lib/logger';
+import { syncDiagnostics } from '../lib/syncDiagnostics';
+import { SyncDiagnosticsPanel } from './player/SyncDiagnosticsPanel';
 import { t } from '../lib/i18n';
 
 export const PlayerConsole: React.FC = () => {
@@ -212,6 +214,7 @@ export const PlayerConsole: React.FC = () => {
         </div>
       </div>
 
+      {syncDiagnostics && <SyncDiagnosticsPanel diagnostics={syncDiagnostics} />}
       {rawViewMode ? (
         <div className="p-3 bg-lu-bg2 flex flex-col gap-2">
           <div className="flex items-center justify-between text-[12px] text-lu-muted">
