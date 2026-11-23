@@ -5,7 +5,8 @@ import { ServerClock } from './serverClock';
 function rig(skew: number) {
   let mono = 1_000;
   const wall = 1_700_000_000_000;
-  const clock = new ServerClock(() => mono, () => wall + mono);
+  let osOffset = 0;
+  const clock = new ServerClock(() => mono, () => wall + mono + osOffset);
   const serverAt = (m: number) => wall + m + skew;
   /** Um heartbeat: `out` ms para ir, `back` ms para voltar. */
   const ping = (out: number, back: number) => {
@@ -15,7 +16,13 @@ function rig(skew: number) {
     mono += back;
     clock.add(t0, mono, serverTime);
   };
-  return { clock, ping, advance: (ms: number) => (mono += ms), serverNow: () => serverAt(mono) };
+  return {
+    clock,
+    ping,
+    advance: (ms: number) => (mono += ms),
+    changeSystemClock: (ms: number) => (osOffset += ms),
+    serverNow: () => serverAt(mono),
+  };
 }
 
 describe('ServerClock', () => {
@@ -36,6 +43,14 @@ describe('ServerClock', () => {
     const { clock, ping, serverNow } = rig(-120_000);
     ping(40, 40);
     expect(Math.abs(clock.now() - serverNow())).toBeLessThanOrEqual(1);
+  });
+
+  it('acompanha o servidor quando o relógio do sistema muda após sincronizar', () => {
+    const { clock, ping, changeSystemClock, advance, serverNow } = rig(8000);
+    ping(25, 25);
+    changeSystemClock(-3_600_000);
+    advance(3000);
+    expect(clock.now()).toBe(serverNow());
   });
 
   it('prefere a medição de menor ida e volta (a assimetria da rede erra menos)', () => {

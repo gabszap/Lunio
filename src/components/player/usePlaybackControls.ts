@@ -9,6 +9,8 @@ import { syncManager } from '../../lib/sync';
 import { getVideoElement } from './dom';
 import { t } from '../../lib/i18n';
 
+export type PlayerSeek = (time: number, roomPlayback?: { playing: boolean }) => void;
+
 /**
  * Ações do usuário sobre a reprodução: play/pause, seek (nativo, por buffer ou refazendo o remux), volume, mudo,
  * velocidade, ganho e "continuar de onde parou". Só o Host da sala emite play/pause/seek/velocidade.
@@ -35,7 +37,7 @@ export function usePlaybackControls(args: {
   pendingPlayRef: MutableRefObject<boolean>;
   lastKnownTimeRef: MutableRefObject<number>;
   isExplicitSeekingRef: MutableRefObject<boolean>;
-  handleSeekRef: MutableRefObject<(time: number) => void>;
+  handleSeekRef: MutableRefObject<PlayerSeek>;
   setPaused: Dispatch<SetStateAction<boolean>>;
   setCurrentTime: Dispatch<SetStateAction<number>>;
   setIsBuffering: Dispatch<SetStateAction<boolean>>;
@@ -148,17 +150,19 @@ export function usePlaybackControls(args: {
     }
   };
 
-  const handleSeek = (newTime: number) => {
-    if (!syncManager.isApplyingRemoteUpdate && syncStatus.isConnected && !syncStatus.isHost) {
+  const handleSeek: PlayerSeek = (newTime, roomPlayback) => {
+    const localAction = !roomPlayback && !syncManager.isApplyingRemoteUpdate;
+    if (localAction && syncStatus.isConnected && !syncStatus.isHost) {
       return;
     }
 
     const videoEl = getVideoElement(playerRef);
 
-    wasPlayingBeforeSeekRef.current = videoEl ? !videoEl.paused : !paused;
+    const shouldResume = roomPlayback?.playing ?? (videoEl ? !videoEl.paused : !paused);
+    wasPlayingBeforeSeekRef.current = shouldResume;
 
     const targetTime = Math.max(0, newTime);
-    if (!syncManager.isApplyingRemoteUpdate && syncManager.isRoomHost()) {
+    if (localAction && syncManager.isRoomHost()) {
       syncManager.emitSeek(targetTime);
     }
     setResumePrompt(null);
@@ -171,6 +175,7 @@ export function usePlaybackControls(args: {
     // 1. Dublagem alternativa ativa com FFmpeg remux: Remuxa segmento físico a partir de targetTime
     // (Streams fMP4 chunked sem suporte a range não suportam seek confiável no elemento <video>; o FFmpeg garante precisão absoluta)
     if (isSwitchingAudioRef.current) {
+      wasPlayingBeforeAudioSwitchRef.current = shouldResume;
       remuxFrom(targetTime);
       return;
     }
