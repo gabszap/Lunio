@@ -19,6 +19,7 @@ import type { VideoQualityOption } from './SettingsMenu';
 import type { PlaylistItem, RoomState } from '../types/sync';
 import { MemberGrid } from './room/MemberGrid';
 import { audioBoost } from '../lib/audioBoost';
+import { getYouTubeId } from '../lib/media';
 import { normalizeChapters, getCurrentChapter, getSkippableChapter, shouldShowNextEpisodePrompt } from '../lib/chapters';
 import { useSkipVote } from './player/useSkipVote';
 import { logger } from '../lib/logger';
@@ -798,6 +799,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           qualities={videoQualities}
           autoQuality={autoQuality}
           onQualitySelect={handleQualitySelect}
+          isYouTube={Boolean(getYouTubeId(source.src))}
           volume={volume}
           muted={muted}
           playbackRate={playbackRate}

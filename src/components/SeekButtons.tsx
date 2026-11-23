@@ -9,12 +9,14 @@ interface SeekButtonsProps {
   duration: number;
   onSeek: (newTime: number) => void;
   disabled?: boolean;
+  /** Mostra o atalho "+90 s" (pular abertura de anime); oculto em vídeos do YouTube. */
+  showSkipIntro?: boolean;
 }
 
 const seekBtn =
   'inline-flex items-center justify-center flex-none gap-1 @[980px]:gap-1.5 h-8 @[880px]:h-9 @[1060px]:h-11 px-1.5 @[880px]:px-2 @[1060px]:px-3 rounded-[10px] text-[12px] @[980px]:text-[13px] font-semibold tabular transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap';
 
-export const SeekButtons: React.FC<SeekButtonsProps> = ({ currentTime, duration, onSeek, disabled = false }) => {
+export const SeekButtons: React.FC<SeekButtonsProps> = ({ currentTime, duration, onSeek, disabled = false, showSkipIntro = true }) => {
   const seekBy = (delta: number, label: string) => (e: React.MouseEvent) => {
     e.stopPropagation();
     const max = duration > 0 ? duration : Infinity;
@@ -49,18 +51,20 @@ export const SeekButtons: React.FC<SeekButtonsProps> = ({ currentTime, duration,
         <span>10 s</span>
         <RotateCw size={18} />
       </button>
-      <button
-        id="btn-seek-forward-90"
-        type="button"
-        aria-label={t('Pular abertura (N)')}
-        title={t('Pular abertura (N)')}
-        disabled={disabled}
-        onClick={seekBy(90, t('Pular 90 s'))}
-        className={`${seekBtn} hidden md:inline-flex text-lu-text hover:bg-white/8`}
-      >
-        <FastForward size={18} />
-        <span>+90 s</span>
-      </button>
+      {showSkipIntro && (
+        <button
+          id="btn-seek-forward-90"
+          type="button"
+          aria-label={t('Pular abertura (N)')}
+          title={t('Pular abertura (N)')}
+          disabled={disabled}
+          onClick={seekBy(90, t('Pular 90 s'))}
+          className={`${seekBtn} hidden md:inline-flex text-lu-text hover:bg-white/8`}
+        >
+          <FastForward size={18} />
+          <span>+90 s</span>
+        </button>
+      )}
     </>
   );
 };

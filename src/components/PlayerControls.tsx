@@ -56,6 +56,8 @@ interface PlayerControlsProps {
   qualities?: VideoQualityOption[];
   autoQuality?: boolean;
   onQualitySelect?: (height: number | 'auto') => void;
+  /** Vídeo do YouTube: oculta o botão "+90 s" (pular abertura). */
+  isYouTube?: boolean;
   volume: number;
   muted: boolean;
   playbackRate: number;
@@ -220,6 +222,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   qualities,
   autoQuality,
   onQualitySelect,
+  isYouTube = false,
   volume,
   muted,
   playbackRate,
@@ -467,7 +470,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                 >
                   {paused ? <Play size={18} /> : <Pause size={18} />}
                 </button>
-                <SeekButtons currentTime={currentTime} duration={duration} onSeek={onSeek} />
+                <SeekButtons currentTime={currentTime} duration={duration} onSeek={onSeek} showSkipIntro={!isYouTube} />
                 {onNext && (
                   <IconButton
                     id="btn-next-in-queue"
