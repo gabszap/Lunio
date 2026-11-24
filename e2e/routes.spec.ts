@@ -18,11 +18,18 @@ const selectedTab = (page: Page, name: string) => page.getByRole('tab', { name, 
 const path = (page: Page) => new URL(page.url()).pathname;
 const query = (page: Page) => new URL(page.url()).search;
 
-test.describe('Rotas da Home (/catalog, /home, /status)', () => {
+test.describe('Rotas da Home (/catalog, /rooms, /home, /status)', () => {
   test('abrir o endereço direto cai na aba certa (/ e /home são o Início)', async ({ browser }) => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await mockCatalog(page);
-    for (const [url, tab] of [['/catalog', 'Catálogo'], ['/status', 'Status'], ['/home', 'Início'], ['/', 'Início'], ['/rota-que-nao-existe', 'Início']] as const) {
+    for (const [url, tab] of [
+      ['/catalog', 'Catálogo'],
+      ['/rooms', 'Salas'],
+      ['/status', 'Status'],
+      ['/home', 'Início'],
+      ['/', 'Início'],
+      ['/rota-que-nao-existe', 'Início'],
+    ] as const) {
       await page.goto(url);
       await expect(selectedTab(page, tab), url).toBeVisible();
     }
@@ -36,6 +43,8 @@ test.describe('Rotas da Home (/catalog, /home, /status)', () => {
 
     await page.getByRole('tab', { name: 'Catálogo' }).click();
     await expect.poll(() => path(page)).toBe('/catalog');
+    await page.getByRole('tab', { name: 'Salas' }).click();
+    await expect.poll(() => path(page)).toBe('/rooms');
     await page.getByRole('tab', { name: 'Status' }).click();
     await expect.poll(() => path(page)).toBe('/status');
     await page.getByRole('tab', { name: 'Início' }).click();
@@ -43,6 +52,9 @@ test.describe('Rotas da Home (/catalog, /home, /status)', () => {
 
     await page.goBack(); // Status
     await expect(selectedTab(page, 'Status')).toBeVisible();
+    await page.goBack(); // Salas
+    await expect(selectedTab(page, 'Salas')).toBeVisible();
+    expect(path(page)).toBe('/rooms');
     await page.goBack(); // Catálogo
     await expect(selectedTab(page, 'Catálogo')).toBeVisible();
     expect(path(page)).toBe('/catalog');
