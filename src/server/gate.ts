@@ -29,6 +29,8 @@ const MIN = 60_000;
 const ROUTES: Record<string, { auth: AuthMode; rate: RateRule }> = {
   session: { auth: 'none', rate: { max: 30, windowMs: MIN } },
   room: { auth: 'none', rate: { max: 120, windowMs: MIN } },
+  rooms: { auth: 'none', rate: { max: 180, windowMs: MIN } },
+  roompreview: { auth: 'host', rate: { max: 30, windowMs: MIN } },
   token: { auth: 'none', rate: { max: 20, windowMs: MIN } },
   status: { auth: 'none', rate: { max: 30, windowMs: MIN } },
   presence: { auth: 'none', rate: { max: 60, windowMs: MIN } },

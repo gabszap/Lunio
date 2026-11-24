@@ -10,6 +10,7 @@ import { handleResolve } from './routes/resolve';
 import { handleUpstreamStatus } from './routes/upstream';
 import { handleScreenToken } from './routes/screen';
 import { handleRoomInfo } from './routes/room';
+import { handlePublicRooms, handleUploadRoomPreview } from './routes/rooms';
 import { handleSession } from './routes/session';
 import { handlePresence, handleSpeed, handleStatus } from './routes/status';
 import { handleSubtitle } from './routes/subtitle';
@@ -40,6 +41,8 @@ export function createApiRouter(): Router {
   router.use('/api/status', handleStatus);
   router.use('/api/speed', handleSpeed);
   router.use('/api/room', handleRoomInfo);
+  router.use('/api/rooms', handlePublicRooms);
+  router.use('/api/roompreview', handleUploadRoomPreview);
   router.use('/api/upload', handleUploadApi);
   router.use('/api/uploads/claim', (req, res) => void handleUploadClaim(req, res));
   router.use('/api/uploads/status', (req, res) => void handleUploadStatus(req, res));
