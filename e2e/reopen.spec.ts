@@ -1,8 +1,6 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
-import { expect, test, type Page, type Request, type Browser } from '@playwright/test';
-import { newUser, submitName } from './helpers';
+import { expect, test, type Page, type Request } from '@playwright/test';
+import { createEmptyRoom, newUser } from './helpers';
 
 /**
  * Reabrir envio com o claim guardado no navegador (ENVIOS-REDIS.md, 4.6): a sala encerra,
@@ -19,25 +17,21 @@ function fakeClaim(id: string) {
   return `${body}.${crypto.createHmac('sha256', E2E_SECRET).update(body).digest('base64url')}`;
 }
 
-/** O apelido já pode estar no navegador (mesma aba): só confirma o modal se ele aparecer. */
-async function maybeName(page: Page, name: string) {
-  const dialog = page.getByRole('dialog');
-  if (await dialog.isVisible().catch(() => false)) {
-    await submitName(page, name);
-  }
+async function openUploadPicker(page: Page, name: string, roomName = 'Sala Upload') {
+  await createEmptyRoom(page, { username: name, roomName });
+  await page.getByRole('button', { name: 'Escolher vídeo' }).click();
+  await page.getByRole('tab', { name: 'Enviar um arquivo' }).click();
 }
 
 async function openUpload(page: Page, name: string, file?: { name: string; mimeType: string; buffer: Buffer }) {
   await page.addInitScript(() => {
     (window as unknown as { __lunioRetryDelays: number[] }).__lunioRetryDelays = [50, 50];
   });
-  await page.goto('/');
-  await page.getByRole('button', { name: /Enviar um arquivo/ }).click();
+  await openUploadPicker(page, name);
   await page.locator('input[type="file"]').setInputFiles(
     file ?? { name: 'episodio-reaberto.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(FILE_SIZE, 7) }
   );
   await page.getByRole('button', { name: 'Enviar e criar sala' }).click();
-  await submitName(page, name);
 }
 
 test.describe('reabrir envio (claim no navegador)', () => {
@@ -49,8 +43,7 @@ test.describe('reabrir envio (claim no navegador)', () => {
     await openUpload(page, 'Ana');
     await expect(page.getByText('Arquivo enviado')).toBeVisible({ timeout: 30_000 });
     const firstEnd = requests.length;
-    await page.goto('/');
-    await page.getByRole('button', { name: /Enviar um arquivo/ }).click();
+    await openUploadPicker(page, 'Ana', 'Sala Reabrir');
 
     // A lista guarda o envio do navegador. O prazo de vencer só se sabe com a sala fechada (conta do fechamento), então
     // logo depois do envio, com a sala ainda aberta, a lista não inventa um "expira em"
@@ -60,7 +53,6 @@ test.describe('reabrir envio (claim no navegador)', () => {
 
     // Reabrir numa sala nova: nenhum PUT pode disparar (sem envio de novo), só o claim
     await page.getByRole('button', { name: 'Usar este arquivo' }).click();
-    await maybeName(page, 'Ana');
     await expect(page.getByText('Arquivo enviado')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('button', { name: 'Abrir player' })).toBeEnabled();
     // O envio reaberto não tem o File de verdade; a tela mostra o tamanho do servidor, completo (antes: "0%" e "0 B")
@@ -87,8 +79,7 @@ test.describe('reabrir envio (claim no navegador)', () => {
         JSON.stringify([{ id: '0000000000000000', name: 'sumido.mp4', size: 65536, claim, at: Date.now() }])
       );
     }, fakeClaim(id));
-    await page.goto('/');
-    await page.getByRole('button', { name: /Enviar um arquivo/ }).click();
+    await openUploadPicker(page, 'Ana', 'Sala Limpa');
     // O servidor não tem o arquivo: o item some da lista e o bloco inteiro desaparece
     await expect(page.getByText('sumido.mp4')).toHaveCount(0, { timeout: 30_000 });
     await expect(page.getByText('Seus envios recentes')).toHaveCount(0);

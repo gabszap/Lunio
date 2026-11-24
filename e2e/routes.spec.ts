@@ -19,10 +19,10 @@ const path = (page: Page) => new URL(page.url()).pathname;
 const query = (page: Page) => new URL(page.url()).search;
 
 test.describe('Rotas da Home (/catalog, /home, /status)', () => {
-  test('abrir o endereço direto cai na aba certa (/ e /home são a Sala)', async ({ browser }) => {
+  test('abrir o endereço direto cai na aba certa (/ e /home são o Início)', async ({ browser }) => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await mockCatalog(page);
-    for (const [url, tab] of [['/catalog', 'Catálogo'], ['/status', 'Status'], ['/home', 'Sala'], ['/', 'Sala'], ['/rota-que-nao-existe', 'Sala']] as const) {
+    for (const [url, tab] of [['/catalog', 'Catálogo'], ['/status', 'Status'], ['/home', 'Início'], ['/', 'Início'], ['/rota-que-nao-existe', 'Início']] as const) {
       await page.goto(url);
       await expect(selectedTab(page, tab), url).toBeVisible();
     }
@@ -38,7 +38,7 @@ test.describe('Rotas da Home (/catalog, /home, /status)', () => {
     await expect.poll(() => path(page)).toBe('/catalog');
     await page.getByRole('tab', { name: 'Status' }).click();
     await expect.poll(() => path(page)).toBe('/status');
-    await page.getByRole('tab', { name: 'Sala' }).click();
+    await page.getByRole('tab', { name: 'Início' }).click();
     await expect.poll(() => path(page)).toBe('/home');
 
     await page.goBack(); // Status
@@ -59,7 +59,7 @@ test.describe('Rotas da Home (/catalog, /home, /status)', () => {
     await page.getByRole('button', { name: /Resultado/ }).click();
     await expect.poll(() => path(page)).toBe('/detail/series/tt1');
 
-    await page.getByRole('tab', { name: 'Sala' }).click();
+    await page.getByRole('tab', { name: 'Início' }).click();
     await expect.poll(() => path(page)).toBe('/home');
     expect(query(page)).toBe(''); // nada do catálogo ficou no endereço
 
@@ -71,14 +71,14 @@ test.describe('Rotas da Home (/catalog, /home, /status)', () => {
     await page.close();
   });
 
-  test('abrir direto um título (/detail/…?season=0), ir à Sala e voltar não reabre aquele título', async ({ browser }) => {
+  test('abrir direto um título (/detail/…?season=0), ir ao Início e voltar não reabre aquele título', async ({ browser }) => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await mockCatalog(page);
     await page.goto('/detail/anime/mal%3A5114?season=0');
     await expect(page.getByRole('heading', { name: 'Anime Três', level: 1 })).toBeVisible();
     await expect(page.getByRole('tab', { name: 'Especiais', selected: true })).toBeVisible();
 
-    await page.getByRole('tab', { name: 'Sala' }).click();
+    await page.getByRole('tab', { name: 'Início' }).click();
     await page.getByRole('tab', { name: 'Catálogo' }).click();
     await expect.poll(() => path(page)).toBe('/catalog');
     expect(query(page)).toBe('');

@@ -1,5 +1,5 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
-import { createRoom, joinRoom, newUser, openParticipants, submitName, testClientHeaders, video, waitReady } from './helpers';
+import { createEmptyRoom, createRoom, joinRoom, newUser, openParticipants, submitName, testClientHeaders, video, waitReady } from './helpers';
 
 /**
  * Transmissão de tela, de ponta a ponta com o motor FALSO: servidor, WebSocket, token, chaves, interface e ciclo de
@@ -281,27 +281,16 @@ test.describe('transmissão de tela (motor falso)', () => {
     await closeAll(host.context, stays.context, kicked.context, banned.context);
   });
 
-  test('"Compartilhar sua tela" na Home cria a sala sem vídeo e o Host transmite dali', async ({ browser }) => {
+  test('sala vazia pela nova Home permite o Host compartilhar tela pelo palco/dock', async ({ browser }) => {
     const host = await user(browser);
     const guest = await user(browser);
-    await host.page.goto('/');
-    const option = host.page.getByRole('button', { name: /Compartilhar sua tela/ });
-    await expect(option).toBeEnabled();
-    await expect(option).not.toContainText('Em breve');
-    await expect(option).toContainText('Beta');
-    await option.click();
-    await submitName(host.page, 'Ana');
-    await expect(host.page).toHaveURL(/\/room\/[A-Z0-9]+|\?room=[A-Z0-9]+/);
-    const hostUrl = new URL(host.page.url());
-    const code = /^\/room\/([A-Z0-9]+)/i.exec(hostUrl.pathname)?.[1] || hostUrl.searchParams.get('room')!;
+    const code = await createEmptyRoom(host.page, { username: 'Ana', roomName: 'Sala de Tela' });
     await expect(host.page.locator('#room-member-grid')).toBeVisible();
 
-    // sem vídeo, o Host transmite pela dock (o menu já abre automaticamente ou pelo botão da dock)
+    // sem vídeo, o Host vê o CTA "Compartilhar tela" na barra do palco vazio e o botão na dock
     await expect(shareBtn(host.page)).toBeVisible();
+    await host.page.getByRole('button', { name: 'Compartilhar tela' }).click();
     const menu = host.page.locator('#screen-share-menu');
-    if (!(await menu.isVisible().catch(() => false))) {
-      await shareBtn(host.page).click();
-    }
     await expect(menu).toBeVisible();
     const box = (await menu.boundingBox())!;
     const viewport = host.page.viewportSize()!;

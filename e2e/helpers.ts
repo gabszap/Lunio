@@ -39,16 +39,45 @@ export async function submitName(page: Page, name: string) {
   await dialog.locator('form button[type="submit"]').click();
 }
 
-/** Home → "Colar link de stream" → Criar sala. Devolve o código da sala. */
-export async function createRoom(page: Page, name: string, url = FIXTURE_URL): Promise<string> {
+export interface CreateEmptyRoomOptions {
+  roomName?: string;
+  username: string;
+  visibility?: 'public' | 'private';
+  password?: string;
+}
+
+/** Home → escolhe privacidade/nome (e senha opcional) → Criar sala → espera sala vazia conectada. Devolve o código. */
+export async function createEmptyRoom(page: Page, opts: CreateEmptyRoomOptions): Promise<string> {
   await page.goto('/');
-  await page.getByRole('button', { name: /Colar link de stream/ }).click();
-  await page.getByRole('textbox', { name: 'URL do stream' }).fill(url);
-  await page.getByRole('button', { name: 'Criar sala' }).click();
-  await submitName(page, name);
+  if (opts.visibility === 'private') {
+    await page.getByRole('radio', { name: /Sala privada/ }).click();
+    if (opts.password !== undefined) {
+      await page.getByLabel('Senha (opcional)').fill(opts.password);
+    }
+  }
+  await page.getByLabel('Nome da sala').fill(opts.roomName ?? 'Sala E2E');
+  const skipNamePrompt = await page.evaluate(
+    () => localStorage.getItem('lunio_skip_name_prompt') === 'true' && Boolean(localStorage.getItem('lunio_last_username'))
+  );
+  await page.getByRole('button', { name: 'Criar sala', exact: true }).click();
+  if (!skipNamePrompt) {
+    await submitName(page, opts.username);
+  }
   await expect(page).toHaveURL(/\/room\/[A-Z0-9]+|\?room=[A-Z0-9]+/);
   const u = new URL(page.url());
   const code = /^\/room\/([A-Z0-9]+)/i.exec(u.pathname)?.[1] || u.searchParams.get('room')!;
+  await expect(page.locator('#room-member-grid')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Escolher vídeo' })).toBeVisible();
+  return code;
+}
+
+/** Home → sala vazia → "Escolher vídeo" → aba "Link de stream" → "Tocar na sala". Devolve o código da sala. */
+export async function createRoom(page: Page, name: string, url = FIXTURE_URL): Promise<string> {
+  const code = await createEmptyRoom(page, { username: name, roomName: 'Sala E2E' });
+  await page.getByRole('button', { name: 'Escolher vídeo' }).click();
+  await page.getByRole('tab', { name: 'Link de stream' }).click();
+  await page.getByRole('textbox', { name: 'URL do stream' }).fill(url);
+  await page.getByRole('button', { name: 'Tocar na sala', exact: true }).click();
   await expect(page.locator('video')).toBeAttached();
   return code;
 }

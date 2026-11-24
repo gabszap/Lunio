@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Page, type Request } from '@playwright/test';
-import { newUser, submitName, waitReady } from './helpers';
+import { createEmptyRoom, newUser, waitReady } from './helpers';
 
 /**
  * Envio de arquivo em pedaços. O servidor de teste usa pedaços de 64 KiB (UPLOAD_CHUNK_MB, ver playwright.config.ts),
@@ -15,13 +15,13 @@ async function openUpload(page: Page, name: string, file?: { name: string; mimeT
   await page.addInitScript(() => {
     (window as unknown as { __lunioRetryDelays: number[] }).__lunioRetryDelays = [50, 50];
   });
-  await page.goto('/');
-  await page.getByRole('button', { name: /Enviar um arquivo/ }).click();
+  await createEmptyRoom(page, { username: name, roomName: 'Sala Upload' });
+  await page.getByRole('button', { name: 'Escolher vídeo' }).click();
+  await page.getByRole('tab', { name: 'Enviar um arquivo' }).click();
   await page.locator('input[type="file"]').setInputFiles(
     file ?? { name: 'episodio.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(FILE_SIZE, 5) }
   );
   await page.getByRole('button', { name: 'Enviar e criar sala' }).click();
-  await submitName(page, name);
 }
 
 const chunkOffsets = (requests: Request[]) =>

@@ -232,7 +232,7 @@ test('abas da Home e da barra lateral da sala animam indicador deslizante e troc
     const clipInitialHome = await indicator.evaluate((el) => getComputedStyle(el).clipPath);
     expect(clipInitialHome).toContain('inset(');
 
-    // Home abre em "Sala": Sala → Status (direita) → Catálogo (esquerda) → Sala (direita)
+    // Home abre em "Início": Início (0) → Status (2, direita) → Catálogo (1, esquerda) → Início (0, esquerda)
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.getByRole('tab', { name: 'Status' }).click();
     await expect.poll(() => indicator.evaluate((el) => getComputedStyle(el).clipPath)).not.toBe(clipInitialHome);
@@ -270,14 +270,14 @@ test('abas da Home e da barra lateral da sala animam indicador deslizante e troc
     await page.getByRole('button', { name: 'Catálogo', exact: true }).click();
     await expect(page.locator('.lu-tab-panel-left').first()).toBeVisible();
 
-    await page.getByRole('tab', { name: 'Sala' }).click();
-    await expect(page.locator('main')).toHaveClass(/lu-tab-panel-right/);
-
-    // Transição ao clicar em uma opção de "Crie uma sala" e ao voltar
-    await page.getByRole('button', { name: /Colar link de stream/ }).click();
-    await expect(page.locator('main')).toHaveClass(/lu-tab-panel-right/);
-    await page.getByRole('button', { name: /Voltar/ }).click();
+    await page.getByRole('tab', { name: 'Início' }).click();
     await expect(page.locator('main')).toHaveClass(/lu-tab-panel-left/);
+
+    // Alternador Criar sala / Entrar com código na nova Home
+    await page.getByRole('tab', { name: 'Entrar com código' }).click();
+    await expect(page.getByLabel('Link ou código da sala')).toBeVisible();
+    await page.getByRole('tab', { name: 'Criar sala' }).click();
+    await expect(page.getByLabel('Nome da sala')).toBeVisible();
 
     // Sala: indicador deslizante + transição direcional nas abas da barra lateral + campo de URL alinhado aos 360px do chat
     await createRoom(page, 'Ana', FIXTURE_URL);
