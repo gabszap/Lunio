@@ -199,6 +199,7 @@ export const RoomShell: React.FC<RoomShellProps> = ({
         roomCode={room.code}
         roomName={roomState?.name}
         visibility={roomState?.visibility}
+        locked={roomState?.locked}
         connected={room.connected}
         environment={environment}
         createdAt={createdAt}

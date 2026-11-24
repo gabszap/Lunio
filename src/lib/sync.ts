@@ -16,6 +16,7 @@ import type {
   RoomMember,
   RoomMedia,
   RoomVisibility,
+  RoomInitialSettings,
   ChatMessage,
   MemberPlaybackState,
   BannedMember,
@@ -58,6 +59,7 @@ class SyncManager implements ScreenSignals {
   private screenViewersListeners = new Set<(viewers: Array<{ id: string; username: string }>) => void>();
   private currentRoomId: string = '';
   private currentRoomPassword: string | undefined = undefined;
+  private pendingInitialSettings: RoomInitialSettings | undefined = undefined;
   private roomState: RoomState | null = null;
   private confirmedPlayback: { generation: number } | null = null;
   /** Votação para pular o capítulo atual (null = nenhuma). Vem do servidor. */
@@ -230,14 +232,17 @@ class SyncManager implements ScreenSignals {
   /**
    * Conecta ao servidor WebSocket da Watch Party
    */
-  public connect(customRoomId?: string, password?: string) {
+  public connect(customRoomId?: string, password?: string, initialSettings?: RoomInitialSettings) {
     const switching = Boolean(customRoomId && this.currentRoomId && customRoomId !== this.currentRoomId);
     if (password !== undefined) this.currentRoomPassword = password || undefined;
     else if (switching) this.currentRoomPassword = undefined;
 
+    if (initialSettings !== undefined) this.pendingInitialSettings = initialSettings;
+    else if (switching) this.pendingInitialSettings = undefined;
+
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      if (customRoomId && (customRoomId !== this.currentRoomId || password !== undefined)) {
-        this.joinRoom(customRoomId, password);
+      if (customRoomId && (customRoomId !== this.currentRoomId || password !== undefined || initialSettings !== undefined)) {
+        this.joinRoom(customRoomId, password, initialSettings);
       }
       return;
     }
@@ -273,6 +278,7 @@ class SyncManager implements ScreenSignals {
       // Sem sala definida: não conecta automaticamente. Opera em Modo Solo desconectado.
       logger.info('[Sala] Sem sala: assistindo sozinho');
       this.currentRoomId = '';
+      this.pendingInitialSettings = undefined;
       this.isConnected = false;
       this.isConnecting = false;
       this.notifyState();
@@ -312,11 +318,14 @@ class SyncManager implements ScreenSignals {
         this.pendingBeats.clear();
 
         // Entra na sala
+        const pendingSettings = this.pendingInitialSettings;
+        this.pendingInitialSettings = undefined;
         this.send({
           type: 'room:join',
           roomId: this.currentRoomId,
           password: this.currentRoomPassword,
           accessToken: getSavedRoomToken(this.currentRoomId),
+          ...(pendingSettings ? { initialSettings: pendingSettings } : {}),
           user: this.user,
         });
 
@@ -448,23 +457,29 @@ class SyncManager implements ScreenSignals {
     this.heartbeatBurst = [];
   }
 
-  public joinRoom(roomId: string, password?: string) {
+  public joinRoom(roomId: string, password?: string, initialSettings?: RoomInitialSettings) {
     const switching = Boolean(this.currentRoomId && this.currentRoomId !== roomId);
     this.confirmedPlayback = null;
     this.currentRoomId = roomId;
     if (password !== undefined) this.currentRoomPassword = password || undefined;
     else if (switching) this.currentRoomPassword = undefined;
 
+    if (initialSettings !== undefined) this.pendingInitialSettings = initialSettings;
+    else if (switching) this.pendingInitialSettings = undefined;
+
     if (this.isConnected && this.ws?.readyState === WebSocket.OPEN) {
+      const pendingSettings = this.pendingInitialSettings;
+      this.pendingInitialSettings = undefined;
       this.send({
         type: 'room:join',
         roomId,
         password: this.currentRoomPassword,
         accessToken: getSavedRoomToken(roomId),
+        ...(pendingSettings ? { initialSettings: pendingSettings } : {}),
         user: this.user,
       });
     } else {
-      this.connect(roomId, this.currentRoomPassword);
+      this.connect(roomId, this.currentRoomPassword, this.pendingInitialSettings);
     }
   }
 
@@ -483,6 +498,7 @@ class SyncManager implements ScreenSignals {
     this.isConnecting = false;
     this.currentRoomId = '';
     this.currentRoomPassword = undefined;
+    this.pendingInitialSettings = undefined;
     const hadScreen = Boolean(this.roomState?.screen);
     this.roomState = null;
     this.confirmedPlayback = null;
@@ -530,6 +546,7 @@ class SyncManager implements ScreenSignals {
 
     switch (msg.type) {
       case 'room:state': {
+        this.pendingInitialSettings = undefined;
         if (msg.accessToken) setRoomToken(msg.state.roomId, msg.accessToken);
         if (msg.assignedUserId && this.user.id !== msg.assignedUserId) {
           this.user = {
@@ -767,6 +784,7 @@ class SyncManager implements ScreenSignals {
           name: msg.name,
           visibility: msg.visibility,
           hasPassword: msg.hasPassword,
+          locked: msg.locked,
           autoPauseOnBuffer: msg.autoPauseOnBuffer,
         };
         this.notifyState();
@@ -890,6 +908,7 @@ class SyncManager implements ScreenSignals {
     name?: string;
     visibility?: RoomVisibility;
     password?: string | null;
+    locked?: boolean;
     autoPauseOnBuffer?: boolean;
   }) {
     if (!this.isConnected || !this.isRoomHost()) return;
