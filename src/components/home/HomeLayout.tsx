@@ -3,9 +3,9 @@ import { Activity, Github, Globe, Home, LayoutGrid } from 'lucide-react';
 import { Logo, cx, useSlidingPill } from '../ui';
 import { LANGS, setLang, t, msg, useLang } from '../../lib/i18n';
 
-export type HomeTab = 'catalog' | 'room' | 'status';
+export type HomeTab = 'catalog' | 'room' | 'rooms' | 'status';
 
-const TAB_ORDER: Record<HomeTab, number> = { room: 0, catalog: 1, status: 2 };
+const TAB_ORDER: Record<HomeTab, number> = { room: 0, rooms: 1, catalog: 2, status: 3 };
 
 export const REPO_URL = 'https://github.com/gabszap/Lunio';
 
@@ -23,22 +23,11 @@ interface HomeLayoutProps {
   centered?: boolean;
 }
 
-type NavItem =
-  | { kind: 'tab'; value: HomeTab; label: string; icon: React.ReactNode }
-  | { kind: 'disabled'; id: string; label: string; badge: string; title: string; icon: React.ReactNode };
-
-const NAV_ITEMS: NavItem[] = [
-  { kind: 'tab', value: 'room', label: msg('Início'), icon: <Home size={16} strokeWidth={1.85} aria-hidden="true" /> },
-  {
-    kind: 'disabled',
-    id: 'rooms',
-    label: msg('Salas'),
-    badge: msg('Em breve'),
-    title: msg('Listagem de salas públicas em breve'),
-    icon: <Globe size={16} strokeWidth={1.85} aria-hidden="true" />,
-  },
-  { kind: 'tab', value: 'catalog', label: msg('Catálogo'), icon: <LayoutGrid size={16} strokeWidth={1.85} aria-hidden="true" /> },
-  { kind: 'tab', value: 'status', label: msg('Status'), icon: <Activity size={16} strokeWidth={1.85} aria-hidden="true" /> },
+const TABS: Array<{ value: HomeTab; label: string; icon: React.ReactNode }> = [
+  { value: 'room', label: msg('Início'), icon: <Home size={16} strokeWidth={1.85} aria-hidden="true" /> },
+  { value: 'rooms', label: msg('Salas'), icon: <Globe size={16} strokeWidth={1.85} aria-hidden="true" /> },
+  { value: 'catalog', label: msg('Catálogo'), icon: <LayoutGrid size={16} strokeWidth={1.85} aria-hidden="true" /> },
+  { value: 'status', label: msg('Status'), icon: <Activity size={16} strokeWidth={1.85} aria-hidden="true" /> },
 ];
 
 /** Troca de idioma (PT/EN). Só na Home: o app inteiro remonta com o idioma novo. */
@@ -110,24 +99,7 @@ export const HomeLayout: React.FC<HomeLayoutProps> = ({ tab, stepKey, onTabChang
               style={{ clipPath }}
             />
           )}
-          {NAV_ITEMS.map((item) => {
-            if (item.kind === 'disabled') {
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  disabled
-                  title={t(item.title)}
-                  className="relative z-10 appearance-none inline-flex items-center justify-center gap-1.5 h-9 sm:h-10 px-3.5 sm:px-4 rounded-full bg-transparent text-[13.5px] sm:text-[14px] font-medium text-lu-disabled whitespace-nowrap cursor-not-allowed select-none"
-                >
-                  {item.icon}
-                  <span>{t(item.label)}</span>
-                  <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-lu-surface border border-lu-border text-[10px] font-semibold leading-none tracking-[0.02em] text-lu-muted">
-                    {t(item.badge)}
-                  </span>
-                </button>
-              );
-            }
+          {TABS.map((item) => {
             const selected = item.value === tab;
             return (
               <button

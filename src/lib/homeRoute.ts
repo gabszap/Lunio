@@ -2,17 +2,18 @@ import type { HomeTab } from '../components/home/HomeLayout';
 import { detailPath, isLibraryPath, readDetailFromUrl } from './searchUrl';
 
 /**
- * Rotas da Home: `/catalog` (Catálogo), `/home` (Sala) e `/status` (Status); `/detail/<tipo>/<id>` é um título aberto no Catálogo. A raiz `/` continua sendo a Sala (os links de
+ * Rotas da Home: `/catalog` (Catálogo), `/home` (Sala), `/rooms` (Salas) e `/status` (Status); `/detail/<tipo>/<id>` é um título aberto no Catálogo. A raiz `/` continua sendo a Sala (os links de
  * sala `/?room=ABC` seguem valendo). Trocar de aba empurra a rota no histórico (o Voltar do navegador volta à aba anterior);
  * a busca, o título e a temporada do catálogo são parâmetros desta rota e saem dela quando se sai do catálogo.
  */
 
-export const TAB_PATHS: Record<HomeTab, string> = { catalog: '/catalog', room: '/home', status: '/status' };
+export const TAB_PATHS: Record<HomeTab, string> = { catalog: '/catalog', room: '/home', rooms: '/rooms', status: '/status' };
 
 /** Aba de um caminho; `/`, `/home` e qualquer rota desconhecida são a Sala. */
 export function tabFromPath(pathname: string): HomeTab {
   const p = pathname.replace(/\/+$/, '') || '/';
   if (p === TAB_PATHS.catalog || isLibraryPath(p) || p === '/calendar' || p.startsWith('/detail/') || p.startsWith('/discover/')) return 'catalog';
+  if (p === TAB_PATHS.rooms) return 'rooms';
   if (p === TAB_PATHS.status) return 'status';
   return 'room';
 }
@@ -28,7 +29,7 @@ export function pushTabUrl(tab: HomeTab) {
   const url = new URL(window.location.href);
   url.pathname = TAB_PATHS[tab];
   if (tab !== 'catalog') for (const k of CATALOG_PARAMS) url.searchParams.delete(k);
-  if (tab !== 'room') url.searchParams.delete('room'); // um link de sala não acompanha o catálogo nem o status
+  if (tab !== 'room') url.searchParams.delete('room'); // um link de sala não acompanha catálogo, salas nem status
   window.history.pushState(null, '', url.pathname + url.search + url.hash);
 }
 
