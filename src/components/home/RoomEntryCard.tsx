@@ -113,22 +113,32 @@ export const RoomEntryCard: React.FC<RoomEntryCardProps> = ({
   const [roomPassword, setRoomPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const roomNameRef = useRef<HTMLInputElement>(null);
+  const visibilityButtonRefs = useRef<Record<RoomVisibility, HTMLButtonElement | null>>({
+    public: null,
+    private: null,
+  });
 
   // Fluxo "Entrar com código"
   const [joinValue, setJoinValue] = useState(joinPrefill?.code ?? '');
   const [joinError, setJoinError] = useState<JoinError | null>(joinPrefill?.error ?? null);
   const [checkingJoin, setCheckingJoin] = useState(false);
-  const mountedRef = useRef(true);
+  const joinReqRef = useRef(0);
+
+  const invalidateJoinCheck = () => {
+    joinReqRef.current += 1;
+    setCheckingJoin(false);
+  };
 
   useEffect(() => {
-    mountedRef.current = true;
     return () => {
-      mountedRef.current = false;
+      joinReqRef.current += 1;
     };
   }, []);
 
   useEffect(() => {
     if (joinPrefill?.code || joinPrefill?.error) {
+      joinReqRef.current += 1;
+      setCheckingJoin(false);
       setMode('join');
       setJoinValue(joinPrefill.code || '');
       setJoinError(joinPrefill.error ?? null);
@@ -161,6 +171,7 @@ export const RoomEntryCard: React.FC<RoomEntryCardProps> = ({
   };
 
   const handleModeChange = (next: EntryMode) => {
+    if (next !== mode) invalidateJoinCheck();
     setMode(next);
     if (next === 'create' && (joinPrefill?.code || joinPrefill?.error || joinError === 'closed')) {
       setJoinError(null);
@@ -192,9 +203,10 @@ export const RoomEntryCard: React.FC<RoomEntryCardProps> = ({
       setJoinError('invalid');
       return;
     }
+    const reqId = ++joinReqRef.current;
     setCheckingJoin(true);
     const info = await checkRoom(code);
-    if (!mountedRef.current) return;
+    if (joinReqRef.current !== reqId) return;
     setCheckingJoin(false);
     if (info && !info.exists) {
       setJoinError(info.closed ? 'closed' : 'not_found');
@@ -204,12 +216,14 @@ export const RoomEntryCard: React.FC<RoomEntryCardProps> = ({
   };
 
   const handleResetClosed = () => {
+    invalidateJoinCheck();
     setJoinValue('');
     setJoinError(null);
     onClearJoinPrefill?.();
   };
 
   const handleCreateFromClosed = () => {
+    invalidateJoinCheck();
     setJoinValue('');
     setJoinError(null);
     onClearJoinPrefill?.();
@@ -219,7 +233,9 @@ export const RoomEntryCard: React.FC<RoomEntryCardProps> = ({
   const handleVisibilityKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
       e.preventDefault();
-      setVisibility((prev) => (prev === 'public' ? 'private' : 'public'));
+      const next: RoomVisibility = visibility === 'public' ? 'private' : 'public';
+      setVisibility(next);
+      visibilityButtonRefs.current[next]?.focus();
     }
   };
 
@@ -308,9 +324,13 @@ export const RoomEntryCard: React.FC<RoomEntryCardProps> = ({
                 return (
                   <button
                     key={opt.value}
+                    ref={(el) => {
+                      visibilityButtonRefs.current[opt.value] = el;
+                    }}
                     type="button"
                     role="radio"
                     aria-checked={selected}
+                    tabIndex={selected ? 0 : -1}
                     onClick={() => setVisibility(opt.value)}
                     onKeyDown={handleVisibilityKeyDown}
                     className={cx(
@@ -460,6 +480,7 @@ export const RoomEntryCard: React.FC<RoomEntryCardProps> = ({
               invalid={Boolean(joinError)}
               aria-describedby="room-code-msg"
               onChange={(e) => {
+                invalidateJoinCheck();
                 setJoinValue(e.target.value);
                 if (joinError) setJoinError(null);
               }}
@@ -469,6 +490,7 @@ export const RoomEntryCard: React.FC<RoomEntryCardProps> = ({
                   <ClearButton
                     label={t('Limpar')}
                     onClick={() => {
+                      invalidateJoinCheck();
                       setJoinValue('');
                       setJoinError(null);
                     }}
