@@ -17,6 +17,7 @@ import { MemberStrip } from './MemberStrip';
 import { RoomDock } from './RoomDock';
 import { RoomSidebar, type RoomSidebarTab } from './RoomSidebar';
 import { MediaPickerModal } from './MediaPickerModal';
+import { useRoomPreviewPublisher } from './useRoomPreviewPublisher';
 
 export interface RoomShellProps {
   onHome: () => void;
@@ -106,6 +107,16 @@ export const RoomShell: React.FC<RoomShellProps> = ({
   const screenLive =
     screenShare.host.status === 'live' || screenShare.host.status === 'starting' || screenShare.covering;
   const showMediaStage = hasSource || screenLive;
+
+  useRoomPreviewPublisher({
+    connected: room.connected,
+    isHost: room.isHost,
+    roomCode: room.code,
+    visibility: roomState?.visibility,
+    locked: roomState?.locked,
+    hasSource,
+    screenStream: screenShare.host.preview,
+  });
 
   const handleLogoClick = useCallback(() => {
     if (room.connected) {

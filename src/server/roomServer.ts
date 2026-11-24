@@ -25,6 +25,9 @@ import type {
   RoomMedia,
   RoomVisibility,
   RoomInitialSettings,
+  PublicRoomActivity,
+  PublicRoomMember,
+  PublicRoomSummary,
   ChatMessage,
   MemberPlaybackState,
   BannedMember,
@@ -152,6 +155,20 @@ const TAKEN_LINK_TTL_MS = 2 * 60_000;
 /** Identidade do vídeo que pode ir aos outros: só as que não carregam o link (`ih:`/`vh:`). */
 const FINGERPRINT_RE = /^(ih|vh):[\w:|.\- ]{1,300}$/i;
 
+/** Tempo máximo de validade de um preview efêmero de sala pública (só em RAM). */
+export const PREVIEW_TTL_MS = 90_000;
+/** Limite máximo de tamanho de um preview de sala pública (64 KiB). */
+export const PREVIEW_MAX_BYTES = 65_536;
+
+export type RoomPreviewMimeType = 'image/jpeg' | 'image/webp';
+
+interface RoomPreviewEntry {
+  data: Buffer;
+  mimeType: RoomPreviewMimeType;
+  version: number;
+  updatedAt: number;
+}
+
 export class RoomManager {
   private rooms = new Map<string, RoomInternal>();
   private sessions = new WeakMap<WebSocket, ClientSession>();
@@ -163,6 +180,9 @@ export class RoomManager {
   private persistTimers = new Map<string, NodeJS.Timeout>();
   private lastPersisted = new Map<string, number>();
   private pendingSaves = new Set<Promise<void>>();
+  /** Previews efêmeros de salas públicas (vivem apenas em RAM; nunca vão ao Redis nem ao RoomState). */
+  private roomPreviews = new Map<string, RoomPreviewEntry>();
+  private previewVersions = new Map<string, number>();
 
   constructor(private readonly store: RoomStore = roomStore) {}
 
@@ -216,6 +236,93 @@ export class RoomManager {
       for (const c of room.clients.values()) people.add(baseUserId(c.userId));
     }
     return { rooms, people: people.size };
+  }
+
+  /** Lista exclusivamente salas públicas, abertas e com pelo menos 1 pessoa conectada. */
+  public listPublicRooms(): PublicRoomSummary[] {
+    const now = Date.now();
+    const list: PublicRoomSummary[] = [];
+
+    for (const room of this.rooms.values()) {
+      if (room.visibility !== 'public' || room.locked || room.clients.size === 0) continue;
+
+      const byBase = new Map<string, PublicRoomMember>();
+      for (const c of room.clients.values()) {
+        const bid = baseUserId(c.userId);
+        const isHost = c.userId === room.hostId;
+        const prev = byBase.get(bid);
+        if (!prev || (isHost && !prev.isHost)) {
+          byBase.set(bid, {
+            username: c.username,
+            ...(c.avatarUrl ? { avatarUrl: c.avatarUrl } : {}),
+            isHost,
+          });
+        }
+      }
+
+      const ordered = Array.from(byBase.values()).sort((a, b) => (a.isHost === b.isHost ? 0 : a.isHost ? -1 : 1));
+      const hostName = ordered.find((m) => m.isHost)?.username ?? ordered[0]?.username ?? '';
+      const activity: PublicRoomActivity = room.screen ? 'screen' : room.media ? 'media' : 'idle';
+      const preview = this.roomPreviews.get(room.roomId);
+      const hasValidPreview = Boolean(preview && now - preview.updatedAt <= PREVIEW_TTL_MS);
+      if (preview && !hasValidPreview) this.roomPreviews.delete(room.roomId);
+
+      list.push({
+        code: room.roomId,
+        name: room.name || room.roomId,
+        hostName,
+        membersCount: ordered.length,
+        members: ordered.slice(0, 8),
+        createdAt: room.createdAt,
+        hasMedia: Boolean(room.media),
+        mediaTitle: room.media?.title || null,
+        screenLive: Boolean(room.screen?.info.live),
+        activity,
+        previewUrl: hasValidPreview ? `/api/rooms/${encodeURIComponent(room.roomId)}/preview?v=${preview!.version}` : null,
+      });
+    }
+
+    return list;
+  }
+
+  /** Grava preview efêmero em RAM apenas para sala pública, aberta e com clientes. */
+  public setRoomPreview(
+    roomId: string,
+    data: Buffer,
+    mimeType: RoomPreviewMimeType
+  ): { ok: true; version: number } | { ok: false; reason: 'not_found' | 'not_public' } {
+    const room = this.rooms.get(roomId);
+    if (!room) return { ok: false, reason: 'not_found' };
+    if (room.visibility !== 'public' || room.locked || room.clients.size === 0) {
+      return { ok: false, reason: 'not_public' };
+    }
+    const version = (this.previewVersions.get(roomId) ?? 0) + 1;
+    this.previewVersions.set(roomId, version);
+    this.roomPreviews.set(roomId, {
+      data: Buffer.from(data),
+      mimeType,
+      version,
+      updatedAt: Date.now(),
+    });
+    return { ok: true, version };
+  }
+
+  /** Retorna o preview efêmero apenas se a sala continuar pública, aberta, com clientes e dentro do TTL. */
+  public getRoomPreview(roomId: string): { data: Buffer; mimeType: RoomPreviewMimeType; version: number } | null {
+    const room = this.rooms.get(roomId);
+    if (!room || room.visibility !== 'public' || room.locked || room.clients.size === 0) return null;
+    const preview = this.roomPreviews.get(roomId);
+    if (!preview) return null;
+    if (Date.now() - preview.updatedAt > PREVIEW_TTL_MS) {
+      this.roomPreviews.delete(roomId);
+      return null;
+    }
+    return { data: preview.data, mimeType: preview.mimeType, version: preview.version };
+  }
+
+  /** Remove o preview em RAM de uma sala. */
+  public clearRoomPreview(roomId: string): void {
+    this.roomPreviews.delete(roomId);
   }
 
   /** Ids dos envios que a sala usa agora: a mídia atual e os itens da fila. */
@@ -278,6 +385,7 @@ export class RoomManager {
     if (screen.rotateTimer) clearTimeout(screen.rotateTimer);
     const hadViewers = screen.viewers.size > 0;
     room.screen = undefined;
+    this.clearRoomPreview(room.roomId);
     console.log(`[Screen] Transmissão encerrada na sala "${room.roomId}" (${reason}).`);
     if (reason !== 'room_closed') {
       this.broadcast(room, { type: 'screen:state', screen: null });
@@ -920,6 +1028,7 @@ export class RoomManager {
       if (session) {
         room.clients.delete(ws);
         this.sessions.delete(ws);
+        if (room.clients.size === 0) this.clearRoomPreview(roomId);
         this.recheckAutoPauseAfterLeave(room);
         console.log(`[WatchParty] 🔌 Socket de "${session.username}" desconectado na sala "${roomId}". Restam ativos: ${room.clients.size}`);
 
@@ -989,6 +1098,8 @@ export class RoomManager {
     if (room.hostGraceTimer) clearTimeout(room.hostGraceTimer);
     this.clearAutoPause(room);
     this.endScreen(room, 'room_closed');
+    this.clearRoomPreview(roomId);
+    this.previewVersions.delete(roomId);
     const pending = this.persistTimers.get(roomId);
     if (pending) clearTimeout(pending);
     this.persistTimers.delete(roomId);
@@ -1321,10 +1432,13 @@ export class RoomManager {
           currentRoom.visibility = msg.visibility;
           if (msg.visibility === 'public') {
             currentRoom.passwordHash = undefined;
+          } else {
+            this.clearRoomPreview(currentRoom.roomId);
           }
         }
         if (typeof msg.locked === 'boolean') {
           currentRoom.locked = msg.locked;
+          if (msg.locked) this.clearRoomPreview(currentRoom.roomId);
         }
         if (typeof msg.autoPauseOnBuffer === 'boolean') {
           currentRoom.autoPauseOnBuffer = msg.autoPauseOnBuffer;
@@ -1344,6 +1458,7 @@ export class RoomManager {
               if (this.rooms.get(roomRef.roomId) !== roomRef || roomRef.hostId !== hostUserId) return;
               roomRef.passwordHash = hashed;
               roomRef.visibility = 'private';
+              this.clearRoomPreview(roomRef.roomId);
               this.broadcast(roomRef, this.roomSettingsUpdatePayload(roomRef));
               this.schedulePersist(roomRef, 250);
             });
@@ -1610,6 +1725,7 @@ export class RoomManager {
 
         this.clearSkipVote(currentRoom);
         this.clearAutoPause(currentRoom);
+        this.clearRoomPreview(currentRoom.roomId);
         console.log(`[WatchParty] 🎬 Nova mídia definida na sala "${currentRoom.roomId}": "${msg.media.title}"`);
         // Trocou de vídeo: o envio que estava tocando (e mais nenhum item da sala) pode sair do disco
         pruneRoomUploads(currentRoom.roomId, this.referencedUploadIds(currentRoom.roomId));

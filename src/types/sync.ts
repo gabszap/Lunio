@@ -5,6 +5,28 @@ export type MemberPlaybackState = 'waiting' | 'loading' | 'ready' | 'playing' | 
 
 export type RoomVisibility = 'public' | 'private';
 
+export type PublicRoomActivity = 'screen' | 'media' | 'idle';
+
+export interface PublicRoomMember {
+  username: string;
+  avatarUrl?: string;
+  isHost: boolean;
+}
+
+export interface PublicRoomSummary {
+  code: string;
+  name: string;
+  hostName: string;
+  membersCount: number;
+  members: PublicRoomMember[]; // ordenado (Host primeiro), máx. 8 entradas
+  createdAt: number;
+  hasMedia: boolean;
+  mediaTitle: string | null;
+  screenLive: boolean;
+  activity: PublicRoomActivity;
+  previewUrl: string | null; // `/api/rooms/${code}/preview?v=${version}` ou null
+}
+
 export interface RoomInitialSettings {
   name?: string;
   visibility?: RoomVisibility;

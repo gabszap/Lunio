@@ -18,6 +18,7 @@ import { LastRoomCard } from './components/home/LastRoomCard';
 import { RoomEntryCard, type CreateRoomInput } from './components/home/RoomEntryCard';
 import { StreamStep } from './components/home/StreamStep';
 import { JoinError, checkRoom } from './components/home/RoomSteps';
+import { RoomsTab } from './components/home/RoomsTab';
 import { StatusTab } from './components/home/StatusTab';
 import type { WatchIntent } from './components/catalog/CatalogTab';
 import type { StreamOption } from './lib/streams';
@@ -690,7 +691,7 @@ export default function App() {
             if (tab !== 'room') setHomeStep('entry');
           }}
           onLogo={() => goHome('room')}
-          centered={homeTab !== 'catalog'}
+          centered={homeTab === 'room' || homeTab === 'status'}
         >
           {homeTab === 'catalog' ? (
             <Suspense fallback={<PanelFallback />}>
@@ -707,6 +708,8 @@ export default function App() {
                 onCreateRoom={() => goHome('room')}
               />
             </Suspense>
+          ) : homeTab === 'rooms' ? (
+            <RoomsTab onJoinRoom={requestJoin} onCreateRoom={() => goHome('room')} />
           ) : homeTab === 'status' ? (
             <StatusTab environment={environment} room={roomInfo} />
           ) : (

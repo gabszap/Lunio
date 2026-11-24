@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { createEmptyRoom, newUser, submitName } from './helpers';
 
 test.describe('Redesign da Home e criação de sala vazia', () => {
-  test('exibe hero, pílula de presença e cápsula do topo com Salas em breve', async ({ browser }) => {
+  test('exibe hero, pílula de presença e cápsula do topo com aba Salas habilitada', async ({ browser }) => {
     const { context, page } = await newUser(browser);
     try {
       // Sem pessoas online: pílula usa fallback padrão
@@ -16,12 +16,18 @@ test.describe('Redesign da Home e criação de sala vazia', () => {
 
       const nav = page.getByRole('tablist', { name: 'Navegação principal' });
       await expect(nav.getByRole('tab', { name: 'Início', selected: true })).toBeVisible();
+      const salasTab = nav.getByRole('tab', { name: 'Salas' });
+      await expect(salasTab).toBeEnabled();
       await expect(nav.getByRole('tab', { name: 'Catálogo' })).toBeEnabled();
       await expect(nav.getByRole('tab', { name: 'Status' })).toBeEnabled();
 
-      const salasBtn = nav.getByRole('button', { name: /Salas/ });
-      await expect(salasBtn).toBeDisabled();
-      await expect(salasBtn).toContainText('Em breve');
+      await salasTab.click();
+      await expect(page).toHaveURL(/\/rooms$/);
+      await expect(nav.getByRole('tab', { name: 'Salas', selected: true })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1, name: 'Salas públicas' })).toBeVisible();
+
+      await nav.getByRole('tab', { name: 'Início' }).click();
+      await expect(page).toHaveURL(/\/home$/);
 
       // Com pessoas online: pílula mostra contagem real
       await page.unroute('**/api/presence');
