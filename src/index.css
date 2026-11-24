@@ -55,14 +55,6 @@
   input[type='range'] {
     accent-color: var(--color-lu-accent);
   }
-
-  @media (prefers-reduced-motion: reduce) {
-    .animate-lu-spin,
-    .animate-spin,
-    .animate-pulse {
-      animation: none;
-    }
-  }
 }
 
 @layer utilities {
@@ -495,6 +487,9 @@ html.is-fullscreen .player-menu-panel {
   .lu-action-btn {
     transition: none;
   }
+  .animate-lu-spin,
+  .animate-spin,
+  .animate-pulse,
   .lu-tab-panel-right,
   .lu-tab-panel-left,
   .lu-view-enter,
