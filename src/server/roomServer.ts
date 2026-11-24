@@ -24,6 +24,7 @@ import type {
   RoomMember,
   RoomMedia,
   RoomVisibility,
+  RoomInitialSettings,
   ChatMessage,
   MemberPlaybackState,
   BannedMember,
@@ -77,6 +78,7 @@ interface RoomInternal {
   name?: string;
   visibility: RoomVisibility;
   passwordHash?: string;
+  locked: boolean;
   autoPauseOnBuffer: boolean;
   autoPausedBy?: string;
   autoPauseTimer?: NodeJS.Timeout;
@@ -155,6 +157,7 @@ export class RoomManager {
   private sessions = new WeakMap<WebSocket, ClientSession>();
   private socketIps = new WeakMap<WebSocket, string>();
   private socketQueues = new WeakMap<WebSocket, Promise<void>>();
+  private pendingCreations = new Map<string, Promise<void>>();
   // Salas removidas por inatividade (para a Home distinguir "encerrada" de "código errado")
   private closedRooms = new Map<string, number>();
   private persistTimers = new Map<string, NodeJS.Timeout>();
@@ -185,6 +188,7 @@ export class RoomManager {
     name?: string;
     visibility?: RoomVisibility;
     hasPassword?: boolean;
+    locked?: boolean;
   } {
     const room = this.rooms.get(roomId);
     if (room) {
@@ -196,6 +200,7 @@ export class RoomManager {
         name: room.name,
         visibility: room.visibility,
         hasPassword: Boolean(room.passwordHash),
+        locked: room.locked,
       };
     }
     return { exists: false, closed: this.closedRooms.has(roomId), members: 0, hasMedia: false };
@@ -461,14 +466,21 @@ export class RoomManager {
     return Math.max(0, playback.position + elapsed * playback.rate);
   }
 
-  public getOrCreateRoom(roomId: string, initialHostId?: string): RoomInternal {
+  public getOrCreateRoom(
+    roomId: string,
+    initialHostId?: string,
+    initialSettings?: { name?: string; visibility?: RoomVisibility; passwordHash?: string }
+  ): RoomInternal {
     let room = this.rooms.get(roomId);
     if (!room) {
       const now = Date.now();
       room = {
         roomId,
         hostId: initialHostId || '',
-        visibility: 'public',
+        name: initialSettings?.name,
+        visibility: initialSettings?.visibility ?? 'public',
+        passwordHash: initialSettings?.passwordHash,
+        locked: false,
         autoPauseOnBuffer: false,
         createdAt: now,
         media: null,
@@ -531,6 +543,7 @@ export class RoomManager {
       name: room.name,
       visibility: room.visibility,
       hasPassword: Boolean(room.passwordHash),
+      locked: room.locked,
       autoPauseOnBuffer: room.autoPauseOnBuffer,
       createdAt: room.createdAt,
       media: room.media,
@@ -581,18 +594,84 @@ export class RoomManager {
     }, excludeWs);
   }
 
+  /** Verifica se o token assinado comprova reconexão legítima de membro/Host da sala (impede spoofing de `user.id`). */
+  private isAuthorizedRoomReconnect(room: RoomInternal, roomId: string, uid: string, accessToken?: string): boolean {
+    if (!accessToken) return false;
+    const tokenPayload = verifyToken(accessToken);
+    const hasValidRoomToken =
+      tokenPayload?.k === 'room' && tokenPayload.r === roomId && baseUserId(tokenPayload.u) === uid;
+    if (!hasValidRoomToken) return false;
+    const isExistingHost = Boolean(room.hostId) && uid === baseUserId(room.hostId);
+    const isAlreadyMember =
+      Array.from(room.clients.values()).some((c) => baseUserId(c.userId) === uid) ||
+      Array.from(room.pendingLeaves.values()).some(
+        (p) => !p.session.removedByHost && baseUserId(p.session.userId) === uid
+      );
+    return isExistingHost || isAlreadyMember;
+  }
+
+  private sanitizeInitialSettings(initialSettings?: RoomInitialSettings): {
+    name?: string;
+    visibility: RoomVisibility;
+    password: string;
+  } {
+    const rawName = typeof initialSettings?.name === 'string' ? initialSettings.name.trim().slice(0, 48) : '';
+    const visibility: RoomVisibility = initialSettings?.visibility === 'private' ? 'private' : 'public';
+    const password =
+      visibility === 'private' && typeof initialSettings?.password === 'string'
+        ? initialSettings.password.trim().slice(0, 64)
+        : '';
+    return { name: rawName || undefined, visibility, password };
+  }
+
+  private roomSettingsUpdatePayload(room: RoomInternal): Extract<ServerMessage, { type: 'room:settings_update' }> {
+    return {
+      type: 'room:settings_update',
+      name: room.name,
+      visibility: room.visibility,
+      hasPassword: Boolean(room.passwordHash),
+      locked: room.locked,
+      autoPauseOnBuffer: room.autoPauseOnBuffer,
+    };
+  }
+
   public handleJoin(
     ws: WebSocket,
     roomId: string,
     user: { id: string; username: string; avatarUrl?: string; platform?: 'discord' | 'web' },
     password?: string,
-    accessToken?: string
+    accessToken?: string,
+    initialSettings?: RoomInitialSettings
   ): void | Promise<void> {
+    return this.runJoin(ws, roomId, user, password, accessToken, initialSettings, false);
+  }
+
+  private runJoin(
+    ws: WebSocket,
+    roomId: string,
+    user: { id: string; username: string; avatarUrl?: string; platform?: 'discord' | 'web' },
+    password: string | undefined,
+    accessToken: string | undefined,
+    initialSettings: RoomInitialSettings | undefined,
+    alreadyQueued: boolean
+  ): void | Promise<void> {
+    // Se há uma criação com senha em andamento para esta sala, aguarda concluir para evitar corrida durante o scrypt
+    if (this.pendingCreations.has(roomId)) {
+      const waitAndRetry = async () => {
+        while (this.pendingCreations.has(roomId)) {
+          await this.pendingCreations.get(roomId)!.catch(() => {});
+        }
+        if (ws.readyState !== WebSocket.OPEN) return;
+        await this.runJoin(ws, roomId, user, password, accessToken, initialSettings, true);
+      };
+      return alreadyQueued ? waitAndRetry() : this.enqueueSocketOp(ws, waitAndRetry);
+    }
+
     const prevSession = this.sessions.get(ws);
     const existing = this.rooms.get(roomId);
     const uid = baseUserId(user.id);
 
-    // 1. Checa banimento ANTES de senha/tranca e ANTES de sair da sala anterior (evita oráculo de senha e ejeção indevida)
+    // 1. Checa banimento ANTES de senha/tranca e ANTES de sair da sala anterior (evita oráculo de senha/tranca e ejeção indevida)
     if (existing?.bannedMembers?.has(uid)) {
       console.log(`[WatchParty] ⛔ Usuário banido "${user.username}" (${user.id}) tentou entrar na sala "${roomId}".`);
       this.send(ws, { type: 'error', message: 'Você foi banido desta sala pelo Host.', code: 'banned' });
@@ -604,22 +683,21 @@ export class RoomManager {
       return;
     }
 
-    // 2. Controle de acesso para salas privadas já existentes:
-    // reconexão privilegiada só passa com token assinado pelo servidor (impede spoofing de `user.id`)
-    if (existing && existing.visibility === 'private') {
-      const tokenPayload = verifyToken(accessToken);
-      const hasValidRoomToken =
-        tokenPayload?.k === 'room' && tokenPayload.r === roomId && baseUserId(tokenPayload.u) === uid;
-      const isExistingHost = Boolean(existing.hostId) && uid === baseUserId(existing.hostId);
-      const isAlreadyMember =
-        Array.from(existing.clients.values()).some((c) => baseUserId(c.userId) === uid) ||
-        Array.from(existing.pendingLeaves.values()).some(
-          (p) => !p.session.removedByHost && baseUserId(p.session.userId) === uid
-        );
-      const authorizedByToken = hasValidRoomToken && (isExistingHost || isAlreadyMember);
+    if (existing) {
+      // Sala existente: ignora initialSettings por completo.
+      // 2. Token assinado válido libera reconexão mesmo em sala trancada ou com senha
+      const hasAccessGate = existing.locked || (existing.visibility === 'private' && Boolean(existing.passwordHash));
+      const authorizedByToken = hasAccessGate && this.isAuthorizedRoomReconnect(existing, roomId, uid, accessToken);
 
       if (!authorizedByToken) {
-        if (existing.passwordHash) {
+        // 3. Sala trancada pelo Host
+        if (existing.locked) {
+          this.send(ws, { type: 'error', message: 'Esta sala está trancada pelo Host.', code: 'room_locked' });
+          return;
+        }
+
+        // 4. Sala privada com senha (sem senha e sem tranca entra livremente pelo link)
+        if (existing.visibility === 'private' && existing.passwordHash) {
           const pw = typeof password === 'string' ? password.trim().slice(0, 64) : '';
           if (!pw) {
             this.send(ws, { type: 'error', message: 'Esta sala é privada e exige senha.', code: 'password_required' });
@@ -638,7 +716,7 @@ export class RoomManager {
             return;
           }
           const expectedHash = existing.passwordHash;
-          return this.enqueueSocketOp(ws, async () => {
+          const verifyAndJoin = async () => {
             const ok = await verifyRoomPassword(pw, expectedHash);
             if (ws.readyState !== WebSocket.OPEN) return;
             const current = this.rooms.get(roomId);
@@ -650,31 +728,60 @@ export class RoomManager {
               this.send(ws, { type: 'error', message: 'Senha incorreta.', code: 'wrong_password' });
               return;
             }
+            if (current?.locked) {
+              this.send(ws, { type: 'error', message: 'Esta sala está trancada pelo Host.', code: 'room_locked' });
+              return;
+            }
             if (current && current.visibility === 'private' && current.passwordHash && current.passwordHash !== expectedHash) {
               // Senha mudou durante o scrypt
               this.send(ws, { type: 'error', message: 'Senha incorreta.', code: 'wrong_password' });
               return;
             }
-            if (current && current.visibility === 'private' && !current.passwordHash) {
-              this.send(ws, { type: 'error', message: 'Esta sala está trancada pelo Host.', code: 'room_locked' });
-              return;
-            }
             this.completeJoin(ws, roomId, user);
-          });
-        } else {
-          this.send(ws, { type: 'error', message: 'Esta sala está trancada pelo Host.', code: 'room_locked' });
-          return;
+          };
+          return alreadyQueued ? verifyAndJoin() : this.enqueueSocketOp(ws, verifyAndJoin);
         }
       }
+
+      this.completeJoin(ws, roomId, user);
+      return;
     }
 
-    this.completeJoin(ws, roomId, user);
+    // Sala nova: aplica initialSettings atomicamente
+    const { name, visibility, password: initialPw } = this.sanitizeInitialSettings(initialSettings);
+    if (initialPw) {
+      let creationPromise!: Promise<void>;
+      const createWithPassword = async () => {
+        try {
+          const hashed = await hashRoomPassword(initialPw);
+          if (this.pendingCreations.get(roomId) === creationPromise) {
+            this.pendingCreations.delete(roomId);
+          }
+          if (ws.readyState !== WebSocket.OPEN) return;
+          if (!this.rooms.has(roomId)) {
+            this.completeJoin(ws, roomId, user, { name, visibility, passwordHash: hashed });
+            return;
+          }
+          await this.runJoin(ws, roomId, user, password, accessToken, undefined, true);
+        } finally {
+          if (this.pendingCreations.get(roomId) === creationPromise) {
+            this.pendingCreations.delete(roomId);
+          }
+        }
+      };
+      creationPromise = alreadyQueued ? createWithPassword() : this.enqueueSocketOp(ws, createWithPassword);
+      this.pendingCreations.set(roomId, creationPromise);
+      return creationPromise;
+    }
+
+    this.completeJoin(ws, roomId, user, { name, visibility });
   }
 
   private completeJoin(
     ws: WebSocket,
     roomId: string,
-    user: { id: string; username: string; avatarUrl?: string; platform?: 'discord' | 'web' }
+    user: { id: string; username: string; avatarUrl?: string; platform?: 'discord' | 'web' },
+    initialSettings?: { name?: string; visibility?: RoomVisibility; passwordHash?: string }
   ) {
     // Só sai da sala anterior depois que a entrada na nova sala foi autorizada
     const prevSession = this.sessions.get(ws);
@@ -682,7 +789,7 @@ export class RoomManager {
       this.handleLeave(ws, true);
     }
 
-    const room = this.getOrCreateRoom(roomId, user.id);
+    const room = this.getOrCreateRoom(roomId, user.id, initialSettings);
 
     if (room.bannedMembers && room.bannedMembers.has(baseUserId(user.id))) {
       console.log(`[WatchParty] ⛔ Usuário banido "${user.username}" (${user.id}) tentou entrar na sala "${roomId}".`);
@@ -926,6 +1033,7 @@ export class RoomManager {
       name: room.name,
       visibility: room.visibility,
       passwordHash: room.passwordHash,
+      locked: room.locked,
       autoPauseOnBuffer: room.autoPauseOnBuffer,
       createdAt: room.createdAt,
       media: room.media,
@@ -987,6 +1095,7 @@ export class RoomManager {
         name: p.name,
         visibility: p.visibility ?? 'public',
         passwordHash: p.passwordHash,
+        locked: p.locked === true,
         autoPauseOnBuffer: p.autoPauseOnBuffer ?? false,
         createdAt: p.createdAt ?? p.savedAt,
         media: p.media,
@@ -1164,12 +1273,17 @@ export class RoomManager {
       }
       const pw = typeof msg.password === 'string' ? msg.password.trim().slice(0, 64) : undefined;
       const accessToken = typeof msg.accessToken === 'string' ? msg.accessToken : undefined;
+      const initialSettings =
+        msg.initialSettings && typeof msg.initialSettings === 'object' && !Array.isArray(msg.initialSettings)
+          ? msg.initialSettings
+          : undefined;
       return this.handleJoin(
         ws,
         msg.roomId,
         { ...user, username: user.username.trim().slice(0, 32) || 'Espectador' },
         pw,
-        accessToken
+        accessToken,
+        initialSettings
       );
     }
 
@@ -1209,6 +1323,9 @@ export class RoomManager {
             currentRoom.passwordHash = undefined;
           }
         }
+        if (typeof msg.locked === 'boolean') {
+          currentRoom.locked = msg.locked;
+        }
         if (typeof msg.autoPauseOnBuffer === 'boolean') {
           currentRoom.autoPauseOnBuffer = msg.autoPauseOnBuffer;
           if (!msg.autoPauseOnBuffer) {
@@ -1227,24 +1344,12 @@ export class RoomManager {
               if (this.rooms.get(roomRef.roomId) !== roomRef || roomRef.hostId !== hostUserId) return;
               roomRef.passwordHash = hashed;
               roomRef.visibility = 'private';
-              this.broadcast(roomRef, {
-                type: 'room:settings_update',
-                name: roomRef.name,
-                visibility: roomRef.visibility,
-                hasPassword: Boolean(roomRef.passwordHash),
-                autoPauseOnBuffer: roomRef.autoPauseOnBuffer,
-              });
+              this.broadcast(roomRef, this.roomSettingsUpdatePayload(roomRef));
               this.schedulePersist(roomRef, 250);
             });
           }
         }
-        this.broadcast(currentRoom, {
-          type: 'room:settings_update',
-          name: currentRoom.name,
-          visibility: currentRoom.visibility,
-          hasPassword: Boolean(currentRoom.passwordHash),
-          autoPauseOnBuffer: currentRoom.autoPauseOnBuffer,
-        });
+        this.broadcast(currentRoom, this.roomSettingsUpdatePayload(currentRoom));
         break;
       }
 
