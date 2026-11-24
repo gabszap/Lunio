@@ -14,7 +14,7 @@ export const COMMIT = typeof __APP_COMMIT__ === 'string' ? __APP_COMMIT__ : 'dev
 
 interface HomeLayoutProps {
   tab: HomeTab;
-  /** Sub-etapa dentro da aba (ex.: 'menu' -> 'stream'/'upload'/'join') para animar avançar/voltar. */
+  /** Sub-etapa dentro da aba (ex.: 'entry' -> 'stream') para animar avançar/voltar. */
   stepKey?: string;
   onTabChange: (tab: HomeTab) => void;
   onLogo: () => void;
@@ -82,7 +82,7 @@ export const HomeLayout: React.FC<HomeLayoutProps> = ({ tab, stepKey, onTabChang
   if (nav.tab !== tab) {
     setNav({ tab, stepKey, dir: TAB_ORDER[tab] >= TAB_ORDER[nav.tab] ? 'right' : 'left' });
   } else if (nav.stepKey !== stepKey) {
-    setNav({ tab, stepKey, dir: stepKey === 'menu' ? 'left' : 'right' });
+    setNav({ tab, stepKey, dir: stepKey === 'entry' ? 'left' : 'right' });
   }
   const panelAnimClass =
     nav.dir === 'right'

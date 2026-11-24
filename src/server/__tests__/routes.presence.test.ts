@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 process.env.SESSION_SECRET = 'segredo-de-teste';
+process.env.TRUST_PROXY = '1';
 
 const { getRedisStatusMock, catalogStatusMock } = vi.hoisted(() => ({
   getRedisStatusMock: vi.fn(),
@@ -119,6 +120,29 @@ describe('GET /api/presence (router)', () => {
       expect(await res.json()).toEqual({ rooms: 2, people: 5 });
       expect(getRedisStatusMock).not.toHaveBeenCalled();
       expect(catalogStatusMock).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('aplica rate limit por IP via apiGate e devolve 429 com Retry-After após 60 requisições', async () => {
+    const spy = vi.spyOn(roomManager, 'getStats').mockReturnValue({ rooms: 1, people: 2 });
+    const headers = { 'x-forwarded-for': '198.51.100.77' };
+    try {
+      for (let i = 0; i < 60; i++) {
+        const ok = await fetch(`${api.base}/api/presence`, { headers });
+        expect(ok.status).toBe(200);
+      }
+
+      const limited = await fetch(`${api.base}/api/presence`, { headers });
+      expect(limited.status).toBe(429);
+      expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0);
+      expect(await limited.json()).toMatchObject({ code: 'rate_limited' });
+
+      const otherIp = await fetch(`${api.base}/api/presence`, {
+        headers: { 'x-forwarded-for': '198.51.100.78' },
+      });
+      expect(otherIp.status).toBe(200);
     } finally {
       spy.mockRestore();
     }
