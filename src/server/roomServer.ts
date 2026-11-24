@@ -265,6 +265,7 @@ export class RoomManager {
       const activity: PublicRoomActivity = room.screen ? 'screen' : room.media ? 'media' : 'idle';
       const preview = this.roomPreviews.get(room.roomId);
       const hasValidPreview = Boolean(preview && now - preview.updatedAt <= PREVIEW_TTL_MS);
+      if (preview && !hasValidPreview) this.roomPreviews.delete(room.roomId);
 
       list.push({
         code: room.roomId,

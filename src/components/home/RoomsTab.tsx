@@ -253,7 +253,7 @@ export const RoomsTab: React.FC<{
     const q = query.trim().toLowerCase();
 
     const matches = rooms.filter((room) => {
-      if (activityFilter === 'live' && !room.screenLive && !room.hasMedia) return false;
+      if (activityFilter === 'live' && room.activity === 'idle') return false;
       if (activityFilter === 'screen' && room.activity !== 'screen') return false;
       if (activityFilter === 'media' && room.activity !== 'media') return false;
 

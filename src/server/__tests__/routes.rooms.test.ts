@@ -499,4 +499,10 @@ describe('Rotas HTTP /api/rooms e /api/roompreview', () => {
       ).status
     ).toBe(403);
   });
+
+  it('retorna 404 (e não 500) para caminhos malformados em /api/rooms', async () => {
+    const res = await fetch(`${api.base}/api/rooms//[`);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ code: 'not_found' });
+  });
 });

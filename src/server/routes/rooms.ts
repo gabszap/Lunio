@@ -50,6 +50,7 @@ function readPreviewBody(
       req.removeListener('end', onEnd);
       req.removeListener('error', onError);
       req.removeListener('aborted', onError);
+      req.removeListener('close', onClose);
       resolve(result);
     };
 
@@ -66,11 +67,15 @@ function readPreviewBody(
 
     const onEnd = () => finish({ ok: true, data: Buffer.concat(chunks, total) });
     const onError = () => finish({ ok: false, reason: 'aborted' });
+    const onClose = () => {
+      if (!req.complete) finish({ ok: false, reason: 'aborted' });
+    };
 
     req.on('data', onData);
     req.on('end', onEnd);
     req.on('error', onError);
     req.on('aborted', onError);
+    req.on('close', onClose);
   });
 }
 
@@ -85,7 +90,12 @@ export function handlePublicRooms(req: IncomingMessage, res: ServerResponse) {
     return sendApiError(res, 405, 'method_not_allowed');
   }
 
-  const url = new URL(req.url || '/', 'http://localhost');
+  let url: URL;
+  try {
+    url = new URL(req.url || '/', 'http://localhost');
+  } catch {
+    return sendApiError(res, 404, 'not_found');
+  }
   if (url.pathname === '/' || url.pathname === '') {
     const rooms = roomManager.listPublicRooms();
     res.setHeader('Cache-Control', 'no-store');

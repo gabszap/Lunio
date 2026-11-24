@@ -149,10 +149,10 @@ export const RoomDetailModal: React.FC<{
       onClose={onClose}
       label={room?.name || t('Detalhes da sala')}
       width={480}
-      className="!p-0 !gap-0 overflow-hidden"
+      className="!p-0 !gap-0 !overflow-hidden"
     >
       {room && (
-        <div className="flex flex-col max-h-[calc(100vh-32px)] overflow-y-auto custom-scrollbar">
+        <div className="flex flex-col min-h-0 flex-1 overflow-y-auto custom-scrollbar">
           <div className="relative h-[190px] w-full flex-none overflow-hidden bg-lu-bg2 border-b border-lu-border">
             <RoomBannerVisual previewUrl={room.previewUrl} activity={room.activity} />
             <IconButton
@@ -204,12 +204,12 @@ export const RoomDetailModal: React.FC<{
 
               <div className="border-t border-lu-border py-3 flex items-center justify-between gap-4 text-[13.5px]">
                 <span className="text-lu-muted flex-none">{t('Status')}</span>
-                {room.screenLive ? (
+                {room.activity === 'screen' ? (
                   <span className="inline-flex items-center gap-1.5 font-semibold text-lu-error">
                     <Radio size={14} className="flex-none" aria-hidden="true" />
                     <span>{t('Ao vivo')}</span>
                   </span>
-                ) : room.hasMedia ? (
+                ) : room.activity === 'media' ? (
                   <span className="inline-flex items-center gap-1.5 min-w-0 text-lu-text">
                     <Play size={13} className="text-lu-accent flex-none" aria-hidden="true" />
                     <span className="font-medium flex-none">{t('Assistindo')}</span>
