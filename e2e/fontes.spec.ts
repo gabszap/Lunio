@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { FIXTURE_URL, submitName } from './helpers';
+import { FIXTURE_URL, createRoom, submitName } from './helpers';
 
 const ADDON_PORT = 3102;
 const MANIFEST_URL = `http://127.0.0.1:${ADDON_PORT}/manifest.json`;
@@ -280,13 +280,7 @@ test.describe('Menu de episódios no player', () => {
     await expect(episodesToggle(page)).toBeVisible();
 
     // O contexto da série fica no sessionStorage: recarregar a Home o traz de volta ao estado e o link colado tem de descartá-lo
-    await page.goto('/');
-    await page.getByRole('button', { name: /Colar link de stream/ }).click();
-    await page.getByRole('textbox', { name: 'URL do stream' }).fill(FIXTURE_URL);
-    await page.getByRole('button', { name: 'Criar sala' }).click();
-    await submitName(page, 'Ana');
-    await expect(page).toHaveURL(/\/room\/[A-Z0-9]+|\?room=[A-Z0-9]+/);
-    await expect(page.locator('video')).toBeAttached();
+    await createRoom(page, 'Ana', FIXTURE_URL);
     await page.mouse.move(640, 360); // mostra os controles
     await expect(episodesToggle(page)).toHaveCount(0);
     await page.close();

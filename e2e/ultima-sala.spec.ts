@@ -31,7 +31,7 @@ test.describe('Voltar à última sala', () => {
     await page.goto('/home');
     await page.evaluate(() => localStorage.setItem('lunio_last_room', JSON.stringify({ code: 'NAOEXIST', at: Date.now() - 120_000 })));
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Crie uma sala' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Criar ou entrar em uma sala' })).toBeVisible();
     await expect(page.getByText('Voltar à sala NAOEXIST')).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => localStorage.getItem('lunio_last_room'))).toBeNull();
     await context.close();

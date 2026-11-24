@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Compass, MonitorUp } from 'lucide-react';
 import { prepareMediaLink } from '../../lib/roomMediaInput';
 import { syncManager } from '../../lib/sync';
 import { t } from '../../lib/i18n';
@@ -10,7 +11,7 @@ import { PLAYLIST_MAX_ITEMS, REQUESTS_MAX_ITEMS, type PlaylistItem, type RoomSta
 import type { SourceCommit } from '../home/types';
 import { PlayerConsole } from '../PlayerConsole';
 import { useScreenShare } from '../player/ScreenShareContext';
-import { Modal, ModalHeader } from '../ui';
+import { GhostButton, Modal, ModalHeader, PrimaryButton } from '../ui';
 import { RoomHeader } from './RoomHeader';
 import { MemberStrip } from './MemberStrip';
 import { RoomDock } from './RoomDock';
@@ -30,9 +31,6 @@ export interface RoomShellProps {
   unreadChat: number;
   onOpenRoomLobby: () => void;
   onPlayQueueItem: (item: PlaylistItem) => void;
-  /** Abre automaticamente o seletor de qualidade de transmissão ao entrar por "Compartilhar sua tela". */
-  autoOpenScreenPicker?: boolean;
-  onAutoOpenScreenPickerConsumed?: () => void;
   /** Props do modal de escolha de mídia dentro da sala. */
   recentStreams: RecentStream[];
   onRemoveRecent: (url: string) => void;
@@ -48,12 +46,13 @@ export interface RoomShellProps {
     seriesContext?: CatalogSeriesContext,
     movie?: CatalogRef
   ) => void;
-  /** Render prop do VideoPlayer recebendo roomState, onSelectMember, fullscreenDock e fullscreenSidebar. */
+  /** Render prop do VideoPlayer recebendo roomState, onSelectMember, fullscreenDock, fullscreenSidebar e openMediaPicker. */
   renderPlayer: (ctx: {
     roomState: RoomState | null;
     onSelectMember: (memberId: string) => void;
     fullscreenDock: React.ReactNode;
     fullscreenSidebar: React.ReactNode;
+    openMediaPicker: () => void;
   }) => React.ReactNode;
 }
 
@@ -77,8 +76,6 @@ export const RoomShell: React.FC<RoomShellProps> = ({
   unreadChat,
   onOpenRoomLobby,
   onPlayQueueItem,
-  autoOpenScreenPicker,
-  onAutoOpenScreenPickerConsumed,
   recentStreams,
   onRemoveRecent,
   onClearRecent,
@@ -105,15 +102,6 @@ export const RoomShell: React.FC<RoomShellProps> = ({
       setCurrentUser(syncManager.getUser());
     });
   }, []);
-
-  // Quando o Host entrou pelo atalho "Compartilhar sua tela" da Home, abre o seletor de qualidade assim que disponível
-  const autoOpenedRef = useRef(false);
-  useEffect(() => {
-    if (!autoOpenScreenPicker || autoOpenedRef.current || !screenShare.canBroadcast) return;
-    autoOpenedRef.current = true;
-    setScreenMenuOpen(true);
-    onAutoOpenScreenPickerConsumed?.();
-  }, [autoOpenScreenPicker, screenShare.canBroadcast, onAutoOpenScreenPickerConsumed]);
 
   const screenLive =
     screenShare.host.status === 'live' || screenShare.host.status === 'starting' || screenShare.covering;
@@ -167,12 +155,14 @@ export const RoomShell: React.FC<RoomShellProps> = ({
   const createdAt = roomState?.createdAt ?? fallbackJoinedAt;
   const serverNow = useCallback(() => syncManager.getServerNow(), []);
 
+  const openMediaPicker = useCallback(() => setMediaPickerOpen(true), []);
+
   const dockProps = {
     connected: room.connected,
     isHost: room.isHost,
     environment,
     roomCode: room.code,
-    onOpenMediaPicker: () => setMediaPickerOpen(true),
+    onOpenMediaPicker: openMediaPicker,
     onOpenRoomLobby,
     onLeaveRoom: onHome,
     onOpenLogs: () => setLogsOpen(true),
@@ -199,6 +189,7 @@ export const RoomShell: React.FC<RoomShellProps> = ({
         roomCode={room.code}
         roomName={roomState?.name}
         visibility={roomState?.visibility}
+        locked={roomState?.locked}
         connected={room.connected}
         environment={environment}
         createdAt={createdAt}
@@ -220,8 +211,27 @@ export const RoomShell: React.FC<RoomShellProps> = ({
               onSelectMember: handleSelectMember,
               fullscreenDock: <RoomDock {...dockProps} isFullscreen />,
               fullscreenSidebar: <RoomSidebar {...sidebarProps} isFullscreen />,
+              openMediaPicker,
             })}
           </div>
+
+          {!showMediaStage && room.isHost && (
+            <div className="flex-none rounded-[14px] bg-lu-bg2/90 border border-lu-border px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap">
+              <span className="text-[13.5px] text-lu-muted">{t('Nenhum vídeo tocando ainda')}</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <PrimaryButton onClick={openMediaPicker} className="!h-9 !px-3.5 text-[13px]">
+                  <Compass size={16} aria-hidden="true" />
+                  <span>{t('Escolher vídeo')}</span>
+                </PrimaryButton>
+                {screenShare.canBroadcast && (
+                  <GhostButton onClick={() => setScreenMenuOpen(true)} className="!h-9 !px-3.5 text-[13px]">
+                    <MonitorUp size={16} aria-hidden="true" />
+                    <span>{t('Compartilhar tela')}</span>
+                  </GhostButton>
+                )}
+              </div>
+            </div>
+          )}
 
           {showMediaStage && room.connected && (
             <MemberStrip

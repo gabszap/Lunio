@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { state, submitName, video, waitReady } from './helpers';
+import { FIXTURE_URL, createRoom, state, submitName, video, waitReady } from './helpers';
 
 const ADDON_PORT = 3104;
 const MANIFEST_URL = `http://127.0.0.1:${ADDON_PORT}/manifest.json`;
@@ -126,11 +126,7 @@ test.describe('Continuar assistindo', () => {
   test('um vídeo colado (fora do catálogo) não entra na lista', async ({ browser }) => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await setup(page);
-    await page.goto('/');
-    await page.getByRole('button', { name: /Colar link de stream/ }).click();
-    await page.getByRole('textbox', { name: 'URL do stream' }).fill('http://127.0.0.1:3101/teste.mkv');
-    await page.getByRole('button', { name: 'Criar sala' }).click();
-    await submitName(page, 'Ana');
+    await createRoom(page, 'Ana', FIXTURE_URL);
     await waitReady(page);
     await seekAndPlay(page, 40);
     await page.waitForTimeout(7000);

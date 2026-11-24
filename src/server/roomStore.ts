@@ -19,6 +19,8 @@ export interface PersistedRoom {
   visibility?: RoomVisibility;
   /** Hash salted scrypt da senha (nunca texto puro). */
   passwordHash?: string;
+  /** Se o Host trancou novas entradas na sala. */
+  locked?: boolean;
   /** Pausa automática quando alguém trava em buffering. */
   autoPauseOnBuffer?: boolean;
   /** Quando a sala foi criada (ms). JSONs antigos sem o campo fazem fallback para `savedAt`. */
@@ -151,6 +153,7 @@ export function parsePersistedRoom(raw: unknown): PersistedRoom | null {
   const visibility: RoomVisibility = r.visibility === 'private' ? 'private' : 'public';
   const passwordHash =
     isString(r.passwordHash, 256) && /^[a-f0-9]{32}:[a-f0-9]{64}$/.test(r.passwordHash) ? r.passwordHash : undefined;
+  const locked = r.locked === true;
   const autoPauseOnBuffer = r.autoPauseOnBuffer === true;
 
   return {
@@ -160,6 +163,7 @@ export function parsePersistedRoom(raw: unknown): PersistedRoom | null {
     name,
     visibility,
     passwordHash,
+    locked,
     autoPauseOnBuffer,
     createdAt,
     media,

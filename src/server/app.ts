@@ -11,7 +11,7 @@ import { handleUpstreamStatus } from './routes/upstream';
 import { handleScreenToken } from './routes/screen';
 import { handleRoomInfo } from './routes/room';
 import { handleSession } from './routes/session';
-import { handleSpeed, handleStatus } from './routes/status';
+import { handlePresence, handleSpeed, handleStatus } from './routes/status';
 import { handleSubtitle } from './routes/subtitle';
 import { handleToken } from './routes/token';
 import { handleTracks } from './routes/tracks';
@@ -36,6 +36,7 @@ export function createApiRouter(): Router {
   router.use(apiGate);
 
   router.use('/api/session', handleSession);
+  router.use('/api/presence', handlePresence);
   router.use('/api/status', handleStatus);
   router.use('/api/speed', handleSpeed);
   router.use('/api/room', handleRoomInfo);

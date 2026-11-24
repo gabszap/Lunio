@@ -51,7 +51,13 @@ async function connect(
   roomId: string,
   id: string,
   username: string,
-  opts?: { password?: string; accessToken?: string; ip?: string; manager?: RoomManager }
+  opts?: {
+    password?: string;
+    accessToken?: string;
+    initialSettings?: { name?: string; visibility?: 'public' | 'private'; password?: string };
+    ip?: string;
+    manager?: RoomManager;
+  }
 ) {
   const manager = opts?.manager ?? rm;
   const s = new FakeSocket();
@@ -63,6 +69,7 @@ async function connect(
       roomId,
       password: opts?.password,
       accessToken: opts?.accessToken,
+      initialSettings: opts?.initialSettings,
       user: { id, username },
     })
   );
@@ -100,6 +107,7 @@ describe('configurações da sala (nome, pública/privada, senha) e persistênci
       name: 'Maratona JoJo',
       visibility: 'private',
       hasPassword: true,
+      locked: false,
       autoPauseOnBuffer: false,
     });
     // Nunca vaza passwordHash no state
@@ -128,15 +136,255 @@ describe('configurações da sala (nome, pública/privada, senha) e persistênci
       hasPassword: true,
     });
 
-    // Sala privada sem senha = trancada (room_locked)
+    // Sala privada sem senha permite entrada livre pelo link/código
     await send(host, { type: 'room:settings', password: null });
-    const blocked = await connect('PRIV1', 'g4', 'Trancada');
-    expect(blocked.last('error')).toMatchObject({ code: 'room_locked' });
+    const linkGuest = await connect('PRIV1', 'g4', 'PeloLink');
+    expect(linkGuest.last('error')).toBeUndefined();
+    expect(linkGuest.last('room:state')?.state).toMatchObject({
+      visibility: 'private',
+      hasPassword: false,
+      locked: false,
+    });
 
     // Voltar para pública libera entrada sem senha
     await send(host, { type: 'room:settings', visibility: 'public' });
     const openGuest = await connect('PRIV1', 'g5', 'Aberto');
     expect(openGuest.last('room:state')).toBeDefined();
+  });
+
+  it('sala com locked: true (pública ou privada) bloqueia novo visitante com room_locked, libera reconexão com accessToken e locked: false volta a liberar', async () => {
+    // Sala pública trancada
+    const pubHost = await connect('LOCK_PUB', 'h', 'Host');
+    const pubHostToken = pubHost.last('room:state')?.accessToken as string;
+    const member = await connect('LOCK_PUB', 'm1', 'Membro');
+    const memberToken = member.last('room:state')?.accessToken as string;
+
+    // Espectador não pode trancar a sala
+    await send(member, { type: 'room:settings', locked: true });
+    expect(rm.getRoomInfo('LOCK_PUB').locked).toBe(false);
+
+    // Host tranca a sala pública
+    await send(pubHost, { type: 'room:settings', locked: true });
+    expect(pubHost.last('room:settings_update')).toMatchObject({
+      type: 'room:settings_update',
+      visibility: 'public',
+      locked: true,
+    });
+    expect(rm.getRoomInfo('LOCK_PUB').locked).toBe(true);
+
+    // Novo visitante recebe room_locked e não entra
+    const stranger = await connect('LOCK_PUB', 'g1', 'Estranho');
+    expect(stranger.last('error')).toMatchObject({ code: 'room_locked' });
+    expect(stranger.last('room:state')).toBeUndefined();
+
+    // Impostor com userId do Host/membro SEM accessToken também é barrado
+    const spoofer = await connect('LOCK_PUB', 'h', 'Impostor');
+    expect(spoofer.last('error')).toMatchObject({ code: 'room_locked' });
+    expect(spoofer.last('room:state')).toBeUndefined();
+
+    // Usuário banido recebe banned antes de room_locked (sem oráculo)
+    const bannedGuest = await connect('LOCK_PUB', 'ban1', 'Banido');
+    expect(bannedGuest.last('error')).toMatchObject({ code: 'room_locked' });
+    await send(pubHost, { type: 'room:settings', locked: false });
+    await connect('LOCK_PUB', 'ban1', 'Banido');
+    await send(pubHost, { type: 'room:ban', targetUserId: 'ban1' });
+    await send(pubHost, { type: 'room:settings', locked: true });
+    const bannedRetry = await connect('LOCK_PUB', 'ban1', 'Banido');
+    expect(bannedRetry.last('error')).toMatchObject({ code: 'banned' });
+
+    // Membro existente e Host com accessToken válido reconectam normalmente
+    rm.handleLeave(asWs(member));
+    const memberReconnect = await connect('LOCK_PUB', 'm1', 'Membro', { accessToken: memberToken });
+    expect(memberReconnect.last('error')).toBeUndefined();
+    expect(memberReconnect.last('room:state')?.state.locked).toBe(true);
+
+    const hostTab = await connect('LOCK_PUB', 'h', 'Host', { accessToken: pubHostToken });
+    expect(hostTab.last('error')).toBeUndefined();
+    expect(hostTab.last('room:state')?.state.locked).toBe(true);
+
+    // Destrancar volta a liberar novos visitantes
+    await send(pubHost, { type: 'room:settings', locked: false });
+    expect(pubHost.last('room:settings_update')).toMatchObject({ locked: false });
+    const lateGuest = await connect('LOCK_PUB', 'g2', 'Depois');
+    expect(lateGuest.last('error')).toBeUndefined();
+    expect(lateGuest.last('room:state')?.state.locked).toBe(false);
+
+    // Sala privada com senha e locked: true bloqueia até quem envia a senha certa
+    const privHost = await connect('LOCK_PRIV', 'ph', 'PrivHost');
+    await send(privHost, { type: 'room:settings', visibility: 'private', password: 'abc', locked: true });
+    const blockedWithPw = await connect('LOCK_PRIV', 'pg', 'Amigo', { password: 'abc' });
+    expect(blockedWithPw.last('error')).toMatchObject({ code: 'room_locked' });
+    expect(blockedWithPw.last('room:state')).toBeUndefined();
+  });
+
+  it('criação atômica via room:join com initialSettings aplica nome, privacidade e senha sem vazar senha', async () => {
+    const host = await connect('ATOM1', 'h', 'Host', {
+      initialSettings: { name: '  Cinema  ', visibility: 'private', password: '  segredo  ' },
+    });
+
+    const hostState = host.last('room:state')?.state;
+    expect(hostState).toMatchObject({
+      roomId: 'ATOM1',
+      hostId: 'h',
+      name: 'Cinema',
+      visibility: 'private',
+      hasPassword: true,
+      locked: false,
+    });
+    expect(rm.getRoomInfo('ATOM1')).toMatchObject({
+      exists: true,
+      name: 'Cinema',
+      visibility: 'private',
+      hasPassword: true,
+      locked: false,
+    });
+    // Nunca vaza a senha em texto puro nem hash
+    expect(JSON.stringify(host.sent)).not.toContain('segredo');
+
+    const noPw = await connect('ATOM1', 'g1', 'SemSenha');
+    expect(noPw.last('error')).toMatchObject({ code: 'password_required' });
+    expect(noPw.last('room:state')).toBeUndefined();
+
+    const wrongPw = await connect('ATOM1', 'g2', 'Errada', { password: 'outra' });
+    expect(wrongPw.last('error')).toMatchObject({ code: 'wrong_password' });
+
+    const ok = await connect('ATOM1', 'g3', 'Amigo', { password: 'segredo' });
+    expect(ok.last('error')).toBeUndefined();
+    expect(ok.last('room:state')?.state).toMatchObject({
+      name: 'Cinema',
+      visibility: 'private',
+      hasPassword: true,
+      locked: false,
+    });
+
+    // Sala pública via initialSettings ignora password e trunca nome em 48 caracteres
+    const longName = 'A'.repeat(60);
+    const pubHost = await connect('ATOM2', 'h2', 'Host2', {
+      initialSettings: { name: `  ${longName}  `, visibility: 'public', password: 'nao-deve-aplicar' },
+    });
+    expect(pubHost.last('room:state')?.state).toMatchObject({
+      name: 'A'.repeat(48),
+      visibility: 'public',
+      hasPassword: false,
+      locked: false,
+    });
+    const pubGuest = await connect('ATOM2', 'g4', 'Visitante');
+    expect(pubGuest.last('room:state')).toBeDefined();
+
+    // Sala privada via initialSettings sem senha permite entrada pelo link
+    const privNoPwHost = await connect('ATOM3', 'h3', 'Host3', {
+      initialSettings: { name: 'Só Link', visibility: 'private', password: '   ' },
+    });
+    expect(privNoPwHost.last('room:state')?.state).toMatchObject({
+      name: 'Só Link',
+      visibility: 'private',
+      hasPassword: false,
+      locked: false,
+    });
+    const privNoPwGuest = await connect('ATOM3', 'g5', 'AmigoLink');
+    expect(privNoPwGuest.last('error')).toBeUndefined();
+    expect(privNoPwGuest.last('room:state')).toBeDefined();
+  });
+
+  it('visitante entrando em sala existente com initialSettings tem initialSettings ignorado completamente', async () => {
+    const host = await connect('EXIST1', 'h', 'Host', {
+      initialSettings: { name: 'Sala Original', visibility: 'public' },
+    });
+    expect(host.last('room:state')?.state.name).toBe('Sala Original');
+
+    const visitor = await connect('EXIST1', 'g1', 'Visitante', {
+      initialSettings: { name: 'Hack', visibility: 'private', password: '123' },
+    });
+    expect(visitor.last('room:state')?.state).toMatchObject({
+      hostId: 'h',
+      name: 'Sala Original',
+      visibility: 'public',
+      hasPassword: false,
+      locked: false,
+    });
+    expect(rm.getRoomInfo('EXIST1')).toMatchObject({
+      name: 'Sala Original',
+      visibility: 'public',
+      hasPassword: false,
+      locked: false,
+    });
+
+    // Mesmo entrando em sala privada existente com senha correta, initialSettings é ignorado
+    await connect('EXIST2', 'h', 'Host', {
+      initialSettings: { name: 'Privada Real', visibility: 'private', password: 'certa' },
+    });
+    const guest = await connect('EXIST2', 'g2', 'Visitante', {
+      password: 'certa',
+      initialSettings: { name: 'Roubada', visibility: 'public' },
+    });
+    expect(guest.last('room:state')?.state).toMatchObject({
+      hostId: 'h',
+      name: 'Privada Real',
+      visibility: 'private',
+      hasPassword: true,
+    });
+  });
+
+  it('dois sockets conectando simultaneamente em sala nova com senha: segundo não entra sem senha nem rouba Host durante o scrypt', async () => {
+    const p1 = connect('RACE1', 'h', 'Host', {
+      initialSettings: { name: 'Privada Race', visibility: 'private', password: 'segredo' },
+    });
+    const p2 = connect('RACE1', 'g1', 'Intruso', {
+      initialSettings: { name: 'Roubo', visibility: 'public' },
+    });
+    const p3 = connect('RACE1', 'g2', 'Amigo', {
+      password: 'segredo',
+    });
+
+    const [host, intruder, friend] = await Promise.all([p1, p2, p3]);
+
+    expect(host.last('room:state')?.assignedUserId).toBe('h');
+    expect(host.last('room:state')?.state).toMatchObject({
+      hostId: 'h',
+      name: 'Privada Race',
+      visibility: 'private',
+      hasPassword: true,
+      locked: false,
+    });
+
+    expect(intruder.last('error')).toMatchObject({ code: 'password_required' });
+    expect(intruder.last('room:state')).toBeUndefined();
+
+    expect(friend.last('error')).toBeUndefined();
+    expect(friend.last('room:state')?.assignedUserId).toBe('g2');
+    expect(friend.last('room:state')?.state.hostId).toBe('h');
+
+    // Se o criador fechar o socket durante o scrypt, pendingCreations é limpo e o segundo socket não trava
+    const creator = new FakeSocket();
+    const waiter = new FakeSocket();
+    rm.setSocketIp(asWs(creator), '10.0.1.1');
+    rm.setSocketIp(asWs(waiter), '10.0.1.2');
+    const c1 = rm.handleClientMessage(
+      asWs(creator),
+      JSON.stringify({
+        type: 'room:join',
+        roomId: 'RACE2',
+        initialSettings: { name: 'Abortada', visibility: 'private', password: 'pw1' },
+        user: { id: 'c1', username: 'Criador' },
+      })
+    );
+    creator.close();
+    const c2 = rm.handleClientMessage(
+      asWs(waiter),
+      JSON.stringify({
+        type: 'room:join',
+        roomId: 'RACE2',
+        initialSettings: { name: 'Assumiu', visibility: 'public' },
+        user: { id: 'c2', username: 'Segundo' },
+      })
+    );
+    await Promise.all([c1, c2]);
+    expect(waiter.last('room:state')?.state).toMatchObject({
+      hostId: 'c2',
+      name: 'Assumiu',
+      visibility: 'public',
+      hasPassword: false,
+    });
   });
 
   it('aplica rate limit em tentativas repetidas de senha pelo WebSocket', async () => {
@@ -155,13 +403,13 @@ describe('configurações da sala (nome, pública/privada, senha) e persistênci
     expect(limited).toBe(true);
   });
 
-  it('persiste e restaura nome, visibilidade, senha, pedidos e histórico de chat no Redis', async () => {
+  it('persiste e restaura nome, visibilidade, senha, locked, pedidos e histórico de chat no Redis', async () => {
     const host = await connect('PERS1', 'h', 'Host');
     const hostToken = host.last('room:state')?.accessToken as string;
     expect(hostToken).toBeTruthy();
 
     const guest = await connect('PERS1', 'g', 'Gui');
-    await send(host, { type: 'room:settings', name: 'Cinema', visibility: 'private', password: 'abc', autoPauseOnBuffer: true });
+    await send(host, { type: 'room:settings', name: 'Cinema', visibility: 'private', password: 'abc', locked: true, autoPauseOnBuffer: true });
     await send(guest, { type: 'request:add', url: 'https://cdn.example/ep1.mp4', title: 'Ep 1' });
     await send(guest, { type: 'chat:send', text: 'Salve galera!' });
 
@@ -171,16 +419,23 @@ describe('configurações da sala (nome, pública/privada, senha) e persistênci
     expect(persisted.visibility).toBe('private');
     expect(persisted.passwordHash).toMatch(/^[a-f0-9]{32}:[a-f0-9]{64}$/);
     expect(persisted.passwordHash).not.toBe('abc');
+    expect(persisted.locked).toBe(true);
     expect(persisted.autoPauseOnBuffer).toBe(true);
     expect(persisted.requests).toHaveLength(1);
     expect(persisted.chatHistory?.some((m) => m.text === 'Salve galera!')).toBe(true);
 
-    // parsePersistedRoom aceita hash válido e rejeita hash malformado
+    // parsePersistedRoom aceita locked: true, rejeita hash malformado e faz fallback para locked: false em legado
     const parsed = parsePersistedRoom(JSON.parse(JSON.stringify(persisted)));
     expect(parsed?.name).toBe('Cinema');
     expect(parsed?.passwordHash).toBe(persisted.passwordHash);
+    expect(parsed?.locked).toBe(true);
     expect(parsed?.requests).toHaveLength(1);
     expect(parsed?.chatHistory?.some((m) => m.text === 'Salve galera!')).toBe(true);
+
+    const legacyRaw = JSON.parse(JSON.stringify(persisted));
+    delete legacyRaw.locked;
+    expect(parsePersistedRoom(legacyRaw)?.locked).toBe(false);
+    expect(parsePersistedRoom({ ...legacyRaw, locked: 'true' })?.locked).toBe(false);
 
     const parsedBadHash = parsePersistedRoom({ ...JSON.parse(JSON.stringify(persisted)), passwordHash: 'invalido:curto' });
     expect(parsedBadHash?.passwordHash).toBeUndefined();
@@ -188,13 +443,15 @@ describe('configurações da sala (nome, pública/privada, senha) e persistênci
     // Restaura num novo RoomManager
     const rm2 = new RoomManager(makeStore());
     expect(await rm2.restore()).toBe(1);
+    expect(rm2.getRoomInfo('PERS1').locked).toBe(true);
 
-    // Host reconecta sem precisar de senha apresentando seu accessToken assinado
+    // Host reconecta sem precisar de senha/tranca apresentando seu accessToken assinado
     const host2 = await connect('PERS1', 'h', 'Host', { accessToken: hostToken, manager: rm2 });
     expect(host2.last('room:state')?.state).toMatchObject({
       name: 'Cinema',
       visibility: 'private',
       hasPassword: true,
+      locked: true,
       autoPauseOnBuffer: true,
     });
     expect(host2.last('room:state')?.state.requests).toHaveLength(1);
@@ -202,11 +459,11 @@ describe('configurações da sala (nome, pública/privada, senha) e persistênci
 
     // Impostor com o mesmo userId do Host mas sem accessToken não passa
     const fakeHost = await connect('PERS1', 'h', 'Host', { manager: rm2 });
-    expect(fakeHost.last('error')).toMatchObject({ code: 'password_required' });
+    expect(fakeHost.last('error')).toMatchObject({ code: 'room_locked' });
 
-    // Novo usuário ainda precisa da senha restaurada
-    const newcomer = await connect('PERS1', 'n', 'Novo', { manager: rm2 });
-    expect(newcomer.last('error')).toMatchObject({ code: 'password_required' });
+    // Novo usuário é barrado pela tranca restaurada mesmo que passe a senha
+    const newcomer = await connect('PERS1', 'n', 'Novo', { password: 'abc', manager: rm2 });
+    expect(newcomer.last('error')).toMatchObject({ code: 'room_locked' });
   });
 });
 

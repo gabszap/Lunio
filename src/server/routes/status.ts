@@ -14,6 +14,12 @@ function pickUsage() {
   return { hostBytes, estimatedEgressBytes };
 }
 
+/** GET /api/presence — leitura puramente em memória com contagem de salas e pessoas ativas (sem Redis, catálogo ou disco). */
+export function handlePresence(_req: IncomingMessage, res: ServerResponse): void {
+  res.setHeader('Cache-Control', 'no-store');
+  sendJson(res, 200, roomManager.getStats());
+}
+
 /** GET /api/status — FFmpeg e Python foram encontrados? Só versões: o caminho no disco não sai do servidor. Mais: salas, pessoas e tempo no ar. */
 export async function handleStatus(_req: IncomingMessage, res: ServerResponse) {
   const { ffmpeg, python } = getTools();

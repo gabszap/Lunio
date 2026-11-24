@@ -36,10 +36,11 @@ const SHORTCUTS: Array<{ group: string; items: Array<{ label: string; keys: stri
   },
 ];
 
-interface RoomHeaderProps {
+export interface RoomHeaderProps {
   roomCode: string;
   roomName?: string;
   visibility?: RoomVisibility;
+  locked?: boolean;
   connected: boolean;
   environment: 'discord' | 'web';
   /** Timestamp (ms) de criação/entrada na sala para o cronômetro de duração. */
@@ -65,6 +66,7 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
   roomCode,
   roomName,
   visibility = 'public',
+  locked = false,
   connected,
   environment,
   createdAt,
@@ -141,8 +143,12 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
           <span className="text-[14px] font-semibold truncate">{t('Canal de voz do Discord')}</span>
         ) : (
           <div className="inline-flex items-center gap-1.5 min-w-0">
-            {visibility === 'private' && (
-              <span title={t('Sala privada')} aria-label={t('Sala privada')} className="text-lu-accent flex-none inline-flex">
+            {(visibility === 'private' || locked) && (
+              <span
+                title={locked ? t('Sala trancada') : t('Sala privada')}
+                aria-label={locked ? t('Sala trancada') : t('Sala privada')}
+                className="text-lu-accent flex-none inline-flex"
+              >
                 <Lock size={13} />
               </span>
             )}

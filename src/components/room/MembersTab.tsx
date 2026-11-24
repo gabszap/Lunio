@@ -26,6 +26,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({ members, roomState, curr
   const [roomNameInput, setRoomNameInput] = useState(() => roomState?.name || '');
   const [visibilityInput, setVisibilityInput] = useState<RoomVisibility>(() => roomState?.visibility || 'public');
   const [passwordInput, setPasswordInput] = useState('');
+  const [lockedInput, setLockedInput] = useState(() => Boolean(roomState?.locked));
   const [autoPauseInput, setAutoPauseInput] = useState(() => Boolean(roomState?.autoPauseOnBuffer));
   const [settingsSaved, setSettingsSaved] = useState(false);
 
@@ -41,8 +42,9 @@ export const MembersTab: React.FC<MembersTabProps> = ({ members, roomState, curr
   useEffect(() => {
     setRoomNameInput(roomState?.name || '');
     setVisibilityInput(roomState?.visibility || 'public');
+    setLockedInput(Boolean(roomState?.locked));
     setAutoPauseInput(Boolean(roomState?.autoPauseOnBuffer));
-  }, [roomState?.name, roomState?.visibility, roomState?.autoPauseOnBuffer]);
+  }, [roomState?.name, roomState?.visibility, roomState?.locked, roomState?.autoPauseOnBuffer]);
 
   useEffect(() => {
     if (focusMemberId && focusedRowRef.current) {
@@ -59,10 +61,12 @@ export const MembersTab: React.FC<MembersTabProps> = ({ members, roomState, curr
       name?: string;
       visibility?: RoomVisibility;
       password?: string | null;
+      locked?: boolean;
       autoPauseOnBuffer?: boolean;
     } = {
       name: roomNameInput.trim(),
       visibility: visibilityInput,
+      locked: lockedInput,
       autoPauseOnBuffer: autoPauseInput,
     };
     if (visibilityInput === 'private' && passwordInput.trim()) {
@@ -202,13 +206,23 @@ export const MembersTab: React.FC<MembersTabProps> = ({ members, roomState, curr
                 id="room-settings-password"
                 type="password"
                 maxLength={64}
-                placeholder={roomState?.hasPassword ? t('Digite para trocar a senha…') : t('Sem senha = sala trancada')}
+                placeholder={roomState?.hasPassword ? t('Digite para trocar a senha…') : t('Deixe vazio para entrar só com o link')}
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
                 className="!h-9 text-[13px]"
               />
             </div>
           )}
+
+          <label className="flex items-start gap-2.5 text-[12.5px] text-lu-muted cursor-pointer select-none leading-snug">
+            <input
+              type="checkbox"
+              checked={lockedInput}
+              onChange={(e) => setLockedInput(e.target.checked)}
+              className="w-4 h-4 mt-0.5 m-0 accent-[var(--color-lu-accent)] flex-none"
+            />
+            <span>{t('Trancar sala (bloquear novas entradas)')}</span>
+          </label>
 
           <label className="flex items-start gap-2.5 text-[12.5px] text-lu-muted cursor-pointer select-none leading-snug">
             <input

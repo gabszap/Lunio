@@ -5,6 +5,12 @@ export type MemberPlaybackState = 'waiting' | 'loading' | 'ready' | 'playing' | 
 
 export type RoomVisibility = 'public' | 'private';
 
+export interface RoomInitialSettings {
+  name?: string;
+  visibility?: RoomVisibility;
+  password?: string;
+}
+
 export interface RoomMember {
   id: string;
   username: string;
@@ -90,10 +96,12 @@ export interface RoomState {
   hostId: string;
   /** Nome personalizável definido pelo Host (opcional). */
   name?: string;
-  /** Sala pública (entra com o link) ou privada (trancada ou com senha). */
+  /** Sala pública (listável e entra com o link) ou privada (não-listada, com senha opcional). */
   visibility?: RoomVisibility;
   /** Se a sala privada exige senha para entrar (o hash nunca vai ao cliente). */
   hasPassword?: boolean;
+  /** Se o Host trancou novas entradas na sala (permite apenas reconexão de membros com token válido). */
+  locked?: boolean;
   /** Pausa automaticamente para todos se algum membro travar (buffering) e retoma quando voltar. */
   autoPauseOnBuffer?: boolean;
   /** Timestamp (ms) de criação da sala no servidor (para o cronômetro de duração). */
@@ -129,6 +137,8 @@ export type ClientMessage =
       password?: string;
       /** Token assinado da sala emitido anteriormente (prova reconexão legítima em salas privadas/trancadas). */
       accessToken?: string;
+      /** Configurações iniciais aplicadas atomicamente apenas quando a sala ainda não existe. */
+      initialSettings?: RoomInitialSettings;
       user: {
         id: string;
         username: string;
@@ -142,6 +152,7 @@ export type ClientMessage =
       visibility?: RoomVisibility;
       /** String não vazia define/altera a senha; `null` remove a senha; `undefined` mantém a atual. */
       password?: string | null;
+      locked?: boolean;
       autoPauseOnBuffer?: boolean;
     }
   | {
@@ -419,6 +430,7 @@ export type ServerMessage =
       name?: string;
       visibility: RoomVisibility;
       hasPassword: boolean;
+      locked: boolean;
       autoPauseOnBuffer: boolean;
     }
   | {

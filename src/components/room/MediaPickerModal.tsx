@@ -4,8 +4,7 @@ import { ChevronLeft, Compass, FolderOpen, Link, Upload, X, Youtube } from 'luci
 import { StreamStep } from '../home/StreamStep';
 import { UploadStep } from '../home/UploadStep';
 import { DriveStep, YouTubeStep } from '../home/LinkSourceSteps';
-import type { SourceStep } from '../home/RoomMenu';
-import type { CommitMode, CommitOptions, SourceCommit } from '../home/types';
+import type { CommitMode, CommitOptions, SourceCommit, SourceStep } from '../home/types';
 import type { WatchIntent } from '../catalog/CatalogTab';
 import type { RecentStream } from '../../lib/recent';
 import type { StreamOption } from '../../lib/streams';

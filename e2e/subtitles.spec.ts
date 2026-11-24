@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { FIXTURE_URL, SUBTITLES_URL, createRoom, joinRoom, newUser, state, submitName, togglePlay, waitReady } from './helpers';
+import { FIXTURE_URL, SUBTITLES_URL, createEmptyRoom, createRoom, joinRoom, newUser, state, togglePlay, waitReady } from './helpers';
 
 /** Registra os pedidos de legenda e faz o `track` indicado falhar (como um PGS ou uma extração impossível). */
 async function failTracks(page: Page, failing: number[]) {
@@ -32,10 +32,11 @@ function rendererErrors(page: Page) {
 }
 
 async function createRoomWithExternalSubtitle(page: Page, format: 'srt' | 'vtt') {
-  // Adiciona antes de criar a sala: a descoberta recebe a fonte externa sem depender
+  // Adiciona antes de carregar o stream na sala: a descoberta recebe a fonte externa sem depender
   // da extração/renderização de ASS nem de alterações na lista durante o playback.
-  await page.goto('/');
-  await page.getByRole('button', { name: /Colar link de stream/ }).click();
+  await createEmptyRoom(page, { username: 'Ana', roomName: 'Sala Legenda' });
+  await page.getByRole('button', { name: 'Escolher vídeo' }).click();
+  await page.getByRole('tab', { name: 'Link de stream' }).click();
   await page.getByRole('textbox', { name: 'URL do stream' }).fill(FIXTURE_URL);
   await page.getByRole('button', { name: 'Legenda', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Adicionar legenda' });
@@ -44,9 +45,7 @@ async function createRoomWithExternalSubtitle(page: Page, format: 'srt' | 'vtt')
   await dialog.getByRole('tab', { name: 'VTT', exact: true }).click();
   await dialog.getByRole('button', { name: 'Adicionar legenda', exact: true }).click();
   await expect(dialog).toBeHidden();
-  await page.getByRole('button', { name: 'Criar sala', exact: true }).click();
-  await submitName(page, 'Ana');
-  await expect(page).toHaveURL(/\/room\/[A-Z0-9]+|\?room=[A-Z0-9]+/);
+  await page.getByRole('button', { name: 'Tocar na sala', exact: true }).click();
   await expect(page.locator('video')).toBeAttached();
 }
 
