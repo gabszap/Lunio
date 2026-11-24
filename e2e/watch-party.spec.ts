@@ -92,7 +92,7 @@ test.describe('Watch Party', () => {
     await host.context.close();
   });
 
-  test('fila: o espectador adiciona, o Host toca agora e o vídeo troca para todos', async ({ browser }) => {
+  test('pedidos: o espectador sugere um vídeo, o Host toca agora e o vídeo troca para todos com link opaco', async ({ browser }) => {
     const host = await newUser(browser);
     const guest = await newUser(browser);
     const code = await createRoom(host.page, 'Ana');
@@ -100,19 +100,20 @@ test.describe('Watch Party', () => {
     await waitReady(host.page);
     await waitReady(guest.page);
 
-    // Bia (espectador) adiciona um vídeo à fila (seção abaixo do player)
-    await guest.page.getByLabel('Link para adicionar à fila').fill(SUBTITLES_URL);
-    await guest.page.getByRole('button', { name: 'Adicionar à fila' }).click();
-    await expect(guest.page.getByText('por Bia')).toBeVisible();
+    // Bia (espectador) envia um link pelo campo superior → entra na aba Pedidos
+    await guest.page.getByLabel('Sugerir link para a sala').fill(SUBTITLES_URL);
+    await guest.page.getByRole('button', { name: 'Enviar pedido' }).click();
+    await expect(guest.page.getByText('Pedido por Bia')).toBeVisible();
 
-    // O Host vê o item, não vê o do outro como removível por engano e toca agora
-    await expect(host.page.getByText('por Bia')).toBeVisible();
+    // O Host abre a aba Pedidos, vê o pedido da Bia e clica em Tocar agora
+    await host.page.getByRole('tab', { name: /Pedidos/ }).click();
+    await expect(host.page.getByText('Pedido por Bia')).toBeVisible();
     await host.page.getByRole('button', { name: 'Tocar agora' }).click();
 
-    // A fila esvazia nos dois e o vídeo trocou nos dois
-    await expect(host.page.getByText('A fila está vazia.')).toBeVisible();
-    await expect(guest.page.getByText('A fila está vazia.')).toBeVisible();
-    // O link é de quem adicionou (Bia): o Host, que só toca, recebe um id no lugar
+    // Os pedidos esvaziam nos dois e o vídeo trocou nos dois
+    await expect(host.page.getByText('Nenhum pedido pendente.')).toBeVisible();
+    await expect(guest.page.getByText('Nenhum pedido pendente.')).toBeVisible();
+    // O link é de quem pediu (Bia): o Host, que só toca, recebe um id no lugar
     await expect.poll(async () => (await state(guest.page)).src, { timeout: 30_000 }).toContain('legendas');
     await expect.poll(async () => (await state(host.page)).src, { timeout: 30_000 }).toMatch(/url=lk_[\w-]{22}/);
 
@@ -133,8 +134,10 @@ test.describe('Watch Party', () => {
       await host.page.getByRole('button', { name: 'Adicionar à fila' }).click();
       await expect(host.page.getByText(`ep${n}`, { exact: true })).toBeVisible();
     }
+    await guest.page.getByRole('tab', { name: /Fila/ }).click();
     const titles = (page: typeof host.page) => page.locator('section[aria-label="Fila de vídeos"] ol li .truncate.font-semibold').allInnerTexts();
     await expect.poll(() => titles(host.page)).toEqual(['ep1', 'ep2', 'ep3']);
+    await expect.poll(() => titles(guest.page)).toEqual(['ep1', 'ep2', 'ep3']);
 
     // Só o Host tem a alça de arrastar
     await expect(guest.page.getByRole('button', { name: 'Arrastar para reordenar' })).toHaveCount(0);
@@ -243,6 +246,35 @@ test.describe('Watch Party', () => {
     // o Host vê a pessoa na lista de banidos e pode desbanir
     await openParticipants(host.page);
     await expect(host.page.getByRole('button', { name: 'Desbanir' })).toBeVisible();
+
+    await host.context.close();
+    await guest.context.close();
+  });
+
+  test('nova UI da sala: duração no cabeçalho, faixa de membros, dock e console de logs em modal', async ({ browser }) => {
+    const host = await newUser(browser);
+    const guest = await newUser(browser);
+    const code = await createRoom(host.page, 'Ana');
+    await joinRoom(guest.page, code, 'Bia');
+    await waitReady(host.page);
+
+    // Cabeçalho com duração da sala e barra lateral acoplada com as 4 abas
+    await expect(host.page.getByLabel('Duração da sala')).toBeVisible();
+    await expect(host.page.getByRole('tab', { name: /Pedidos/ })).toBeVisible();
+    await expect(host.page.getByRole('tab', { name: /Fila/ })).toBeVisible();
+    await expect(host.page.getByRole('tab', { name: /Chat/ })).toBeVisible();
+    await expect(host.page.getByRole('tab', { name: /Membros/ })).toBeVisible();
+
+    // Faixa de membros abaixo do vídeo e dock visível
+    await expect(host.page.locator('#room-member-strip')).toBeVisible();
+    await expect(host.page.locator('#room-member-strip')).toContainText('Ana');
+    await expect(host.page.locator('#room-member-strip')).toContainText('Bia');
+    await expect(host.page.locator('#room-dock')).toBeVisible();
+
+    // Console de logs fora da página fixa, abrindo em modal pela dock
+    await expect(host.page.locator('#player-console-container')).toHaveCount(0);
+    await host.page.locator('#btn-dock-logs').click();
+    await expect(host.page.locator('#player-console-container')).toBeVisible();
 
     await host.context.close();
     await guest.context.close();

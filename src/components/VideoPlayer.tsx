@@ -14,8 +14,8 @@ import { MediaSource, Chapter, SubtitleTrack, AudioTrackOption, VideoInfo, Catal
 import type { CatalogEpisode } from '../lib/catalog';
 import type { StreamOption } from '../lib/streams';
 import { PlayerControls } from './PlayerControls';
-import { WatchPartyPanel } from './WatchPartyPanel';
-import type { PlaylistItem } from '../types/sync';
+import type { PlaylistItem, RoomState } from '../types/sync';
+import { MemberGrid } from './room/MemberGrid';
 import { audioBoost } from '../lib/audioBoost';
 import { normalizeChapters, getCurrentChapter, getSkippableChapter } from '../lib/chapters';
 import { useSkipVote } from './player/useSkipVote';
@@ -33,7 +33,6 @@ import {
   CodecNotice,
   RoundedCornersFrame,
   SkipChapterButton,
-  StandbyScreen,
   SubtitleFailurePrompt,
   SubtitlePreparingBadge,
 } from './player/overlays';
@@ -51,7 +50,7 @@ import { usePlayerPrefs } from './player/usePlayerPrefs';
 import { usePlayerShortcuts } from './player/usePlayerShortcuts';
 import { useRoomSync } from './player/useRoomSync';
 import { useSubtitles } from './player/useSubtitles';
-import { ScreenShareStandbyButton, ScreenStage } from './player/ScreenShare';
+import { ScreenStage } from './player/ScreenShare';
 import { useScreenShare } from './player/ScreenShareContext';
 
 export type { AspectMode } from './player/usePlayerPrefs';
@@ -80,6 +79,12 @@ interface VideoPlayerProps {
   onPlayPlaylistItem?: (item: PlaylistItem) => void;
   seriesContext?: CatalogSeriesContext | null;
   onSelectEpisodeStream?: (episode: CatalogEpisode, stream: StreamOption) => void;
+  /** Estado ao vivo da sala (para renderizar Telas 2 e 4 sem vídeo). */
+  roomState?: RoomState | null;
+  onSelectMember?: (memberId: string) => void;
+  /** Dock (hover inferior) e barra lateral (overlay) renderizados dentro do elemento :fullscreen. */
+  fullscreenDock?: React.ReactNode;
+  fullscreenSidebar?: React.ReactNode;
 }
 
 /**
@@ -108,6 +113,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onPlayPlaylistItem,
   seriesContext,
   onSelectEpisodeStream,
+  roomState,
+  onSelectMember,
+  fullscreenDock,
+  fullscreenSidebar,
 }) => {
   const playerRef = useRef<MediaPlayerInstance>(null);
   const mediaProviderRef = useRef<MediaProviderInstance>(null);
@@ -168,7 +177,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const player = playerRef.current;
     if (player) player.muted = muted || screenCovering;
   }, [muted, screenCovering]);
-  const fullscreen = useFullscreen(playerRef, containerRef);
+  const fullscreen = useFullscreen(playerRef, containerRef, onCloseWatchParty);
   const subs = useSubtitles({ playerRef, audioOffsetRef, setPaused, initialSubtitles });
   const { detectedSubtitles, readiness, setReadiness, activeSubtitle, setActiveSubtitle } = subs;
 
@@ -404,22 +413,56 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const { isFullscreen } = fullscreen;
 
   if (!hasSource) {
-    const canChoose = Boolean(onChooseVideo) && (!syncStatus.isConnected || syncStatus.isHost);
+    const liveRoomState = roomState ?? syncManager.getRoomState();
+    const currentUser = syncManager.getUser();
+    const screenActive =
+      screenShare.host.status === 'live' || screenShare.host.status === 'starting' || screenShare.covering;
+    const isNativeFsStandby = typeof document !== 'undefined' && !!document.fullscreenElement;
+    const isWindowFsStandby = isFullscreen && !isNativeFsStandby;
+
+    if (screenActive) {
+      return (
+        <div
+          id="video-player-standby"
+          ref={containerRef}
+          className={`${
+            isWindowFsStandby
+              ? 'fixed inset-0 z-50 w-screen h-screen max-w-none max-h-none window-fullscreen bg-black'
+              : isFullscreen
+              ? 'relative w-full h-full rounded-none border-0 bg-black'
+              : 'relative w-full h-full rounded-[18px] lu-video-bg border border-lu-border'
+          } overflow-hidden flex items-center justify-center select-none`}
+        >
+          <ScreenStage />
+          {syncStatus.reconnecting && <ReconnectingBanner />}
+          {isFullscreen && fullscreenDock}
+          {isFullscreen && fullscreenSidebar}
+        </div>
+      );
+    }
+
     return (
-      <StandbyScreen
-        canChoose={canChoose}
-        isConnected={syncStatus.isConnected}
-        reconnecting={syncStatus.reconnecting}
-        membersCount={syncStatus.membersCount}
-        isWatchPartyOpen={isWatchPartyOpen}
-        onChooseVideo={onChooseVideo}
-        onToggleWatchParty={handleToggleWatchParty}
-        onCloseWatchParty={handleCloseWatchParty}
-        onOpenRoomLobby={onOpenRoomLobby}
-        onLeaveRoom={onLeaveRoom}
-        stage={<ScreenStage />}
-        hostAction={<ScreenShareStandbyButton />}
-      />
+      <div
+        id="video-player-standby"
+        ref={containerRef}
+        className={`${
+          isWindowFsStandby
+            ? 'fixed inset-0 z-50 w-screen h-screen max-w-none max-h-none window-fullscreen bg-black'
+            : 'relative w-full h-full min-h-0'
+        } flex items-center justify-center select-none`}
+      >
+        <MemberGrid
+          members={liveRoomState?.members ?? []}
+          currentUserId={currentUser.id}
+          currentUsername={currentUser.username}
+          roomState={liveRoomState}
+          onSelectMember={onSelectMember}
+        />
+        <ScreenStage />
+        {syncStatus.reconnecting && <ReconnectingBanner />}
+        {isFullscreen && fullscreenDock}
+        {isFullscreen && fullscreenSidebar}
+      </div>
     );
   }
 
@@ -463,7 +506,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           ? `fixed inset-0 z-50 w-screen h-screen max-w-none max-h-none window-fullscreen bg-black aspect-${aspectMode}`
           : isFullscreen
           ? `h-full aspect-auto rounded-none bg-black aspect-${aspectMode}`
-          : `relative w-full aspect-video lu-video-bg aspect-${aspectMode}`
+          : `relative w-full h-full lu-video-bg aspect-${aspectMode}`
       } overflow-hidden select-none group text-lu-text ${isCursorHidden ? 'hide-cursor cursor-none' : ''} ${screenCovering ? 'screen-covering' : ''}`}
     >
       {/* Vidstack Media Player Core */}
@@ -651,7 +694,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           watchPartyMembersCount={syncStatus.membersCount}
           isWatchPartyConnected={syncStatus.isConnected}
           isHost={syncStatus.isHost}
-          unreadChatCount={room.unreadChatCount}
           onBack={isFullscreen ? undefined : onBack}
           onAddSubtitle={onAddSubtitle}
           seriesContext={seriesContext}
@@ -692,7 +734,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           enquanto nada está por cima do vídeo; em tela cheia não há cantos, por isso lá não acontecia. */}
       {!isFullscreen && <RoundedCornersFrame />}
 
-      <WatchPartyPanel isOpen={isWatchPartyOpen} onClose={handleCloseWatchParty} onOpenRoomLobby={onOpenRoomLobby} onLeaveRoom={onLeaveRoom} />
+      {isFullscreen && fullscreenDock}
+      {isFullscreen && fullscreenSidebar}
     </div>
   );
 };

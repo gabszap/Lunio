@@ -32,14 +32,15 @@ export const VolumeDisplay: React.FC<VolumeDisplayProps> = ({
   };
 
   return (
-    <div id="volume-display-container" className="hidden md:flex items-center gap-1">
+    <div id="volume-display-container" className="hidden md:flex items-center gap-1 flex-none">
       <IconButton
         id="btn-volume-mute-toggle"
         label={muted ? t('Ativar som (M)') : t('Silenciar (M)')}
         disabled={disabled}
         onClick={onMuteToggle}
+        className="!w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11"
       >
-        <Icon size={20} />
+        <Icon size={18} />
       </IconButton>
       <input
         id="volume-slider-input"
@@ -51,9 +52,9 @@ export const VolumeDisplay: React.FC<VolumeDisplayProps> = ({
         disabled={disabled}
         value={effectiveVolume}
         onChange={handleSliderChange}
-        className="w-[84px] m-0 cursor-pointer"
+        className="w-14 @[920px]:w-[84px] m-0 cursor-pointer"
       />
-      <span id="volume-percentage-text" className="w-[38px] text-right text-[12px] tabular text-lu-muted select-none">
+      <span id="volume-percentage-text" className="hidden @[960px]:inline w-[36px] text-right text-[12px] tabular text-lu-muted select-none">
         {percentage}%
       </span>
     </div>

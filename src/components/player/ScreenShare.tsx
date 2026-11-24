@@ -74,7 +74,7 @@ const ShareMenuBody: React.FC<{
  * para cima); `variant="button"` serve para a tela sem vídeo e abre numa janela centralizada (um menu que abre para cima
  * ali saía da tela). Só aparece para o Host de uma sala, em navegador capaz e com a transmissão ligada no servidor.
  */
-export const ScreenShareControl: React.FC<{ open: boolean; onOpenChange: (open: boolean) => void; variant?: 'icon' | 'button' }> = ({
+export const ScreenShareControl: React.FC<{ open: boolean; onOpenChange: (open: boolean) => void; variant?: 'icon' | 'button' | 'dock' }> = ({
   open,
   onOpenChange,
   variant = 'icon',
@@ -83,7 +83,7 @@ export const ScreenShareControl: React.FC<{ open: boolean; onOpenChange: (open: 
   const ref = useRef<HTMLDivElement>(null);
   const [choice, setChoice] = useState<ScreenQualityId>(s.lastQuality);
   const close = React.useCallback(() => onOpenChange(false), [onOpenChange]);
-  useDismiss(open && variant === 'icon', close, ref);
+  useDismiss(open && variant !== 'button', close, ref);
   useEffect(() => setChoice(s.lastQuality), [s.lastQuality]);
 
   if (!s.canBroadcast) return null;
@@ -98,6 +98,22 @@ export const ScreenShareControl: React.FC<{ open: boolean; onOpenChange: (open: 
         <IconButton id="btn-screen-share" label={label} aria-expanded={open} active={busy || open} onClick={() => onOpenChange(!open)}>
           <MonitorUp size={20} />
         </IconButton>
+      ) : variant === 'dock' ? (
+        <button
+          id="btn-screen-share"
+          type="button"
+          aria-label={label}
+          title={label}
+          aria-expanded={open}
+          onClick={() => onOpenChange(!open)}
+          className={cx(
+            'inline-flex items-center justify-center gap-2 h-9 px-3 rounded-[9px] text-[13px] font-medium transition-colors whitespace-nowrap flex-none',
+            busy || open ? 'bg-lu-tint text-lu-accent' : 'bg-white/6 text-lu-text hover:bg-white/10'
+          )}
+        >
+          <MonitorUp size={16} />
+          <span className="hidden md:inline">{label}</span>
+        </button>
       ) : (
         <GhostButton id="btn-screen-share" aria-expanded={open} onClick={() => onOpenChange(!open)}>
           <MonitorUp size={18} />
@@ -105,8 +121,13 @@ export const ScreenShareControl: React.FC<{ open: boolean; onOpenChange: (open: 
         </GhostButton>
       )}
 
-      {open && variant === 'icon' && (
-        <MenuPanel id="screen-share-menu" title={t('Transmitir a tela')} onClose={close} className="right-[-48px] w-[340px]">
+      {open && (variant === 'icon' || variant === 'dock') && (
+        <MenuPanel
+          id="screen-share-menu"
+          title={t('Transmitir a tela')}
+          onClose={close}
+          className={variant === 'dock' ? 'left-1/2 -translate-x-1/2 w-[340px]' : 'right-[-48px] w-[340px]'}
+        >
           <ShareMenuBody s={s} choice={choice} setChoice={setChoice} close={close} />
         </MenuPanel>
       )}

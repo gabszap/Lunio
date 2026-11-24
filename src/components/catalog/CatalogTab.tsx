@@ -44,6 +44,8 @@ interface CatalogTabProps {
   /** Um stream escolhido na lista "Onde assistir" (o App cria a sala e abre o player). */
   onPlayStream: (stream: StreamOption, title: string, seriesContext?: CatalogSeriesContext, movie?: CatalogRef) => void;
   onCreateRoom: () => void;
+  /** Quando `false` (ex.: dentro do MediaPickerModal na sala), não lê nem altera a URL do navegador nem rola a página. */
+  syncUrl?: boolean;
 }
 
 // ───────────────────────── Aba ─────────────────────────
@@ -60,7 +62,15 @@ function readSearchMode(): SearchMode {
   }
 }
 
-export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initialDetail = null, initialSeason = null, onWatch, onPlayStream, onCreateRoom }) => {
+export const CatalogTab: React.FC<CatalogTabProps> = ({
+  initialQuery = '',
+  initialDetail = null,
+  initialSeason = null,
+  onWatch,
+  onPlayStream,
+  onCreateRoom,
+  syncUrl = true,
+}) => {
   const [query, setQuery] = useState(initialQuery);
   const [debounced, setDebounced] = useState(initialQuery.trim());
   /** Um grupo por catálogo de busca da fonte (como no Stremio). */
@@ -73,11 +83,11 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   const [selected, setSelected] = useState<CatalogItem | null>(() => (initialDetail ? { id: initialDetail.id, type: initialDetail.type, name: '' } : null));
   const [calendarSeasonMalId, setCalendarSeasonMalId] = useState<string>();
   const [myList, setMyList] = useState<CatalogItem[]>(() => getMyList());
-  const [myListOpen, setMyListOpen] = useState(() => isLibraryPath(window.location.pathname));
+  const [myListOpen, setMyListOpen] = useState(() => (syncUrl ? isLibraryPath(window.location.pathname) : false));
   const myListScroll = useRef(0);
   const openMyList = () => {
     myListScroll.current = 0;
-    window.scrollTo({ top: 0 });
+    if (syncUrl) window.scrollTo({ top: 0 });
     setMyListOpen(true);
   };
   const refreshMyList = useCallback(() => {
@@ -127,17 +137,17 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   const [episodeId, setEpisodeId] = useState<string | null>(initialDetail?.videoId ?? null);
   // Explorar (o Descobrir do Stremio): aberto pelo botão ou por um link `/discover/<tipo>/<catálogo>`; continua montado por baixo do detalhe
   // para voltar à mesma grade e à mesma posição
-  const initialDiscover = useMemo(() => discoverFromUrl(), []);
+  const initialDiscover = useMemo(() => (syncUrl ? discoverFromUrl() : null), [syncUrl]);
   const [discoverOpen, setDiscoverOpen] = useState(initialDiscover !== null);
   const [discoverSel, setDiscoverSel] = useState<DiscoverRef | null>(initialDiscover);
   const discoverScroll = useRef(0);
   const openDiscover = (ref: DiscoverRef | null) => {
     discoverScroll.current = 0;
-    window.scrollTo({ top: 0 });
+    if (syncUrl) window.scrollTo({ top: 0 });
     setDiscoverSel(ref);
     setDiscoverOpen(true);
   };
-  const [calendarOpen, setCalendarOpen] = useState(readCalendarFromUrl);
+  const [calendarOpen, setCalendarOpen] = useState(() => (syncUrl ? readCalendarFromUrl() : false));
   const calendarScroll = useRef(0);
   const openItem = (item: CatalogItem, seasonMalId?: string) => {
     if (discoverOpen) discoverScroll.current = window.scrollY;
@@ -167,32 +177,36 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
   // A busca vai para o endereço (e sai dele quando a aba fecha). Com um título aberto a rota é só /detail/…: a busca volta
   // ao endereço quando o título fecha (ela continua aqui, no estado)
   useEffect(() => {
+    if (!syncUrl) return;
     writeSearchToUrl(selected || calendarOpen || myListOpen ? '' : debounced);
-  }, [debounced, selected, calendarOpen, myListOpen]);
-  useEffect(() => () => writeSearchToUrl(''), []);
+  }, [syncUrl, debounced, selected, calendarOpen, myListOpen]);
+  useEffect(() => () => { if (syncUrl) writeSearchToUrl(''); }, [syncUrl]);
   // O título aberto também vai para o endereço
   useEffect(() => {
+    if (!syncUrl) return;
     writeDetailToUrl(selected ? { type: selected.type, id: selected.id, videoId: episodeId ?? undefined } : null);
-  }, [selected, episodeId]);
-  useEffect(() => () => writeDetailToUrl(null), []);
+  }, [syncUrl, selected, episodeId]);
+  useEffect(() => () => { if (syncUrl) writeDetailToUrl(null); }, [syncUrl]);
   // O Explorar também (depois do título: ao fechar o título, o endereço volta para o Explorar). Sem escolha ainda (a fonte está carregando),
   // o endereço do link fica como veio
   useEffect(() => {
-    if (selected) return;
+    if (!syncUrl || selected) return;
     if (!discoverOpen) writeDiscoverToUrl(null);
     else if (discoverSel) writeDiscoverToUrl(discoverSel);
-  }, [selected, discoverOpen, discoverSel]);
-  useEffect(() => () => writeDiscoverToUrl(null), []);
+  }, [syncUrl, selected, discoverOpen, discoverSel]);
+  useEffect(() => () => { if (syncUrl) writeDiscoverToUrl(null); }, [syncUrl]);
 
   useEffect(() => {
+    if (!syncUrl) return;
     writeCalendarToUrl(calendarOpen && !selected);
-  }, [calendarOpen, selected]);
-  useEffect(() => () => writeCalendarToUrl(false), []);
+  }, [syncUrl, calendarOpen, selected]);
+  useEffect(() => () => { if (syncUrl) writeCalendarToUrl(false); }, [syncUrl]);
 
   useEffect(() => {
+    if (!syncUrl) return;
     writeLibraryToUrl(myListOpen && !selected);
-  }, [myListOpen, selected]);
-  useEffect(() => () => writeLibraryToUrl(false), []);
+  }, [syncUrl, myListOpen, selected]);
+  useEffect(() => () => { if (syncUrl) writeLibraryToUrl(false); }, [syncUrl]);
 
   useEffect(() => {
     if (!debounced) {
@@ -213,6 +227,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({ initialQuery = '', initi
 
   useEffect(() => {
     if (!selected) refreshMyList();
+    if (!syncUrl) return;
     const returnScroll = discoverOpen ? discoverScroll : calendarOpen ? calendarScroll : myListOpen ? myListScroll : null;
     const top = selected ? 0 : returnScroll?.current ?? 0;
     window.scrollTo({ top });

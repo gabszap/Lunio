@@ -89,9 +89,9 @@ export async function togglePlay(page: Page) {
   await page.keyboard.press('k');
 }
 
-/** Abre o painel da sala na aba "Participantes" (onde ficam expulsar/banir). */
+/** Abre o painel da sala na aba "Membros" (onde ficam expulsar/banir). */
 export async function openParticipants(page: Page) {
-  const tab = page.getByRole('tab', { name: /Participantes/ });
+  const tab = page.getByRole('tab', { name: /Membros/ });
   if (!(await tab.isVisible().catch(() => false))) await page.keyboard.press('w');
   await tab.click();
 }

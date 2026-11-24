@@ -73,8 +73,9 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
         active={open}
         disabled={disabled}
         onClick={() => onOpenChange(!open)}
+        className="!w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11"
       >
-        <Settings size={20} className={`transition-transform ${open ? 'rotate-45' : ''}`} />
+        <Settings size={18} className={`transition-transform ${open ? 'rotate-45' : ''}`} />
       </IconButton>
 
       {open && (

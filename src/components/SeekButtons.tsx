@@ -12,7 +12,7 @@ interface SeekButtonsProps {
 }
 
 const seekBtn =
-  'inline-flex items-center justify-center flex-none gap-1.5 h-11 px-3 rounded-[10px] text-[13px] font-semibold tabular transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
+  'inline-flex items-center justify-center flex-none gap-1 @[980px]:gap-1.5 h-8 @[880px]:h-9 @[1060px]:h-11 px-1.5 @[880px]:px-2 @[1060px]:px-3 rounded-[10px] text-[12px] @[980px]:text-[13px] font-semibold tabular transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap';
 
 export const SeekButtons: React.FC<SeekButtonsProps> = ({ currentTime, duration, onSeek, disabled = false }) => {
   const seekBy = (delta: number, label: string) => (e: React.MouseEvent) => {
@@ -56,7 +56,7 @@ export const SeekButtons: React.FC<SeekButtonsProps> = ({ currentTime, duration,
         title={t('Pular abertura (N)')}
         disabled={disabled}
         onClick={seekBy(90, t('Pular 90 s'))}
-        className={`${seekBtn} hidden md:inline-flex bg-lu-tint text-lu-accent hover:bg-lu-accent/20`}
+        className={`${seekBtn} hidden md:inline-flex text-lu-text hover:bg-white/8`}
       >
         <FastForward size={18} />
         <span>+90 s</span>

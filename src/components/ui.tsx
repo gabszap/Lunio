@@ -366,8 +366,8 @@ export const MenuPanel = React.forwardRef<
     aria-label={title}
     onClick={(e) => e.stopPropagation()}
     className={cx(
-      'absolute bottom-full mb-3 max-w-[calc(100vw-32px)] box-border p-2 rounded-[14px] bg-lu-elevated border border-lu-border shadow-[0_16px_40px_rgba(0,0,0,0.5)] text-lu-text z-50',
-      'max-h-[min(70vh,560px)] overflow-y-auto custom-scrollbar',
+      'player-menu-panel absolute bottom-full mb-3 max-w-[calc(100vw-32px)] box-border p-2 rounded-[14px] bg-lu-elevated border border-lu-border shadow-[0_16px_40px_rgba(0,0,0,0.5)] text-lu-text z-50',
+      'max-h-[clamp(180px,calc(100dvh-310px),480px)] overflow-y-auto custom-scrollbar',
       className,
       // No celular os menus viram bottom sheets (Mobile · Player: legendas/áudio/ajustes)
       'max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:top-auto max-sm:mb-0 max-sm:w-auto max-sm:max-w-none max-sm:translate-x-0 max-sm:rounded-b-none max-sm:max-h-[80vh] max-sm:px-3 max-sm:pb-6 max-sm:z-[60]'
@@ -589,7 +589,11 @@ export const Modal: React.FC<{
     );
     first?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && onClose) onClose();
+      if (e.key !== 'Escape' || !onClose) return;
+      // Quando há modais aninhados (ex.: SubtitleModal sobre MediaPickerModal), apenas o modal do topo responde ao Escape
+      const dialogs = document.querySelectorAll('[role="dialog"], [role="alertdialog"]');
+      if (dialogs.length > 0 && dialogs[dialogs.length - 1] !== dialogRef.current) return;
+      onClose();
     };
     document.addEventListener('keydown', onKey);
     return () => {

@@ -57,11 +57,12 @@ afterEach(() => {
 describe('fila (playlist)', () => {
   const item = (n: number) => ({ type: 'playlist:add', url: `https://exemplo.test/ep${n}.mkv`, title: `Ep ${n}` });
 
-  it('qualquer membro adiciona; o estado da sala traz a fila na ordem', () => {
+  it('Host adiciona direto e aprova pedido de espectador; o estado da sala traz a fila na ordem', () => {
     const host = connect('FILA1', 'h', 'Host');
     const guest = connect('FILA1', 'g', 'Gui');
     send(host, item(1));
-    send(guest, item(2));
+    send(guest, { ...item(2), type: 'request:add' });
+    send(host, { type: 'request:approve', itemId: stateOf('FILA1').requests![0].id });
     const list = stateOf('FILA1').playlist!;
     expect(list.map((i) => i.title)).toEqual(['Ep 1', 'Ep 2']);
     expect(list[1]).toMatchObject({ addedById: 'g', addedBy: 'Gui' });
@@ -81,7 +82,8 @@ describe('fila (playlist)', () => {
     const host = connect('FILA3', 'h');
     const guest = connect('FILA3', 'g');
     send(host, item(1));
-    send(guest, item(2));
+    send(guest, { ...item(2), type: 'request:add' });
+    send(host, { type: 'request:approve', itemId: stateOf('FILA3').requests![0].id });
     const [a, b] = stateOf('FILA3').playlist!;
     send(guest, { type: 'playlist:move', itemId: b.id, direction: 'up' });
     send(guest, { type: 'playlist:take', itemId: a.id });
@@ -514,7 +516,8 @@ describe('links opacos', () => {
   it('cada link da fila só aparece inteiro para quem o adicionou', () => {
     const host = connect('LK2', 'h', 'Host');
     const ana = connect('LK2', 'a', 'Ana');
-    send(ana, { type: 'playlist:add', url: ANA_LINK, title: 'Ep 2' });
+    send(ana, { type: 'request:add', url: ANA_LINK, title: 'Ep 2' });
+    send(host, { type: 'request:approve', itemId: stateOf('LK2').requests![0].id });
     send(host, { type: 'playlist:add', url: HOST_LINK, title: 'Ep 1' });
     expect(everything(ana)).toContain('CHAVE-DA-ANA');
     expect(everything(ana)).not.toContain('CHAVE-DO-HOST');
@@ -527,7 +530,8 @@ describe('links opacos', () => {
     const host = connect('LK3', 'h', 'Host');
     const ana = connect('LK3', 'a', 'Ana');
     const bia = connect('LK3', 'b', 'Bia');
-    send(ana, { type: 'playlist:add', url: ANA_LINK, title: 'Ep 2' });
+    send(ana, { type: 'request:add', url: ANA_LINK, title: 'Ep 2' });
+    send(host, { type: 'request:approve', itemId: stateOf('LK3').requests![0].id });
     const item = host.last('playlist:update').playlist[0];
     send(host, { type: 'playlist:take', itemId: item.id });
     send(host, { type: 'media:set', media: { url: item.url, title: 'Ep 2', duration: 0 } });

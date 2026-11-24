@@ -1,11 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { GripVertical, ListPlus, ListVideo, Play, X } from 'lucide-react';
-import { syncManager } from '../lib/sync';
-import { detectMimeType, getYouTubeId, shareableFingerprint, validateAndFormatUrl } from '../lib/media';
-import { extractCleanTitleFromUrl } from '../lib/recent';
-import { PLAYLIST_MAX_ITEMS, playlistUrlKey, type PlaylistItem } from '../types/sync';
-import { t } from '../lib/i18n';
-import { IconButton, PrimaryButton, TextInput, cx } from './ui';
+import { GripVertical, ListVideo, Play, X } from 'lucide-react';
+import { t } from '../../lib/i18n';
+import { syncManager } from '../../lib/sync';
+import type { PlaylistItem } from '../../types/sync';
+import { IconButton, cx } from '../ui';
 
 /** Espaço entre os itens da lista (gap-2); entra na distância que os vizinhos andam durante o arraste. */
 const ITEM_GAP = 8;
@@ -19,16 +17,14 @@ interface DragState {
   shift: number;
 }
 
-interface PlaylistPanelProps {
+export interface QueueTabProps {
   /** Host: toca o item agora (tira da fila e carrega o vídeo). */
   onPlayItem: (item: PlaylistItem) => void;
 }
 
-/** Fila da sala, abaixo do player (estilo YouTube): vídeos para assistir em sequência. */
-export const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ onPlayItem }) => {
+/** Aba de fila da sala dentro da barra lateral: vídeos para assistir em sequência. */
+export const QueueTab: React.FC<QueueTabProps> = ({ onPlayItem }) => {
   const [playlist, setPlaylist] = useState<PlaylistItem[]>(() => syncManager.getPlaylist());
-  const [link, setLink] = useState('');
-  const [error, setError] = useState('');
   const isHost = syncManager.isRoomHost();
   const myId = syncManager.getUser().id;
   const listRef = useRef<HTMLOListElement>(null);
@@ -38,40 +34,6 @@ export const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ onPlayItem }) => {
   const dragRef = useRef<{ startY: number; tops: number[]; heights: number[]; state: DragState } | null>(null);
 
   useEffect(() => syncManager.subscribeState(() => setPlaylist([...syncManager.getPlaylist()])), []);
-
-  const add = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const url = validateAndFormatUrl(link.trim());
-    if (!/^https?:\/\//i.test(url)) {
-      setError(t('Cole uma URL completa, começando com http:// ou https://'));
-      return;
-    }
-    if (playlist.length >= PLAYLIST_MAX_ITEMS) {
-      setError(t('A fila está cheia.'));
-      return;
-    }
-    const ytId = getYouTubeId(url);
-    const finalUrl = ytId ? `https://www.youtube.com/watch?v=${ytId}` : url;
-    // Só pega o que a pessoa mesma adicionou (dos outros chega um id); quem decide é o servidor
-    if (playlist.some((p) => playlistUrlKey(p.url) === playlistUrlKey(finalUrl))) {
-      setError(t('Esse vídeo já está na fila.'));
-      return;
-    }
-    if (ytId) {
-      let title = t('Vídeo do YouTube');
-      try {
-        const res = await fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(`https://www.youtube.com/watch?v=${ytId}`)}`);
-        if (res.ok) title = (await res.json()).title || title;
-      } catch {
-        // sem rede para o oEmbed: fica o título genérico
-      }
-      syncManager.emitPlaylistAdd({ url: `https://www.youtube.com/watch?v=${ytId}`, title, mimeType: 'video/youtube' });
-    } else {
-      syncManager.emitPlaylistAdd({ url, title: extractCleanTitleFromUrl(url) || 'Stream', mimeType: detectMimeType(url), fingerprint: shareableFingerprint(url) });
-    }
-    setLink('');
-    setError('');
-  };
 
   const contentY = (clientY: number) => {
     const list = listRef.current!;
@@ -129,14 +91,19 @@ export const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ onPlayItem }) => {
   };
 
   // Esc cancela o arraste
+  const dragging = Boolean(drag);
   useEffect(() => {
-    if (!drag) return;
+    if (!dragging) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') endDrag(false);
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        endDrag(false);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragging]);
 
   const offsetFor = (i: number): number => {
     if (!drag) return 0;
@@ -147,49 +114,26 @@ export const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ onPlayItem }) => {
   };
 
   return (
-    <section aria-label={t('Fila de vídeos')} className="rounded-[14px] bg-lu-surface border border-lu-border overflow-hidden">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-4 border-b border-lu-border">
-        <h2 className="inline-flex items-center gap-2 text-[15px] font-semibold">
-          <ListVideo size={18} />
-          {t('Fila')}
-          <span className="text-[13px] tabular text-lu-muted font-medium">{playlist.length}</span>
-        </h2>
-        <form onSubmit={add} className="flex-1 min-w-[240px] flex flex-col gap-1.5">
-          <div className="flex gap-2">
-            <TextInput
-              value={link}
-              onChange={(e) => {
-                setLink(e.target.value);
-                setError('');
-              }}
-              placeholder={t('Adicionar link do vídeo ou do YouTube')}
-              aria-label={t('Link para adicionar à fila')}
-              className="flex-1 min-w-0"
-            />
-            <PrimaryButton type="submit" disabled={!link.trim()} aria-label={t('Adicionar à fila')}>
-              <ListPlus size={16} />
-            </PrimaryButton>
-          </div>
-          {error && <span className="text-[12px] text-lu-error">{error}</span>}
-        </form>
-      </div>
-
+    <section aria-label={t('Fila de vídeos')} className="flex-1 min-h-0 flex flex-col">
       {playlist.length === 0 ? (
-        <p className="px-5 py-6 text-[13px] text-lu-muted text-center">
-          {t('A fila está vazia. Adicione links e o próximo toca sozinho quando o vídeo acabar.')}
-        </p>
+        <div className="flex-1 px-5 py-6 flex flex-col items-center justify-center text-center gap-2 text-lu-muted">
+          <ListVideo size={26} className="opacity-60" />
+          <p className="m-0 text-[13px] text-lu-muted max-w-[260px]">
+            {t('A fila está vazia. Adicione links e o próximo toca sozinho quando o vídeo acabar.')}
+          </p>
+        </div>
       ) : (
-        <ol ref={listRef} className="relative max-h-[360px] overflow-y-auto custom-scrollbar p-3 flex flex-col gap-2">
+        <ol ref={listRef} className="relative flex-1 min-h-0 overflow-y-auto custom-scrollbar p-3 flex flex-col gap-2">
           {playlist.map((item, i) => (
             <li
               key={item.id}
               style={drag ? { transform: `translateY(${offsetFor(i)}px)` } : undefined}
               className={cx(
-                'flex items-center gap-3 p-2.5 pl-3 rounded-[12px] border',
+                'flex items-center gap-2.5 p-2.5 rounded-[12px] border',
                 drag && 'select-none',
                 drag?.id === item.id
                   ? 'relative z-10 bg-lu-elevated border-lu-border-strong shadow-[0_12px_32px_rgba(0,0,0,0.5)]'
-                  : cx('bg-lu-elevated/60 border-lu-border', drag && 'transition-transform duration-150')
+                  : cx('bg-lu-surface border-lu-border', drag && 'transition-transform duration-150')
               )}
             >
               {isHost && (
@@ -197,7 +141,7 @@ export const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ onPlayItem }) => {
                   label={t('Arrastar para reordenar')}
                   size={36}
                   tone="muted"
-                  className={cx('touch-none flex-none cursor-grab', drag?.id === item.id && 'cursor-grabbing')}
+                  className={cx('touch-none flex-none cursor-grab -ml-1', drag?.id === item.id && 'cursor-grabbing')}
                   onPointerDown={(e) => startDrag(e, item, i)}
                   onPointerMove={moveDrag}
                   onPointerUp={() => endDrag(true)}
@@ -208,20 +152,20 @@ export const PlaylistPanel: React.FC<PlaylistPanelProps> = ({ onPlayItem }) => {
                     syncManager.emitPlaylistMove(item.id, e.key === 'ArrowUp' ? 'up' : 'down');
                   }}
                 >
-                  <GripVertical size={16} />
+                  <GripVertical size={15} />
                 </IconButton>
               )}
-              <span className="text-[12px] tabular text-lu-muted w-5 flex-none text-center">{i + 1}</span>
+              <span className="text-[12px] tabular text-lu-muted w-4 flex-none text-center">{i + 1}</span>
               <div className="min-w-0 flex-1">
-                <div className="text-[14px] font-semibold truncate" title={item.title}>{item.title}</div>
+                <div className="text-[14px] font-semibold truncate" title={item.title}>
+                  {item.title}
+                </div>
                 <div className="text-[12px] text-lu-muted truncate">{t('Adicionado por {name}', { name: item.addedBy })}</div>
               </div>
               {isHost && (
-                <>
-                  <IconButton label={t('Tocar agora')} size={36} onClick={() => onPlayItem(item)}>
-                    <Play size={15} />
-                  </IconButton>
-                </>
+                <IconButton label={t('Tocar agora')} size={36} onClick={() => onPlayItem(item)}>
+                  <Play size={15} />
+                </IconButton>
               )}
               {(isHost || item.addedById === myId) && (
                 <IconButton label={t('Remover da fila')} size={36} tone="muted" onClick={() => syncManager.emitPlaylistRemove(item.id)}>

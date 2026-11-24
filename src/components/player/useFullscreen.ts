@@ -1,15 +1,22 @@
-import { useEffect, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { MediaPlayerInstance } from '@vidstack/react';
 import { logger } from '../../lib/logger';
 import { subtitleManager } from '../../lib/subtitles';
 
 /** Tela cheia (nativa ou "ocupar a janela" no iframe do Discord), Picture-in-Picture e redimensionamento da legenda ASS. */
-export function useFullscreen(playerRef: RefObject<MediaPlayerInstance | null>, containerRef: RefObject<HTMLDivElement | null>) {
+export function useFullscreen(
+  playerRef: RefObject<MediaPlayerInstance | null>,
+  containerRef: RefObject<HTMLDivElement | null>,
+  onEnterFullscreen?: () => void
+) {
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isPip, setIsPip] = useState<boolean>(false);
+  const onEnterFullscreenRef = useRef(onEnterFullscreen);
+  onEnterFullscreenRef.current = onEnterFullscreen;
 
   const triggerFullscreenVisuals = (active: boolean) => {
     setIsFullscreen(active);
+    if (active) onEnterFullscreenRef.current?.();
     logger.action(active ? '[Player] Tela cheia' : '[Player] Saiu da tela cheia');
 
     if (active) {

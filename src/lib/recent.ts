@@ -47,7 +47,8 @@ export function pushRecentStream(list: RecentStream[], url: string, title: strin
 
 export function extractCleanTitleFromUrl(urlStr: string): string {
   try {
-    const parsed = new URL(urlStr, window.location.origin);
+    const base = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+    const parsed = new URL(urlStr, base);
     const parts = parsed.pathname.split('/').map((p) => {
       try {
         let dec = decodeURIComponent(p);

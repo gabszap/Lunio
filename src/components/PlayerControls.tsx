@@ -8,8 +8,6 @@ import {
   Captions,
   AudioWaveform,
   Maximize2,
-  Users,
-  ChevronLeft,
   RotateCcw,
   RotateCw,
   Plus,
@@ -19,13 +17,12 @@ import {
 import { Chapter, SubtitleTrack, AudioTrackOption, CatalogSeriesContext } from '../types/media';
 import type { CatalogEpisode } from '../lib/catalog';
 import type { StreamOption } from '../lib/streams';
-import { formatTime, getCurrentChapter } from '../lib/chapters';
+import { formatTime } from '../lib/chapters';
 import { SeekButtons } from './SeekButtons';
 import { VolumeDisplay } from './VolumeDisplay';
 import { SettingsMenu, formatMs } from './SettingsMenu';
 import { ChapterTimeline } from './ChapterTimeline';
 import { ChapterList } from './ChapterList';
-import { ScreenShareControl } from './player/ScreenShare';
 import { EpisodesOverlay } from './EpisodesMenu';
 import { t, msg } from '../lib/i18n';
 import {
@@ -193,7 +190,7 @@ const ASPECT_LABEL: Record<'fit' | 'fill' | 'stretch', string> = {
   stretch: msg('Ajuste de tela: esticar (Z)'),
 };
 
-type MenuId = 'subs' | 'audio' | 'chapters' | 'episodes' | 'settings' | 'screen' | null;
+type MenuId = 'subs' | 'audio' | 'chapters' | 'episodes' | 'settings' | null;
 
 export const PlayerControls: React.FC<PlayerControlsProps> = ({
   title,
@@ -268,39 +265,46 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   useDismiss(openMenu === 'audio', closeMenu, audioMenuRef);
 
   const isViewer = Boolean(isWatchPartyConnected && !isHost);
-  const currentChapter = getCurrentChapter(currentTime, chapters);
   const bufferAhead = getBufferAhead(currentTime, buffered, bufferedRanges);
   const showBuffer = duration > 0 || currentTime > 0 || buffered > 0;
   const bufferTone = bufferAhead >= 10 ? 'success' : bufferAhead >= 3 ? 'warning' : 'error';
 
-  const subtitleLine = [currentChapter?.title, parsedMetadata?.episodeTitle].filter(Boolean).join(' · ');
+  const episodeTitle = parsedMetadata?.episodeTitle ? String(parsedMetadata.episodeTitle) : '';
+  const hasChapters = chapters.length > 0;
   const codecBadge = parsedMetadata?.codec ? String(parsedMetadata.codec).toUpperCase().replace('X265', 'HEVC').replace('X264', 'H.264') : null;
-
-  const badgeCount = unreadChatCount > 0 ? unreadChatCount : (watchPartyMembersCount ?? 0) > 1 ? watchPartyMembersCount : 0;
 
   return (
     <div id="player-ui-overlay" className="absolute inset-0 flex flex-col justify-between pointer-events-none">
-      {/* Topo: voltar, título, capítulo atual e selos técnicos */}
-      <div className="pointer-events-auto flex items-start justify-between gap-4 px-3 sm:px-6 pt-3 sm:pt-5 pb-14 bg-gradient-to-b from-lu-video/80 to-lu-video/0">
+      {/* Topo: título, capítulo atual clicável e selos técnicos (ações da sala ficam no cabeçalho e na dock) */}
+      <div className="pointer-events-auto relative z-20 flex items-start justify-between gap-4 px-3 sm:px-6 pt-3 sm:pt-5 pb-14 bg-gradient-to-b from-lu-video/80 to-lu-video/0">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-          {onBack && (
-            <IconButton label={t('Voltar')} onClick={onBack} className="-ml-2">
-              <ChevronLeft size={20} />
-            </IconButton>
-          )}
           <div className="min-w-0">
             <h2 id="player-media-title" className="m-0 text-[15px] sm:text-[16px] font-medium truncate">
               {title || t('Stream de vídeo')}
             </h2>
-            {(subtitleLine || isInspecting) && (
-              <div className="hidden sm:flex items-center gap-2 text-[13px] text-lu-muted min-w-0">
+            {(hasChapters || episodeTitle || isInspecting) && (
+              <div className="hidden sm:flex items-center gap-2 text-[13px] text-lu-muted min-w-0 mt-0.5">
                 {isInspecting && (
                   <span className="inline-flex items-center gap-1.5 text-lu-accent flex-none">
                     <Spinner size={13} />
                     {t('Lendo faixas…')}
                   </span>
                 )}
-                {subtitleLine && <span id="player-active-chapter-badge" className="truncate">{subtitleLine}</span>}
+                {hasChapters && (
+                  <ChapterList
+                    chapters={chapters}
+                    currentTime={currentTime}
+                    onSeek={onSeek}
+                    open={openMenu === 'chapters'}
+                    onOpenChange={(o) => setOpenMenu(o ? 'chapters' : null)}
+                    disabled={isViewer}
+                  />
+                )}
+                {episodeTitle && (
+                  <span className="truncate">
+                    {hasChapters ? `· ${episodeTitle}` : episodeTitle}
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -374,7 +378,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
       {/* Base: timeline e barra de controles */}
       <div
         id="player-bottom-controls-bar"
-        className="pointer-events-auto flex flex-col gap-1 px-3 sm:px-6 pt-16 pb-2 sm:pb-4 bg-gradient-to-t from-lu-video/92 to-lu-video/0"
+        className="sm:@container pointer-events-auto flex flex-col gap-1 px-3 sm:px-4 @[980px]:px-6 pt-16 pb-2 sm:pb-3.5 bg-gradient-to-t from-lu-video/92 to-lu-video/0"
       >
         <ChapterTimeline
           currentTime={currentTime}
@@ -386,13 +390,13 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           disabled={isViewer}
         />
 
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-1 flex-wrap min-w-0">
+        <div className="flex items-center justify-between gap-1.5 flex-wrap sm:flex-nowrap">
+          <div className="flex items-center gap-0.5 @[980px]:gap-1 min-w-0 flex-none">
             {isViewer ? (
               <span
                 id="viewer-sync-badge"
                 title={t('Sua reprodução é sincronizada automaticamente com o Host da sala.')}
-                className="inline-flex items-center gap-2 h-11 px-3.5 box-border rounded-[10px] bg-lu-success/10 border border-lu-success/28 text-lu-success text-[13px] font-semibold"
+                className="inline-flex items-center gap-2 h-9 @[980px]:h-11 px-3 @[980px]:px-3.5 box-border rounded-[10px] bg-lu-success/10 border border-lu-success/28 text-lu-success text-[12px] @[980px]:text-[13px] font-semibold flex-none"
               >
                 <Dot tone="success" />
                 {t('Ao vivo')}
@@ -405,26 +409,27 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   aria-label={paused ? t('Reproduzir (Espaço)') : t('Pausar (Espaço)')}
                   title={paused ? t('Reproduzir (Espaço)') : t('Pausar (Espaço)')}
                   onClick={onPlayToggle}
-                  className="hidden sm:inline-flex w-11 h-11 rounded-[10px] items-center justify-center bg-lu-accent text-lu-bg hover:bg-lu-accent-hover transition-colors"
+                  className="hidden sm:inline-flex flex-none w-9 h-9 @[980px]:w-11 @[980px]:h-11 rounded-[10px] items-center justify-center bg-lu-accent text-lu-bg hover:bg-lu-accent-hover transition-colors"
                 >
-                  {paused ? <Play size={20} /> : <Pause size={20} />}
+                  {paused ? <Play size={18} /> : <Pause size={18} />}
                 </button>
                 <SeekButtons currentTime={currentTime} duration={duration} onSeek={onSeek} />
                 {onNext && (
                   <IconButton
                     id="btn-next-in-queue"
                     label={hasNext ? t('Próximo da fila') : t('Nenhum vídeo na fila')}
-                    size={44}
+                    size={36}
                     disabled={!hasNext}
                     onClick={onNext}
+                    className="!w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11"
                   >
-                    <SkipForward size={20} />
+                    <SkipForward size={18} />
                   </IconButton>
                 )}
               </>
             )}
 
-            <span id="player-time-display" className="px-2 text-[13px] tabular text-lu-muted whitespace-nowrap">
+            <span id="player-time-display" className="px-1.5 text-[12px] @[980px]:text-[13px] tabular text-lu-muted whitespace-nowrap flex-none">
               <span className="text-lu-text font-medium">{formatTime(currentTime)}</span> / {formatTime(duration)}
             </span>
 
@@ -432,7 +437,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               <span
                 id="player-buffer-status"
                 title={t('Buffer contíguo à frente: +{v1} s (até {v2})', { v1: bufferAhead.toFixed(1), v2: formatTime(currentTime + bufferAhead) })}
-                className="hidden lg:inline-flex items-center gap-1.5 text-[12px] text-lu-muted whitespace-nowrap tabular"
+                className="hidden @[1040px]:inline-flex items-center gap-1.5 text-[12px] text-lu-muted whitespace-nowrap tabular flex-none"
               >
                 <Dot tone={bufferTone} />
                 {bufferAhead > 0.2 ? t('Buffer +{n} s', { n: bufferAhead.toFixed(1).replace('.', ',') }) : t('Buffer: baixando…')}
@@ -440,7 +445,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-1 flex-wrap justify-end">
+          <div className="flex items-center gap-0.5 @[980px]:gap-1 flex-nowrap justify-end flex-none">
             <VolumeDisplay volume={volume} muted={muted} onVolumeChange={onVolumeChange} onMuteToggle={onMuteToggle} />
 
             {/* Legendas */}
@@ -449,10 +454,14 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                 id="btn-subtitles-toggle"
                 label={t('Legendas (C)')}
                 aria-expanded={openMenu === 'subs'}
-                active={Boolean(activeSubtitle) || openMenu === 'subs'}
                 onClick={() => toggleMenu('subs')}
+                className={cx(
+                  '!w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11',
+                  openMenu === 'subs' && 'bg-white/10',
+                  (Boolean(activeSubtitle) || openMenu === 'subs') && '!text-lu-accent'
+                )}
               >
-                <Captions size={20} />
+                <Captions size={18} />
               </IconButton>
               {openMenu === 'subs' && (
                 <MenuPanel
@@ -544,8 +553,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   aria-expanded={openMenu === 'audio'}
                   active={openMenu === 'audio'}
                   onClick={() => toggleMenu('audio')}
+                  className="!w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11"
                 >
-                  <AudioWaveform size={20} />
+                  <AudioWaveform size={18} />
                 </IconButton>
                 {openMenu === 'audio' && (
                   <MenuPanel
@@ -582,20 +592,12 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   aria-expanded={openMenu === 'episodes'}
                   active={openMenu === 'episodes'}
                   onClick={() => toggleMenu('episodes')}
+                  className="!w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11"
                 >
-                  <Tv size={20} />
+                  <Tv size={18} />
                 </IconButton>
               </div>
             )}
-
-            <ChapterList
-              chapters={chapters}
-              currentTime={currentTime}
-              onSeek={onSeek}
-              open={openMenu === 'chapters'}
-              onOpenChange={(o) => setOpenMenu(o ? 'chapters' : null)}
-              disabled={isViewer}
-            />
 
             <SettingsMenu
               playbackRate={playbackRate}
@@ -619,11 +621,10 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               <IconButton
                 id="btn-pip-toggle"
                 label={t('Picture-in-Picture')}
-                active={isPip}
                 onClick={onPipToggle}
-                className="hidden md:inline-flex"
+                className={cx('hidden md:inline-flex !w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11', isPip && '!text-lu-accent')}
               >
-                <PictureInPicture2 size={20} />
+                <PictureInPicture2 size={18} />
               </IconButton>
             )}
 
@@ -631,35 +632,10 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               <IconButton
                 id="btn-aspect-toggle"
                 label={t(ASPECT_LABEL[aspectMode])}
-                active={aspectMode !== 'fit'}
                 onClick={onToggleAspect}
-                className="hidden md:inline-flex"
+                className={cx('hidden md:inline-flex !w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11', aspectMode !== 'fit' && '!text-lu-accent')}
               >
-                <Maximize2 size={20} />
-              </IconButton>
-            )}
-
-            <ScreenShareControl open={openMenu === 'screen'} onOpenChange={(o) => setOpenMenu(o ? 'screen' : null)} />
-
-            {onWatchPartyToggle && (
-              <IconButton
-                id="btn-watchparty-toggle"
-                label={t('Watch Party')}
-                active={Boolean(isWatchPartyConnected)}
-                onClick={onWatchPartyToggle}
-                className="hidden sm:inline-flex"
-              >
-                <Users size={20} />
-                {badgeCount ? (
-                  <span
-                    className={cx(
-                      'absolute top-[5px] right-1 min-w-4 h-4 px-1 box-border rounded-lg text-[10px] font-bold leading-4 text-center text-lu-bg',
-                      unreadChatCount > 0 ? 'bg-lu-error' : 'bg-lu-accent'
-                    )}
-                  >
-                    {badgeCount > 9 ? '9+' : badgeCount}
-                  </span>
-                ) : null}
+                <Maximize2 size={18} />
               </IconButton>
             )}
 
@@ -667,8 +643,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               id="btn-fullscreen-toggle"
               label={isFullscreen ? t('Sair da tela cheia (F)') : t('Tela cheia (F)')}
               onClick={onFullscreenToggle}
+              className="!w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11"
             >
-              {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
+              {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
             </IconButton>
           </div>
         </div>

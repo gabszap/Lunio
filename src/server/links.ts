@@ -24,6 +24,7 @@ export interface LinkRoom {
   roomId: string;
   media: Pick<RoomMedia, 'url' | 'ownerId'> | null;
   playlist: Array<Pick<PlaylistItem, 'url' | 'addedById'>>;
+  requests?: Array<Pick<PlaylistItem, 'url' | 'addedById'>>;
 }
 
 /** A segunda aba da mesma pessoa tem `<id>_tab####`: vale o id de verdade (mesma regra de `baseUserId`). */
@@ -65,6 +66,7 @@ export function linksOf(room: LinkRoom): LinkEntry[] {
   };
   add(room.media?.url, room.media?.ownerId);
   for (const item of room.playlist) add(item.url, item.addedById);
+  for (const item of room.requests ?? []) add(item.url, item.addedById);
   return [...out.values()];
 }
 

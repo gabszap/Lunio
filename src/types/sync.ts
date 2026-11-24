@@ -46,6 +46,7 @@ export interface PlaylistItem {
 }
 
 export const PLAYLIST_MAX_ITEMS = 50;
+export const REQUESTS_MAX_ITEMS = 30;
 
 /** Chave para saber se dois links da fila são o mesmo vídeo (ignora espaços e o #fragmento). */
 export const playlistUrlKey = (url: string) => url.trim().replace(/#.*$/, '');
@@ -85,9 +86,13 @@ export interface BannedMember {
 export interface RoomState {
   roomId: string;
   hostId: string;
+  /** Timestamp (ms) de criação da sala no servidor (para o cronômetro de duração). */
+  createdAt?: number;
   media: RoomMedia | null;
-  /** Fila de vídeos a tocar em seguida (qualquer membro adiciona; o Host controla a ordem). */
+  /** Fila de vídeos a tocar em seguida (só o Host adiciona; espectadores enviam Pedidos). */
   playlist?: PlaylistItem[];
+  /** Pedidos sugeridos por espectadores aguardando aprovação do Host. */
+  requests?: PlaylistItem[];
   /** Estado de playback global autoritativo (ditado pelo Host) */
   playback: RoomPlaybackState;
   members: RoomMember[];
@@ -220,6 +225,25 @@ export type ClientMessage =
       itemId: string;
     }
   | {
+      /** Espectador sugere um vídeo para o Host aprovar. */
+      type: 'request:add';
+      url: string;
+      title: string;
+      mimeType?: string;
+      fingerprint?: string;
+    }
+  | {
+      /** Autor cancela o próprio pedido ou o Host recusa qualquer pedido. */
+      type: 'request:remove';
+      itemId: string;
+    }
+  | {
+      /** Host aprova o pedido para a fila (ou para tocar imediatamente com `playNow: true`). */
+      type: 'request:approve';
+      itemId: string;
+      playNow?: boolean;
+    }
+  | {
       /** O Host informa os capítulos do vídeo atual assim que o player os lê (no `media:set` ainda não se sabe). */
       type: 'media:chapters';
       /** URL do vídeo a que os capítulos pertencem (descarta o que chegar depois de uma troca de vídeo). */
@@ -290,6 +314,15 @@ export type ServerMessage =
   | {
       type: 'playlist:update';
       playlist: PlaylistItem[];
+    }
+  | {
+      type: 'requests:update';
+      requests: PlaylistItem[];
+    }
+  | {
+      /** Enviado apenas ao Host quando ele aprova um pedido com `playNow: true`. */
+      type: 'request:play';
+      item: PlaylistItem;
     }
   | {
       type: 'room:bans_update';
