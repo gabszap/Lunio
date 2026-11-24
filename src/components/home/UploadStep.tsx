@@ -7,8 +7,7 @@ import { logger } from '../../lib/logger';
 import { getAccessToken, waitForRoomToken } from '../../lib/access';
 import { UploadError, uploadInChunks, type UploadSession } from '../../lib/chunkedUpload';
 import { BigInput, CardFooter, FieldLabel, GhostButton, HomeCard, HomeCardTitle, PrimaryButton, TextButton, cx } from '../ui';
-import type { SourceCommit } from './types';
-import type { SourceStep } from './RoomMenu';
+import type { SourceCommit, SourceStep } from './types';
 import { apiErrorMessage, t } from '../../lib/i18n';
 
 const MAX_BYTES = 50 * 1024 ** 3;

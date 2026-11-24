@@ -13,18 +13,18 @@ import { Modal, ModalHeader, PrimaryButton, Spinner, TextButton, TextInput } fro
 import { readDetailFromUrl, readSearchFromUrl, readSeasonFromUrl } from './lib/searchUrl';
 import { canonicalizeCatalogUrl, pushTabUrl, tabFromPath } from './lib/homeRoute';
 import { HomeLayout, HomeTab } from './components/home/HomeLayout';
-import { RoomMenu, SourceStep } from './components/home/RoomMenu';
+import { HomeHero } from './components/home/HomeHero';
+import { LastRoomCard } from './components/home/LastRoomCard';
+import { RoomEntryCard, type CreateRoomInput } from './components/home/RoomEntryCard';
 import { StreamStep } from './components/home/StreamStep';
-import { UploadStep } from './components/home/UploadStep';
-import { DriveStep, YouTubeStep } from './components/home/LinkSourceSteps';
-import { JoinError, JoinStep, checkRoom } from './components/home/RoomSteps';
+import { JoinError, checkRoom } from './components/home/RoomSteps';
 import { StatusTab } from './components/home/StatusTab';
 import type { WatchIntent } from './components/catalog/CatalogTab';
 import type { StreamOption } from './lib/streams';
 import type { CommitMode, CommitOptions } from './components/home/types';
 import { MediaPayload, SubtitleTrack, CatalogSeriesContext } from './types/media';
 import { CatalogEpisode, episodeTag, loadActiveSeriesContext, saveActiveSeriesContext } from './lib/catalog';
-import type { PlaylistItem } from './types/sync';
+import type { PlaylistItem, RoomInitialSettings } from './types/sync';
 import { logger } from './lib/logger';
 import { clearLastRoom, saveLastRoom } from './lib/lastRoom';
 import { refFromSeriesContext, startPlayback, type CatalogRef } from './lib/continueWatching';
@@ -38,7 +38,7 @@ import { t, useLang } from './lib/i18n';
 import { ScreenShareProvider } from './components/player/ScreenShareContext';
 import { streamMediaInfo } from './lib/streamMime';
 
-type HomeStep = 'menu' | 'join' | SourceStep;
+type HomeStep = 'entry' | 'stream';
 
 /** Enquanto o pedaço sob demanda (player/catálogo) baixa. */
 const PanelFallback: React.FC = () => (
@@ -71,7 +71,7 @@ export default function App() {
     const hasRoom = Boolean(readRoomFromUrl());
     return (initialSearch.current || initialDetail.current) && !hasRoom ? 'catalog' : 'room';
   });
-  const [homeStep, setHomeStep] = useState<HomeStep>('menu');
+  const [homeStep, setHomeStep] = useState<HomeStep>('entry');
   const [joinPrefill, setJoinPrefill] = useState<{ code: string; error: JoinError | null }>({ code: '', error: null });
   const [watchIntent, setWatchIntent] = useState<WatchIntent | null>(null);
 
@@ -93,7 +93,6 @@ export default function App() {
     typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
   );
   const [sidebarTab, setSidebarTab] = useState<RoomSidebarTab>('chat');
-  const [autoOpenScreenPicker, setAutoOpenScreenPicker] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [kickBanAlert, setKickBanAlert] = useState<{ title: string; message: string; type: 'kicked' | 'banned' | 'locked' } | null>(null);
   const [passwordPrompt, setPasswordPrompt] = useState<{ roomCode: string; error?: string } | null>(null);
@@ -171,7 +170,7 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  const goHome = useCallback((tab: HomeTab = 'room', step: HomeStep = 'menu') => {
+  const goHome = useCallback((tab: HomeTab = 'room', step: HomeStep = 'entry') => {
     setView('home');
     setHomeTab(tab);
     setHomeStep(step);
@@ -277,7 +276,7 @@ export default function App() {
             setRoomInUrl(null);
             setJoinPrefill({ code: validCode, error: info.closed ? 'closed' : 'not_found' });
             setHomeTab('room');
-            setHomeStep('join');
+            setHomeStep('entry');
             setView('home');
           } else {
             requestJoin(validCode);
@@ -375,7 +374,7 @@ export default function App() {
         setIsWatchPartyOpen(false);
         setView('home');
         setHomeTab('room');
-        setHomeStep('menu');
+        setHomeStep('entry');
       }
       if (code === 'banned') {
         setKickBanAlert(
@@ -417,7 +416,7 @@ export default function App() {
           setRoomInUrl(null);
           setView('home');
           setHomeTab('room');
-          setHomeStep('menu');
+          setHomeStep('entry');
         }
         setKickBanAlert({
           title: t('Sala trancada'),
@@ -438,7 +437,7 @@ export default function App() {
   }, []);
 
   /** Garante uma sala em que você é o Host e devolve o código. */
-  const ensureRoom = useCallback((): string => {
+  const ensureRoom = useCallback((initialSettings?: RoomInitialSettings): string => {
     const st = syncManager.getStatus();
     if (discordManager.isDiscordActivity() && st.roomId) return st.roomId;
     if ((st.isConnected || st.isConnecting) && st.isHost && st.roomId) return st.roomId;
@@ -446,7 +445,7 @@ export default function App() {
     const code = generateRoomCode();
     setRoomInUrl(code);
     wasInRoomRef.current = false;
-    syncManager.connect(code);
+    syncManager.connect(code, undefined, initialSettings);
     logger.info(`[Sala] Sala ${code} criada (você é o Host)`);
     return code;
   }, []);
@@ -488,7 +487,7 @@ export default function App() {
 
     if (mode === 'room') {
       // Cria a sala e já abre o player; o código fica no cabeçalho do player para compartilhar
-      ensureRoom();
+      ensureRoom(options.initialRoomSettings);
       emitCurrentMedia(merged);
       setIsWatchPartyOpen(typeof window !== 'undefined' ? window.innerWidth >= 1024 : true);
       setView('player');
@@ -506,6 +505,7 @@ export default function App() {
   /** Um stream escolhido no detalhe do catálogo ("Onde assistir"): cria a sala e abre o player. */
   const playStream = (stream: StreamOption, title: string, context?: CatalogSeriesContext, movie?: CatalogRef) => {
     const { mimeType, isMkv } = streamMediaInfo(stream.url, stream.filename);
+    const roomName = title.trim().slice(0, 48);
     commitMedia(
       {
         url: stream.url,
@@ -517,7 +517,13 @@ export default function App() {
         isMkv,
       },
       'room',
-      { seriesContext: context, continueRef: context ? refFromSeriesContext(context) : movie }
+      {
+        seriesContext: context,
+        continueRef: context ? refFromSeriesContext(context) : movie,
+        initialRoomSettings: !isHostingRoom()
+          ? { ...(roomName ? { name: roomName } : {}), visibility: 'public' }
+          : undefined,
+      }
     );
   };
 
@@ -605,92 +611,70 @@ export default function App() {
     isHost: syncStatus.isHost,
   };
 
-  const backToMenu = () => {
-    setHomeStep('menu');
-    setWatchIntent(null);
-  };
-
-  /** "Compartilhar sua tela": cria a sala sem vídeo e abre o palco; abre o seletor de qualidade automaticamente. */
-  const startScreenRoom = () => {
-    // Já é Host de uma sala (voltou à Home sem sair): volta a ela em vez de esvaziar o vídeo só neste navegador
-    if (isHostingRoom()) {
-      setAutoOpenScreenPicker(true);
-      setView('player');
-      return;
-    }
-    withName(() => {
-      setPendingSubtitles([]);
-      setAutoPlayNext(false);
-      setCurrentPayload(EMPTY_PAYLOAD);
-      setWatchIntent(null);
-      ensureRoom();
-      setIsWatchPartyOpen(typeof window !== 'undefined' ? window.innerWidth >= 1024 : true);
-      setAutoOpenScreenPicker(true);
-      setView('player');
-    }, t('Criar sala'));
-  };
+  /** Cria uma sala vazia a partir da Home preservando nome, privacidade e senha opcional. */
+  const createEmptyRoom = useCallback(
+    (input: CreateRoomInput) => {
+      withName(() => {
+        setPendingSubtitles([]);
+        setAutoPlayNext(false);
+        currentUrlRef.current = '';
+        setCurrentPayload(EMPTY_PAYLOAD);
+        setWatchIntent(null);
+        updateSeriesContext(null);
+        startPlayback(null);
+        setUnreadChatCount(0);
+        ensureRoom({
+          name: input.name,
+          visibility: input.visibility,
+          ...(input.password ? { password: input.password } : {}),
+        });
+        setIsWatchPartyOpen(typeof window !== 'undefined' ? window.innerWidth >= 1024 : true);
+        setView('player');
+      }, t('Criar sala'));
+    },
+    [ensureRoom, updateSeriesContext, withName]
+  );
 
   const renderRoomTab = () => {
-    switch (homeStep) {
-      case 'join':
-        return (
-          <JoinStep
-            initialCode={joinPrefill.code}
-            initialError={joinPrefill.error}
-            onBack={backToMenu}
-            onJoin={requestJoin}
-            onCreate={backToMenu}
-          />
-        );
-      case 'stream':
-        return (
-          <StreamStep
-            recentStreams={recentStreams}
-            onRemoveRecent={(url) =>
-              setRecentStreams((prev) => {
-                const next = prev.filter((i) => i.url !== url);
-                saveRecentStreams(next);
-                return next;
-              })
-            }
-            onClearRecent={() => {
-              setRecentStreams([]);
-              saveRecentStreams([]);
-            }}
-            intentTitle={watchIntent?.title}
-            preferSolo={watchIntent?.preferSolo}
-            pendingSubtitles={pendingSubtitles.length}
-            onAddSubtitle={() => setSubtitleModal('pending')}
-            onBack={() => (watchIntent ? goHome('catalog') : backToMenu())}
-            onCommit={commitMedia}
-          />
-        );
-      case 'upload':
-        return <UploadStep onBack={backToMenu} onCommit={commitMedia} ensureRoom={ensureRoom} requireName={(cb) => (isHostingRoom() ? cb() : withName(cb, t('Criar sala')))} onPickSource={setHomeStep} />;
-      case 'youtube':
-        return <YouTubeStep onBack={backToMenu} onCommit={commitMedia} />;
-      case 'drive':
-        return <DriveStep onBack={backToMenu} onCommit={commitMedia} />;
-      default:
-        return (
-          <RoomMenu
-            onPick={(step) => {
-              setWatchIntent(null);
-              if (step === 'screen') {
-                startScreenRoom();
-                return;
-              }
-              setHomeStep(step);
-            }}
-            onJoin={() => {
-              setJoinPrefill({ code: '', error: null });
-              setHomeStep('join');
-            }}
-            onRejoin={requestJoin}
-            onCatalog={() => setHomeTab('catalog')}
-          />
-        );
+    if (homeStep === 'stream') {
+      return (
+        <StreamStep
+          recentStreams={recentStreams}
+          onRemoveRecent={(url) =>
+            setRecentStreams((prev) => {
+              const next = prev.filter((i) => i.url !== url);
+              saveRecentStreams(next);
+              return next;
+            })
+          }
+          onClearRecent={() => {
+            setRecentStreams([]);
+            saveRecentStreams([]);
+          }}
+          intentTitle={watchIntent?.title}
+          preferSolo={watchIntent?.preferSolo}
+          pendingSubtitles={pendingSubtitles.length}
+          onAddSubtitle={() => setSubtitleModal('pending')}
+          onBack={() => goHome('catalog')}
+          onCommit={commitMedia}
+        />
+      );
     }
+
+    return (
+      <>
+        <HomeHero />
+        <LastRoomCard onRejoin={requestJoin} />
+        <RoomEntryCard
+          initialMode={joinPrefill.code || joinPrefill.error ? 'join' : 'create'}
+          joinPrefill={joinPrefill}
+          onCreateRoom={createEmptyRoom}
+          onJoinRoom={requestJoin}
+          onCatalog={() => setHomeTab('catalog')}
+          onClearJoinPrefill={() => setJoinPrefill({ code: '', error: null })}
+        />
+      </>
+    );
   };
 
   return (
@@ -703,7 +687,7 @@ export default function App() {
           onTabChange={(tab) => {
             setHomeTab(tab);
             setWatchIntent(null);
-            if (tab !== 'room') setHomeStep('menu');
+            if (tab !== 'room') setHomeStep('entry');
           }}
           onLogo={() => goHome('room')}
           centered={homeTab !== 'catalog'}
@@ -743,8 +727,6 @@ export default function App() {
           unreadChat={unreadChatCount}
           onOpenRoomLobby={() => setShowRoomModal(true)}
           onPlayQueueItem={playPlaylistItem}
-          autoOpenScreenPicker={autoOpenScreenPicker}
-          onAutoOpenScreenPickerConsumed={() => setAutoOpenScreenPicker(false)}
           recentStreams={recentStreams}
           onRemoveRecent={(url) =>
             setRecentStreams((prev) => {
@@ -763,7 +745,7 @@ export default function App() {
           requireName={(cb) => (isHostingRoom() ? cb() : withName(cb, t('Criar sala')))}
           onCommitMedia={commitMedia}
           onPlayCatalogStream={playStream}
-          renderPlayer={({ roomState, onSelectMember, fullscreenDock, fullscreenSidebar }) => (
+          renderPlayer={({ roomState, onSelectMember, fullscreenDock, fullscreenSidebar, openMediaPicker }) => (
             <Suspense fallback={<PanelFallback />}>
               {/* key = URL: um vídeo novo (fila, Host trocando) nasce com estado limpo: áudio escolhido, posição, retomada */}
               <VideoPlayer
@@ -784,7 +766,7 @@ export default function App() {
                 onSelectEpisodeStream={playEpisodeStream}
                 onPlayPlaylistItem={playPlaylistItem}
                 onAddSubtitle={() => setSubtitleModal('current')}
-                onChooseVideo={() => goHome('room')}
+                onChooseVideo={openMediaPicker}
                 roomState={roomState}
                 onSelectMember={onSelectMember}
                 fullscreenDock={fullscreenDock}
