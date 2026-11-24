@@ -197,6 +197,8 @@ export const RoomShell: React.FC<RoomShellProps> = ({
     <div className="h-dvh w-full bg-lu-bg text-lu-text flex flex-col p-3 gap-3 overflow-hidden box-border">
       <RoomHeader
         roomCode={room.code}
+        roomName={roomState?.name}
+        visibility={roomState?.visibility}
         connected={room.connected}
         environment={environment}
         createdAt={createdAt}
@@ -241,6 +243,7 @@ export const RoomShell: React.FC<RoomShellProps> = ({
         open={mediaPickerOpen}
         onClose={() => setMediaPickerOpen(false)}
         inRoom={room.connected}
+        isHost={room.isHost}
         roomCode={room.code}
         recentStreams={recentStreams}
         onRemoveRecent={onRemoveRecent}
@@ -250,6 +253,25 @@ export const RoomShell: React.FC<RoomShellProps> = ({
         ensureRoom={ensureRoom}
         requireName={requireName}
         onCommit={onCommitMedia}
+        onSuggestMedia={(item) => {
+          const requests = syncManager.getRequests();
+          const playlist = syncManager.getPlaylist();
+          if (requests.length >= REQUESTS_MAX_ITEMS) return;
+          void prepareMediaLink(
+            item.url,
+            [...requests.map((r) => r.url), ...playlist.map((p) => p.url)],
+            Number.POSITIVE_INFINITY
+          ).then((res) => {
+            if ('error' in res) return;
+            syncManager.emitRequestAdd({
+              ...res.item,
+              title: item.title || res.item.title,
+              mimeType: item.mimeType || res.item.mimeType,
+            });
+            onSidebarTabChange('requests');
+            if (!sidebarOpen) onToggleSidebar();
+          });
+        }}
         onPlayStream={onPlayCatalogStream}
       />
 

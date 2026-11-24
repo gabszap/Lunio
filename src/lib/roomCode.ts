@@ -59,11 +59,47 @@ export function roomCodeFrom(input: string): string | null {
 }
 
 /**
- * Monta o link completo de compartilhamento para a sala
+ * Extrai o código da sala do endereço atual (`/room/CODE` ou o legado `?room=CODE`).
+ */
+export function readRoomFromUrl(href?: string): string | null {
+  try {
+    const raw = href ?? (typeof window !== 'undefined' ? window.location.href : '');
+    if (!raw) return null;
+    const base = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+    const url = new URL(raw, base);
+    const pathMatch = /^\/room\/([A-Za-z0-9]{4,32})\/?$/i.exec(url.pathname);
+    if (pathMatch) {
+      const candidate = pathMatch[1].toUpperCase();
+      if (ROOM_CODE_REGEX.test(candidate)) return candidate;
+    }
+    const queryRoom = url.searchParams.get('room');
+    if (queryRoom) {
+      const candidate = queryRoom.trim().toUpperCase();
+      if (ROOM_CODE_REGEX.test(candidate)) return candidate;
+    }
+  } catch {}
+  return null;
+}
+
+/**
+ * Atualiza a URL do navegador para `/room/CODE` (ou limpa de volta para `/home` ao sair).
+ */
+export function setRoomInUrl(code: string | null): void {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  url.searchParams.delete('room');
+  if (code) {
+    url.pathname = `/room/${code}`;
+  } else if (/^\/room\//i.test(url.pathname)) {
+    url.pathname = '/home';
+  }
+  window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+}
+
+/**
+ * Monta o link completo de compartilhamento para a sala (`/room/CODE`).
  */
 export function formatRoomUrl(roomId: string): string {
-  if (typeof window === 'undefined') return `?room=${roomId}`;
-  const url = new URL('/', window.location.origin);
-  url.searchParams.set('room', roomId);
-  return url.toString();
+  if (typeof window === 'undefined') return `/room/${roomId}`;
+  return new URL(`/room/${roomId}`, window.location.origin).toString();
 }

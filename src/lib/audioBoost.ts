@@ -17,6 +17,7 @@ export class AudioBoostManager {
   private isAvailable = true;
 
   constructor() {
+    if (typeof localStorage === 'undefined') return;
     const savedBoost = localStorage.getItem('vidstack_player_volume_boost');
     if (savedBoost) {
       const parsed = parseFloat(savedBoost);
@@ -72,12 +73,12 @@ export class AudioBoostManager {
         const delayNode = audioContext.createDelay(5.0); // max 5 seconds delay buffer
         const compressorNode = audioContext.createDynamicsCompressor();
 
-        // Dynamics compressor settings to prevent harsh clipping when boosted up to 200%
-        compressorNode.threshold.setValueAtTime(-6, audioContext.currentTime);
-        compressorNode.knee.setValueAtTime(30, audioContext.currentTime);
-        compressorNode.ratio.setValueAtTime(12, audioContext.currentTime);
-        compressorNode.attack.setValueAtTime(0.003, audioContext.currentTime);
-        compressorNode.release.setValueAtTime(0.25, audioContext.currentTime);
+        // Limitador suave perto de 0 dBFS: transparente em 100% e evita clipping no boost até 200%
+        compressorNode.threshold.setValueAtTime(-1, audioContext.currentTime);
+        compressorNode.knee.setValueAtTime(6, audioContext.currentTime);
+        compressorNode.ratio.setValueAtTime(20, audioContext.currentTime);
+        compressorNode.attack.setValueAtTime(0.002, audioContext.currentTime);
+        compressorNode.release.setValueAtTime(0.15, audioContext.currentTime);
 
         // Chain: source -> gainNode -> delayNode -> compressor -> destination
         sourceNode.connect(gainNode);
@@ -108,6 +109,8 @@ export class AudioBoostManager {
               const now = graph.audioContext.currentTime;
               graph.gainNode.gain.cancelScheduledValues(now);
               graph.gainNode.gain.setValueAtTime(this.boostPercent / 100, now);
+              graph.delayNode.delayTime.cancelScheduledValues(now);
+              graph.delayNode.delayTime.setValueAtTime(this.audioDelaySec, now);
               if (graph.audioContext.state === 'suspended') {
                 graph.audioContext.resume().catch(() => {});
               }
@@ -154,16 +157,32 @@ export class AudioBoostManager {
     }
   }
 
+  private ensureElement(): HTMLMediaElement | null {
+    if (this.currentElement && (typeof this.currentElement.isConnected !== 'boolean' || this.currentElement.isConnected)) {
+      return this.currentElement;
+    }
+    this.currentElement = null;
+    if (typeof document !== 'undefined') {
+      const video = document.querySelector('#video-player-root video') as HTMLMediaElement | null;
+      if (video) {
+        this.currentElement = video;
+        return video;
+      }
+    }
+    return null;
+  }
+
   public setBoost(percent: number) {
     const clamped = Math.max(100, Math.min(200, percent));
     this.boostPercent = clamped;
-    localStorage.setItem('vidstack_player_volume_boost', clamped.toString());
+    if (typeof localStorage !== 'undefined') localStorage.setItem('vidstack_player_volume_boost', clamped.toString());
 
-    if (this.currentElement) {
+    const el = this.ensureElement();
+    if (el) {
       if (clamped > 100) {
-        this.attachToElement(this.currentElement);
+        this.attachToElement(el);
       }
-      const graph = videoGraphMap.get(this.currentElement);
+      const graph = videoGraphMap.get(el);
       if (graph) {
         this.applyGain(graph);
       }
@@ -175,13 +194,14 @@ export class AudioBoostManager {
   public setAudioDelay(delayInSeconds: number) {
     const clamped = Math.max(0, Math.min(5.0, Number(delayInSeconds.toFixed(3))));
     this.audioDelaySec = clamped;
-    localStorage.setItem('vidstack_player_audio_delay', clamped.toString());
+    if (typeof localStorage !== 'undefined') localStorage.setItem('vidstack_player_audio_delay', clamped.toString());
 
-    if (this.currentElement) {
+    const el = this.ensureElement();
+    if (el) {
       if (clamped > 0) {
-        this.attachToElement(this.currentElement);
+        this.attachToElement(el);
       }
-      const graph = videoGraphMap.get(this.currentElement);
+      const graph = videoGraphMap.get(el);
       if (graph) {
         this.applyDelay(graph);
       }
@@ -190,9 +210,16 @@ export class AudioBoostManager {
     logger.setting('Atraso do áudio', `${Math.round(clamped * 1000)} ms`);
   }
 
+  private resumeIfNeeded(graph: AudioGraph) {
+    if (graph.audioContext.state === 'suspended' && this.currentElement && !this.currentElement.paused) {
+      graph.audioContext.resume().catch(() => {});
+    }
+  }
+
   private applyGain(graph: AudioGraph) {
     // 100% -> gain 1.0; 200% -> gain 2.0
     const gainValue = this.boostPercent / 100;
+    this.resumeIfNeeded(graph);
     try {
       graph.gainNode.gain.cancelScheduledValues(graph.audioContext.currentTime);
       graph.gainNode.gain.setValueAtTime(gainValue, graph.audioContext.currentTime);
@@ -202,6 +229,7 @@ export class AudioBoostManager {
   }
 
   private applyDelay(graph: AudioGraph) {
+    this.resumeIfNeeded(graph);
     try {
       graph.delayNode.delayTime.cancelScheduledValues(graph.audioContext.currentTime);
       graph.delayNode.delayTime.setValueAtTime(this.audioDelaySec, graph.audioContext.currentTime);

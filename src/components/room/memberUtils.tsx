@@ -30,12 +30,22 @@ export function behindLabel(member: { isHost: boolean; behindMs?: number }, room
 }
 
 /** Status resumido de sincronia de um membro para o dot/tooltip dos cards. */
-export function memberSyncMeta(member: RoomMember, room: RoomState | null): { tone: 'success' | 'warning'; label: string } {
+export function memberSyncMeta(
+  member: RoomMember,
+  room: RoomState | null
+): { tone: 'success' | 'warning'; label: string; buffering?: boolean; behindBadge?: string } {
   const transmitting = memberTransmitting(member, room);
   const behind = behindLabel(member, room);
   if (transmitting) return { tone: 'success', label: t('Transmitindo') };
   if (member.watchingScreen) return { tone: 'success', label: t('Assistindo') };
-  if (behind) return { tone: 'warning', label: behind.text };
+  if (room?.media && (member.state === 'stalled' || (member.state === 'loading' && !member.ready))) {
+    return { tone: 'warning', label: t('Carregando…'), buffering: true };
+  }
+  if (behind) {
+    const sec = Math.round(Math.abs(member.behindMs ?? 0) / 1000);
+    const sign = (member.behindMs ?? 0) > 0 ? '−' : '+';
+    return { tone: 'warning', label: behind.text, behindBadge: `${sign}${sec}s` };
+  }
   if (member.ready) return { tone: 'success', label: t('Sincronizado') };
   return { tone: 'warning', label: t('Aguardando') };
 }

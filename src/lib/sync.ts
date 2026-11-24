@@ -1,8 +1,11 @@
 import { discordManager } from './discord';
-import { clearRoomToken, setRoomToken } from './access';
+import { clearRoomToken, getSavedRoomToken, setRoomToken } from './access';
 import { logger } from './logger';
 import { t } from './/i18n';
+import { readRoomFromUrl, setRoomInUrl } from './roomCode';
 import { ServerClock } from './serverClock';
+import { decideDrift, type DriftCorrectionResult } from './playbackDrift';
+import { syncDiagnostics } from './syncDiagnostics';
 import type { ScreenSignals } from './screen/signals';
 import type { ScreenKeyMaterial } from './screen/wire';
 import type { RoomScreen, ScreenQualityId } from '../types/screen';
@@ -12,17 +15,14 @@ import type {
   RoomState,
   RoomMember,
   RoomMedia,
+  RoomVisibility,
   ChatMessage,
   MemberPlaybackState,
   BannedMember,
   PlaylistItem,
 } from '../types/sync';
 
-export interface DriftCorrectionResult {
-  drift: number;
-  action: 'none' | 'rate_speedup' | 'rate_slowdown' | 'seek';
-  targetTime: number;
-}
+export type { DriftCorrectionResult } from './playbackDrift';
 
 export type SyncStateListener = (state: RoomState | null) => void;
 export type PlaybackSyncListener = (
@@ -57,7 +57,9 @@ class SyncManager implements ScreenSignals {
   private screenViewers: Array<{ id: string; username: string }> = [];
   private screenViewersListeners = new Set<(viewers: Array<{ id: string; username: string }>) => void>();
   private currentRoomId: string = '';
+  private currentRoomPassword: string | undefined = undefined;
   private roomState: RoomState | null = null;
+  private confirmedPlayback: { generation: number } | null = null;
   /** Votação para pular o capítulo atual (null = nenhuma). Vem do servidor. */
   private skipVote: import('../types/sync').SkipVoteState | null = null;
   private skipVoteListeners = new Set<SkipVoteListener>();
@@ -193,6 +195,13 @@ class SyncManager implements ScreenSignals {
     return this.roomState;
   }
 
+  /** A identidade muda após confirmar uma reconexão ou receber a timeline de outra geração. */
+  public getConfirmedPlayback(sourceUrl: string): Readonly<{ generation: number }> | null {
+    const media = this.roomState?.media;
+    if (this.roomState?.roomId !== this.currentRoomId || !media || media.url !== sourceUrl) return null;
+    return this.confirmedPlayback?.generation === media.generation ? this.confirmedPlayback : null;
+  }
+
   public getRoomId(): string {
     return this.currentRoomId;
   }
@@ -221,11 +230,20 @@ class SyncManager implements ScreenSignals {
   /**
    * Conecta ao servidor WebSocket da Watch Party
    */
-  public connect(customRoomId?: string) {
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
-      if (customRoomId && customRoomId !== this.currentRoomId) {
-        this.joinRoom(customRoomId);
+  public connect(customRoomId?: string, password?: string) {
+    const switching = Boolean(customRoomId && this.currentRoomId && customRoomId !== this.currentRoomId);
+    if (password !== undefined) this.currentRoomPassword = password || undefined;
+    else if (switching) this.currentRoomPassword = undefined;
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      if (customRoomId && (customRoomId !== this.currentRoomId || password !== undefined)) {
+        this.joinRoom(customRoomId, password);
       }
+      return;
+    }
+    if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+      // A conexão ainda está abrindo: apenas atualiza o alvo que `ws.onopen` enviará (evita recursão com joinRoom)
+      if (customRoomId) this.currentRoomId = customRoomId;
       return;
     }
 
@@ -234,10 +252,9 @@ class SyncManager implements ScreenSignals {
       this.reconnectTimer = null;
     }
 
-    // Detecta sala: Discord Voice Channel se disponível, query param ?room= ou customRoomId
+    // Detecta sala: Discord Voice Channel se disponível, rota /room/:code (ou ?room= legado) ou customRoomId
     const discordState = discordManager.getState();
-    const urlParams = new URLSearchParams(window.location.search);
-    const queryRoom = urlParams.get('room');
+    const queryRoom = readRoomFromUrl();
 
     // Se estiver no Discord e o canal de voz ainda não estiver resolvido pelo SDK, aguarda a resolução
     if (discordState.isEmbedded && !discordState.channelId && !customRoomId) {
@@ -298,6 +315,8 @@ class SyncManager implements ScreenSignals {
         this.send({
           type: 'room:join',
           roomId: this.currentRoomId,
+          password: this.currentRoomPassword,
+          accessToken: getSavedRoomToken(this.currentRoomId),
           user: this.user,
         });
 
@@ -306,8 +325,6 @@ class SyncManager implements ScreenSignals {
           const pending = this.messageQueue.shift()!;
           this.send(pending);
         }
-
-        this.startHeartbeat();
       };
 
       this.ws.onmessage = (event) => {
@@ -342,8 +359,7 @@ class SyncManager implements ScreenSignals {
   }
 
   public syncWithDiscord(discordState: import('./discord').DiscordContextState) {
-    const urlParams = new URLSearchParams(window.location.search);
-    const queryRoom = urlParams.get('room');
+    const queryRoom = readRoomFromUrl();
 
     if (discordState.user) {
       this.setUserProfile(
@@ -368,6 +384,8 @@ class SyncManager implements ScreenSignals {
     this.isConnected = false;
     this.isConnecting = false;
     this.stopHeartbeat();
+    this.confirmedPlayback = null;
+    syncDiagnostics?.resetConnection();
 
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -397,7 +415,7 @@ class SyncManager implements ScreenSignals {
   }
 
   private sendHeartbeat() {
-    if (!this.isConnected || this.ws?.readyState !== WebSocket.OPEN) return;
+    if (!this.isConnected || !this.roomState || this.ws?.readyState !== WebSocket.OPEN) return;
     const curTime = this.getCurrentTimeCallback ? this.getCurrentTimeCallback() : 0;
     // O `clientTime` é a chave da resposta: duas batidas no mesmo milissegundo não podem repeti-lo
     let clientTime = Date.now();
@@ -409,7 +427,6 @@ class SyncManager implements ScreenSignals {
       type: 'client:heartbeat',
       clientTime,
       currentTime: Math.max(0, curTime),
-      state: 'ready',
       rtt: this.clock.synced ? Math.round(this.clock.rtt) : undefined,
     });
   }
@@ -431,20 +448,28 @@ class SyncManager implements ScreenSignals {
     this.heartbeatBurst = [];
   }
 
-  public joinRoom(roomId: string) {
+  public joinRoom(roomId: string, password?: string) {
+    const switching = Boolean(this.currentRoomId && this.currentRoomId !== roomId);
+    this.confirmedPlayback = null;
     this.currentRoomId = roomId;
-    if (this.isConnected) {
+    if (password !== undefined) this.currentRoomPassword = password || undefined;
+    else if (switching) this.currentRoomPassword = undefined;
+
+    if (this.isConnected && this.ws?.readyState === WebSocket.OPEN) {
       this.send({
         type: 'room:join',
         roomId,
+        password: this.currentRoomPassword,
+        accessToken: getSavedRoomToken(roomId),
         user: this.user,
       });
     } else {
-      this.connect(roomId);
+      this.connect(roomId, this.currentRoomPassword);
     }
   }
 
   public leaveRoom() {
+    const prevRoomId = this.currentRoomId || this.roomState?.roomId;
     if (this.isConnected) {
       this.send({ type: 'room:leave' });
     }
@@ -457,14 +482,18 @@ class SyncManager implements ScreenSignals {
     this.isConnected = false;
     this.isConnecting = false;
     this.currentRoomId = '';
+    this.currentRoomPassword = undefined;
     const hadScreen = Boolean(this.roomState?.screen);
     this.roomState = null;
+    this.confirmedPlayback = null;
+    syncDiagnostics?.resetConnection();
+    syncDiagnostics?.resetMedia();
     this.screenKeys = [];
     this.screenViewers = [];
     if (hadScreen) this.notifyScreen(null);
     this.setSkipVote(null);
     this.chatHistory = [];
-    clearRoomToken();
+    clearRoomToken(prevRoomId);
     this.stopHeartbeat();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -472,11 +501,7 @@ class SyncManager implements ScreenSignals {
     }
 
     try {
-      if (typeof window !== 'undefined' && window.location.search) {
-        const url = new URL(window.location.href);
-        url.searchParams.delete('room');
-        window.history.replaceState(null, '', url.pathname + (url.search ? url.search : ''));
-      }
+      setRoomInUrl(null);
     } catch {}
 
     logger.info('[Sala] Você saiu da sala');
@@ -515,10 +540,30 @@ class SyncManager implements ScreenSignals {
             sessionStorage.setItem('lunio_watchparty_user', JSON.stringify(this.user));
           } catch {}
         }
-        const prevMedia = this.roomState?.media;
+        const prevRoomId = this.roomState?.roomId;
+        const switchedRoom = Boolean(prevRoomId && prevRoomId !== msg.state.roomId);
+        if (switchedRoom) {
+          this.chatHistory = [];
+          this.setSkipVote(null);
+          this.screenKeys = [];
+          this.screenViewers = [];
+        }
+        const prevMedia = switchedRoom ? null : this.roomState?.media;
         const prevScreen = this.roomState?.screen ?? null;
-        const isFirstState = !this.roomState;
+        const isFirstState = !this.roomState || switchedRoom;
+        if (this.roomState?.roomId !== msg.state.roomId || prevMedia?.generation !== msg.state.media?.generation) {
+          syncDiagnostics?.resetMedia();
+        }
+        const generation = msg.state.media?.generation;
+        if (generation === undefined) {
+          this.confirmedPlayback = null;
+        } else if (this.roomState?.roomId !== msg.state.roomId || this.confirmedPlayback?.generation !== generation) {
+          this.confirmedPlayback = { generation };
+        }
+        this.currentRoomId = msg.state.roomId;
         this.roomState = msg.state;
+        if (!this.heartbeatInterval) this.startHeartbeat();
+        syncDiagnostics?.markTimeline();
         this.afterScreenChange(prevScreen, msg.state.screen ?? null);
         if (isFirstState) {
           const host = msg.state.members.find((m) => m.isHost);
@@ -547,6 +592,7 @@ class SyncManager implements ScreenSignals {
       case 'playback:sync': {
         if (!this.roomState) return;
         this.roomState.playback = msg.playback;
+        syncDiagnostics?.markTimeline();
 
         // Notifica listeners para aplicar no player local (se não foi o próprio disparador)
         if (msg.triggeredBy !== this.user.id) {
@@ -575,7 +621,8 @@ class SyncManager implements ScreenSignals {
       }
 
       case 'media:sync': {
-        if (!this.roomState) return;
+        if (!this.roomState || msg.generation <= (this.roomState.media?.generation ?? 0)) return;
+        syncDiagnostics?.resetMedia();
         this.roomState.media = msg.media;
 
         if (msg.triggeredBy !== this.user.id) {
@@ -697,6 +744,7 @@ class SyncManager implements ScreenSignals {
         if (sentAt !== undefined) {
           this.pendingBeats.delete(msg.clientTime);
           this.clock.add(sentAt, performance.now(), msg.serverTime);
+          if (this.clock.synced) syncDiagnostics?.setRtt(this.clock.rtt);
         }
         break;
       }
@@ -708,6 +756,20 @@ class SyncManager implements ScreenSignals {
           this.roomState.playback.rate = msg.rate;
         }
         this.roomState.playback.updatedAt = msg.updatedAt || Date.now();
+        syncDiagnostics?.markTimeline();
+        break;
+      }
+
+      case 'room:settings_update': {
+        if (!this.roomState) break;
+        this.roomState = {
+          ...this.roomState,
+          name: msg.name,
+          visibility: msg.visibility,
+          hasPassword: msg.hasPassword,
+          autoPauseOnBuffer: msg.autoPauseOnBuffer,
+        };
+        this.notifyState();
         break;
       }
 
@@ -785,12 +847,13 @@ class SyncManager implements ScreenSignals {
     });
   }
 
-  public emitReadiness(ready: boolean, state: MemberPlaybackState, currentTime: number) {
+  public emitReadiness(ready: boolean, state: MemberPlaybackState, currentTime: number, generation: number) {
     this.send({
       type: 'client:readiness',
       ready,
       state,
       currentTime,
+      generation,
     });
   }
 
@@ -812,6 +875,25 @@ class SyncManager implements ScreenSignals {
 
   public getServerNow(): number {
     return this.clock.now();
+  }
+
+  /** Posição esperada da reprodução da sala agora (em segundos), ou null se não há sala conectada. */
+  public getExpectedPlaybackTime(): number | null {
+    if (!this.roomState) return null;
+    const { playing, position, rate, updatedAt } = this.roomState.playback;
+    if (!playing) return Math.max(0, position);
+    const elapsed = Math.max(0, (this.clock.now() - updatedAt) / 1000);
+    return Math.max(0, position + elapsed * rate);
+  }
+
+  public emitRoomSettings(settings: {
+    name?: string;
+    visibility?: RoomVisibility;
+    password?: string | null;
+    autoPauseOnBuffer?: boolean;
+  }) {
+    if (!this.isConnected || !this.isRoomHost()) return;
+    this.send({ type: 'room:settings', ...settings });
   }
 
   public getPlaylist(): PlaylistItem[] {
@@ -931,65 +1013,12 @@ class SyncManager implements ScreenSignals {
     return Math.max(0, position + elapsed * rate);
   }
 
-  /**
-   * Avalia a discrepância (drift) do cliente em relação ao Host
-   * Regras rigorosas de sincronização da sala:
-   *  - O espectador NUNCA deve correr na frente do Host (tolerância máx 0.5s).
-   *  - Se drift > 0.5s (adiantado): seek corretivo imediato para a posição exata do Host.
-   *  - Se 0.12s < drift <= 0.5s (levemente adiantado): desacelera (slowdown 0.85x) até o Host alcançar.
-   *  - Se drift < -1.2s (muito atrasado): seek corretivo para a posição calculada.
-   *  - Se -1.2s <= drift < -0.25s (atrasado): micro-aceleração (speedup 1.08x).
-   *  - Se -0.25s <= drift <= 0.12s: sincronia perfeita, reprodução normal (1.0x).
-   */
+  /** Calcula a correção local usando a posição autoritativa da sala. */
   public calculateDrift(localCurrentTime: number): DriftCorrectionResult {
     if (!this.roomState || this.isRoomHost()) {
       return { drift: 0, action: 'none', targetTime: localCurrentTime };
     }
-
-    const expected = this.getExpectedPosition();
-    const drift = localCurrentTime - expected;
-
-    // Se o espectador estiver adiantado em relação ao Host (drift positivo)
-    if (drift > 0.5) {
-      return {
-        drift,
-        action: 'seek',
-        targetTime: expected,
-      };
-    }
-
-    if (drift > 0.12) {
-      // Espectador adiantado: desacelera para esperar o Host
-      return {
-        drift,
-        action: 'rate_slowdown',
-        targetTime: expected,
-      };
-    }
-
-    // Se o espectador estiver atrasado em relação ao Host (drift negativo)
-    if (drift < -1.2) {
-      return {
-        drift,
-        action: 'seek',
-        targetTime: expected,
-      };
-    }
-
-    if (drift < -0.25) {
-      // Espectador atrasado: acelera suavemente
-      return {
-        drift,
-        action: 'rate_speedup',
-        targetTime: expected,
-      };
-    }
-
-    return {
-      drift,
-      action: 'none',
-      targetTime: expected,
-    };
+    return decideDrift(localCurrentTime, this.getExpectedPosition());
   }
 
   // --- Inscrições de Eventos ---

@@ -1,4 +1,5 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronLeft, Compass, FolderOpen, Link, Upload, X, Youtube } from 'lucide-react';
 import { StreamStep } from '../home/StreamStep';
 import { UploadStep } from '../home/UploadStep';
@@ -8,10 +9,11 @@ import type { CommitMode, CommitOptions, SourceCommit } from '../home/types';
 import type { WatchIntent } from '../catalog/CatalogTab';
 import type { RecentStream } from '../../lib/recent';
 import type { StreamOption } from '../../lib/streams';
+import { streamMediaInfo } from '../../lib/streamMime';
 import type { CatalogSeriesContext, MediaPayload } from '../../types/media';
 import type { CatalogRef } from '../../lib/continueWatching';
 import { t, msg } from '../../lib/i18n';
-import { Dot, IconButton, PillTabs, Spinner, cx } from '../ui';
+import { Dot, IconButton, PillTabs, Spinner, cx, usePortalTarget } from '../ui';
 
 const CatalogTab = lazy(() => import('../catalog/CatalogTab').then((m) => ({ default: m.CatalogTab })));
 
@@ -21,6 +23,7 @@ interface MediaPickerModalProps {
   open: boolean;
   onClose: () => void;
   inRoom?: boolean;
+  isHost?: boolean;
   roomCode?: string;
   initialTab?: PickerTab;
   recentStreams: RecentStream[];
@@ -31,6 +34,7 @@ interface MediaPickerModalProps {
   ensureRoom: () => string;
   requireName: (then: () => void) => void;
   onCommit: SourceCommit;
+  onSuggestMedia?: (item: { url: string; title: string; mimeType?: string }) => void;
   onPlayStream: (
     stream: StreamOption,
     title: string,
@@ -50,6 +54,7 @@ const TABS: Array<{ value: PickerTab; label: string; icon: React.ReactNode }> = 
 const MediaPickerPage: React.FC<Omit<MediaPickerModalProps, 'open'>> = ({
   onClose,
   inRoom,
+  isHost = true,
   roomCode,
   initialTab = 'catalog',
   recentStreams,
@@ -60,10 +65,13 @@ const MediaPickerPage: React.FC<Omit<MediaPickerModalProps, 'open'>> = ({
   ensureRoom,
   requireName,
   onCommit,
+  onSuggestMedia,
   onPlayStream,
 }) => {
   const [tab, setTab] = useState<PickerTab>(initialTab);
   const [watchIntent, setWatchIntent] = useState<WatchIntent | null>(null);
+  const isViewerSuggesting = Boolean(inRoom && !isHost && onSuggestMedia);
+  const visibleTabs = isViewerSuggesting ? TABS.filter((item) => item.value !== 'upload') : TABS;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -81,6 +89,12 @@ const MediaPickerPage: React.FC<Omit<MediaPickerModalProps, 'open'>> = ({
     mode: CommitMode,
     options?: CommitOptions
   ) => {
+    if (isViewerSuggesting && onSuggestMedia) {
+      onSuggestMedia({ url: payload.url, title: payload.title || 'Stream', mimeType: payload.mimeType });
+      setWatchIntent(null);
+      onClose();
+      return;
+    }
     onCommit(payload, inRoom ? 'room' : mode, options);
     setWatchIntent(null);
     onClose();
@@ -92,6 +106,13 @@ const MediaPickerPage: React.FC<Omit<MediaPickerModalProps, 'open'>> = ({
     seriesContext?: CatalogSeriesContext,
     movie?: CatalogRef
   ) => {
+    if (isViewerSuggesting && onSuggestMedia) {
+      const { mimeType } = streamMediaInfo(stream.url, stream.filename);
+      onSuggestMedia({ url: stream.url, title, mimeType });
+      setWatchIntent(null);
+      onClose();
+      return;
+    }
     onPlayStream(stream, title, seriesContext, movie);
     setWatchIntent(null);
     onClose();
@@ -124,7 +145,13 @@ const MediaPickerPage: React.FC<Omit<MediaPickerModalProps, 'open'>> = ({
           {inRoom && roomCode && (
             <span className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-lu-bg2 border border-lu-border text-[12px] font-semibold text-lu-muted tabular">
               <Dot tone="success" />
-              {t('Sala')} <span className="tracking-[0.08em] text-lu-text">{roomCode}</span>
+              {isViewerSuggesting ? (
+                <span className="text-lu-accent">{t('Pedir para a sala')}</span>
+              ) : (
+                <>
+                  {t('Sala')} <span className="tracking-[0.08em] text-lu-text">{roomCode}</span>
+                </>
+              )}
             </span>
           )}
         </div>
@@ -138,7 +165,7 @@ const MediaPickerPage: React.FC<Omit<MediaPickerModalProps, 'open'>> = ({
             }}
             size="sm"
             label={t('Fonte do vídeo')}
-            options={TABS}
+            options={visibleTabs}
           />
         </div>
 
@@ -214,6 +241,8 @@ const MediaPickerPage: React.FC<Omit<MediaPickerModalProps, 'open'>> = ({
  * Tela inteira do Catálogo / fontes de mídia aberta por cima da sala, preservando a conexão e o player vivos por baixo.
  */
 export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({ open, ...rest }) => {
+  const portalTarget = usePortalTarget();
   if (!open) return null;
-  return <MediaPickerPage {...rest} />;
+  const page = <MediaPickerPage {...rest} />;
+  return portalTarget ? createPortal(page, portalTarget) : page;
 };

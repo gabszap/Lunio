@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Check, ChevronUp, Clock, Compass, Link2, LogOut, Share2, Terminal, Users } from 'lucide-react';
 import { formatTime } from '../../lib/chapters';
 import { t } from '../../lib/i18n';
@@ -44,21 +44,29 @@ export const RoomDock: React.FC<RoomDockProps> = ({
   const [hovered, setHovered] = useState(false);
 
   const shareRef = useRef<HTMLDivElement>(null);
+  const copiedTimerRef = useRef<number | null>(null);
   useDismiss(shareOpen, () => setShareOpen(false), shareRef);
 
-  const canChooseMedia = !connected || isHost;
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
+
   const anyMenuOpen = shareOpen || screenOpen;
   const revealDock = !isFullscreen || hovered || anyMenuOpen;
 
   const copyRoomLink = async (atSeconds?: number) => {
-    const url = new URL('/', window.location.origin);
-    url.searchParams.set('room', roomCode);
-    if (atSeconds === undefined) url.searchParams.delete('t');
-    else url.searchParams.set('t', String(Math.floor(atSeconds)));
+    const url = new URL(`/room/${roomCode}`, window.location.origin);
+    if (atSeconds !== undefined) url.searchParams.set('t', String(Math.floor(atSeconds)));
     setShareOpen(false);
     if (await copyText(url.toString())) {
       setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2000);
+      if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = window.setTimeout(() => {
+        copiedTimerRef.current = null;
+        setCopiedLink(false);
+      }, 2000);
     }
   };
 
@@ -73,20 +81,19 @@ export const RoomDock: React.FC<RoomDockProps> = ({
         isFullscreen && (revealDock ? 'translate-y-0 opacity-100 pointer-events-auto' : 'translate-y-[calc(100%+20px)] opacity-0 pointer-events-none')
       )}
     >
-      {canChooseMedia && (
-        <button
-          id="btn-dock-choose-media"
-          type="button"
-          onClick={onOpenMediaPicker}
-          className={cx(
-            dockBtnBase,
-            'bg-lu-accent text-lu-bg hover:bg-lu-accent-hover font-semibold shadow-[0_4px_14px_rgba(167,139,250,0.22)]'
-          )}
-        >
-          <Compass size={16} />
-          <span className="hidden sm:inline">{t('Catálogo')}</span>
-        </button>
-      )}
+      <button
+        id="btn-dock-choose-media"
+        type="button"
+        onClick={onOpenMediaPicker}
+        title={connected && !isHost ? t('Explorar catálogo e pedir para a sala') : t('Catálogo')}
+        className={cx(
+          dockBtnBase,
+          'bg-lu-accent text-lu-bg hover:bg-lu-accent-hover font-semibold shadow-[0_4px_14px_rgba(167,139,250,0.22)]'
+        )}
+      >
+        <Compass size={16} />
+        <span className="hidden sm:inline">{t('Catálogo')}</span>
+      </button>
 
       <ScreenShareControl open={screenOpen} onOpenChange={onScreenOpenChange} variant="dock" />
 

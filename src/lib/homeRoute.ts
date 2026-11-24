@@ -23,7 +23,8 @@ const CATALOG_PARAMS = ['search', 'detail', 'season', 'genre', 'calendar'];
 /** Leva o endereço para a rota da aba (entrada nova no histórico). Já estando nela, não faz nada. */
 export function pushTabUrl(tab: HomeTab) {
   if (typeof window === 'undefined') return;
-  if (tabFromPath(window.location.pathname) === tab) return;
+  const isRoomPath = /^\/room\//i.test(window.location.pathname);
+  if (!isRoomPath && tabFromPath(window.location.pathname) === tab) return;
   const url = new URL(window.location.href);
   url.pathname = TAB_PATHS[tab];
   if (tab !== 'catalog') for (const k of CATALOG_PARAMS) url.searchParams.delete(k);

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bookmark, CalendarDays, Compass, Puzzle, Search, SearchX, Users, X } from 'lucide-react';
+import { CalendarDays, Compass, Puzzle, Search, SearchX, Users, X } from 'lucide-react';
 import {
   CatalogItem,
   CatalogManifest,
@@ -84,10 +84,16 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({
   const [calendarSeasonMalId, setCalendarSeasonMalId] = useState<string>();
   const [myList, setMyList] = useState<CatalogItem[]>(() => getMyList());
   const [myListOpen, setMyListOpen] = useState(() => (syncUrl ? isLibraryPath(window.location.pathname) : false));
+  const [returnTick, setReturnTick] = useState(0);
+  const [subViewDir, setSubViewDir] = useState<'forward' | 'back'>('forward');
+  const markBackToCatalog = () => {
+    setReturnTick((n) => n + 1);
+  };
   const myListScroll = useRef(0);
   const openMyList = () => {
     myListScroll.current = 0;
     if (syncUrl) window.scrollTo({ top: 0 });
+    setSubViewDir('forward');
     setMyListOpen(true);
   };
   const refreshMyList = useCallback(() => {
@@ -144,6 +150,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({
   const openDiscover = (ref: DiscoverRef | null) => {
     discoverScroll.current = 0;
     if (syncUrl) window.scrollTo({ top: 0 });
+    setSubViewDir('forward');
     setDiscoverSel(ref);
     setDiscoverOpen(true);
   };
@@ -235,41 +242,74 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
+  const closeDetail = () => {
+    setSubViewDir('back');
+    setEpisodeId(null);
+    setSelected(null);
+    if (!discoverOpen && !calendarOpen && !myListOpen) {
+      markBackToCatalog();
+    }
+  };
+
   if (selected || discoverOpen || calendarOpen || myListOpen) {
     const fromUrl = selected && initialDetail && initialDetail.id === selected.id && initialDetail.type === selected.type;
+    const subViewAnim = subViewDir === 'back' ? 'lu-tab-panel-left' : 'lu-tab-panel-right';
     // O Explorar fica no mesmo lugar da árvore com ou sem título aberto (escondido por baixo dele), então não perde a grade nem a posição
     return (
       <>
         {selected && (
-          <Detail
-            key={`${selected.type}/${selected.id}`}
-            item={selected}
-            initialSeason={fromUrl && !calendarSeasonMalId ? initialSeason : null}
-            calendarSeasonMalId={calendarSeasonMalId}
-            episodeId={episodeId}
-            onEpisodeChange={setEpisodeId}
-            addons={addons}
-            onOpenAddons={() => setAddonsOpen(true)}
-            backLabel={myListOpen ? t('Biblioteca') : undefined}
-            onBack={() => {
-              setEpisodeId(null);
-              setSelected(null);
-            }}
-            onWatch={onWatch}
-            onPlayStream={onPlayStream}
-          />
+          <div key={`detail:${selected.type}/${selected.id}`} className="lu-tab-panel-right">
+            <Detail
+              item={selected}
+              initialSeason={fromUrl && !calendarSeasonMalId ? initialSeason : null}
+              calendarSeasonMalId={calendarSeasonMalId}
+              episodeId={episodeId}
+              onEpisodeChange={setEpisodeId}
+              addons={addons}
+              onOpenAddons={() => setAddonsOpen(true)}
+              backLabel={myListOpen ? t('Biblioteca') : undefined}
+              onBack={closeDetail}
+              onWatch={onWatch}
+              onPlayStream={onPlayStream}
+            />
+          </div>
         )}
         {selected && <AddonsPanel open={addonsOpen} onClose={() => setAddonsOpen(false)} onChange={setAddons} />}
-        {myListOpen && <div hidden={Boolean(selected)}><MyList items={myList} onOpen={openItem} onBack={() => setMyListOpen(false)} /></div>}
-        {calendarOpen && <div hidden={Boolean(selected)}><Calendar myList={myList} onOpen={openItem} onBack={() => setCalendarOpen(false)} /></div>}
+        {myListOpen && (
+          <div hidden={Boolean(selected)} className={!selected ? subViewAnim : undefined}>
+            <MyList
+              items={myList}
+              onOpen={openItem}
+              onBack={() => {
+                setMyListOpen(false);
+                markBackToCatalog();
+              }}
+            />
+          </div>
+        )}
+        {calendarOpen && (
+          <div hidden={Boolean(selected)} className={!selected ? subViewAnim : undefined}>
+            <Calendar
+              myList={myList}
+              onOpen={openItem}
+              onBack={() => {
+                setCalendarOpen(false);
+                markBackToCatalog();
+              }}
+            />
+          </div>
+        )}
         {discoverOpen && (
-          <div hidden={Boolean(selected)}>
+          <div hidden={Boolean(selected)} className={!selected ? subViewAnim : undefined}>
             <Discover
               manifest={manifest}
               initial={discoverSel}
               onChange={setDiscoverSel}
               onOpen={openItem}
-              onBack={() => setDiscoverOpen(false)}
+              onBack={() => {
+                setDiscoverOpen(false);
+                markBackToCatalog();
+              }}
               onRetry={() => setManifestTry((n) => n + 1)}
               onCreateRoom={onCreateRoom}
             />
@@ -296,7 +336,7 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({
   };
 
   return (
-    <div className="flex flex-col gap-8">
+    <div key={`catalog-main-${returnTick}`} className={returnTick > 0 ? 'flex flex-col gap-8 lu-tab-panel-left' : 'flex flex-col gap-8'}>
       <div className="flex flex-wrap items-center justify-center gap-3">
         <div className="flex items-center gap-3 w-[640px] max-w-full h-[52px] pl-[18px] pr-2 rounded-[14px] bg-lu-surface border border-lu-border focus-within:border-lu-accent focus-within:shadow-[0_0_0_3px_var(--color-lu-tint)]">
           <span className="flex text-lu-muted">
@@ -316,20 +356,22 @@ export const CatalogTab: React.FC<CatalogTabProps> = ({
             </IconButton>
           )}
         </div>
-        <GhostButton onClick={() => openDiscover(null)}>
-          <Compass size={16} />
+        <GhostButton onClick={() => openDiscover(null)} className="group lu-action-btn">
+          <Compass size={16} className="transition-transform duration-200 group-hover:rotate-12 group-hover:text-lu-accent" />
           <span>{t('Explorar')}</span>
         </GhostButton>
-        <GhostButton onClick={openMyList}>
-          <Bookmark size={16} aria-hidden="true" />
-          <span>{t('Biblioteca')}</span>
-        </GhostButton>
-        <GhostButton onClick={() => setAddonsOpen(true)}>
-          <Puzzle size={16} />
+        <GhostButton onClick={() => setAddonsOpen(true)} className="group lu-action-btn">
+          <Puzzle size={16} className="transition-transform duration-200 group-hover:scale-110 group-hover:text-lu-accent" />
           <span>{t('Addons')}</span>
         </GhostButton>
-        <GhostButton onClick={() => setCalendarOpen(true)}>
-          <CalendarDays size={16} />
+        <GhostButton
+          onClick={() => {
+            setSubViewDir('forward');
+            setCalendarOpen(true);
+          }}
+          className="group lu-action-btn"
+        >
+          <CalendarDays size={16} className="transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:text-lu-accent" />
           <span>{t('Calendário')}</span>
         </GhostButton>
       </div>

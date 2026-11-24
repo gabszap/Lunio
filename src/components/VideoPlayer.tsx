@@ -9,17 +9,21 @@ import {
 } from '@vidstack/react';
 import '@vidstack/react/player/styles/base.css';
 
+import { Play, X } from 'lucide-react';
 import { getVideoElement } from './player/dom';
 import { MediaSource, Chapter, SubtitleTrack, AudioTrackOption, VideoInfo, CatalogSeriesContext } from '../types/media';
-import type { CatalogEpisode } from '../lib/catalog';
+import { episodeTag, type CatalogEpisode } from '../lib/catalog';
 import type { StreamOption } from '../lib/streams';
 import { PlayerControls } from './PlayerControls';
+import type { VideoQualityOption } from './SettingsMenu';
 import type { PlaylistItem, RoomState } from '../types/sync';
 import { MemberGrid } from './room/MemberGrid';
 import { audioBoost } from '../lib/audioBoost';
-import { normalizeChapters, getCurrentChapter, getSkippableChapter } from '../lib/chapters';
+import { getYouTubeId } from '../lib/media';
+import { normalizeChapters, getCurrentChapter, getSkippableChapter, shouldShowNextEpisodePrompt } from '../lib/chapters';
 import { useSkipVote } from './player/useSkipVote';
 import { logger } from '../lib/logger';
+import { t } from '../lib/i18n';
 import { formatTime } from '../lib/chapters';
 import { syncManager } from '../lib/sync';
 import {
@@ -43,7 +47,7 @@ import { useMediaInspection } from './player/useMediaInspection';
 import { useVideoCodecNotice } from './player/useVideoCodecNotice';
 import { useDiscordPresence } from './player/useDiscordPresence';
 import { useNativeVideoEvents } from './player/useNativeVideoEvents';
-import { usePlaybackControls } from './player/usePlaybackControls';
+import { usePlaybackControls, type PlayerSeek } from './player/usePlaybackControls';
 import { usePlaybackReadiness } from './player/usePlaybackReadiness';
 import { usePlayerEventHandlers } from './player/usePlayerEventHandlers';
 import { usePlayerPrefs } from './player/usePlayerPrefs';
@@ -130,7 +134,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const pendingPlayRef = useRef<boolean>(false);
   const lastKnownTimeRef = useRef<number>(0);
   const isExplicitSeekingRef = useRef<boolean>(false);
-  const handleSeekRef = useRef<(time: number) => void>(() => {});
+  const handleSeekRef = useRef<PlayerSeek>(() => {});
   const currentChapterRef = useRef<Chapter | null>(null);
 
   // Playback error diagnostics
@@ -164,6 +168,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [canPip, setCanPip] = useState<boolean>(false);
   // Prompt flutuante para retomar reprodução do momento anterior
   const [resumePrompt, setResumePrompt] = useState<{ time: number; formatted: string } | null>(null);
+  const [nextEpisodeTarget, setNextEpisodeTarget] = useState<CatalogEpisode | null>(null);
+  const [dismissedNextFor, setDismissedNextFor] = useState<string | null>(null);
+  const [liveResolution, setLiveResolution] = useState<string | null>(null);
+  const [videoQualities, setVideoQualities] = useState<VideoQualityOption[]>([]);
+  const [autoQuality, setAutoQuality] = useState<boolean>(true);
 
   const hasSource = Boolean(source.src && source.src.trim());
 
@@ -196,6 +205,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     initialAudioTracks,
   });
   const { detectedAudioTracks, activeAudioTrack, resolvedStreamUrl, setResolvedStreamUrl } = audio;
+  const isYouTubeSource = Boolean(getYouTubeId(source.src));
+
+  // Reseta a lista de qualidades ao trocar de stream (ex.: HLS -> fallback embed ou troca de áudio)
+  useEffect(() => {
+    setVideoQualities([]);
+    setAutoQuality(true);
+  }, [resolvedStreamUrl]);
 
   // Leitura das faixas ao mudar a fonte
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
@@ -226,6 +242,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     playerRef,
     lastKnownTimeRef,
     isSwitchingAudioRef,
+    isExplicitSeekingRef,
     audioOffsetRef,
     handleSeekRef,
     paused,
@@ -235,6 +252,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setPlaybackRate,
     readiness,
     isBuffering,
+    sourceUrl: source.src,
     detectedAudioTracks,
     detectedSubtitles,
     onMediaChangeRequested,
@@ -302,6 +320,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setPaused,
     setIsBuffering,
     setResumePrompt,
+    setLiveResolution,
   });
 
   const playback = usePlaybackControls({
@@ -338,7 +357,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setVolumeBoost: prefs.setVolumeBoost,
   });
 
-  usePlaybackReadiness({ readiness, autoPlay, paused, setPaused, playerRef, source, handleSeekRef, pendingPlayRef });
+  usePlaybackReadiness({
+    readiness, autoPlay, paused, setPaused, setPlaybackRate, playerRef, source,
+    handleSeekRef, lastKnownTimeRef, pendingPlayRef, syncStatus,
+  });
 
   const skipVote = useSkipVote({
     skippableChapter,
@@ -364,6 +386,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     isFullscreen: fullscreen.isFullscreen,
     syncStatus,
     skippableChapter,
+    isYouTube: isYouTubeSource,
     subtitleDelay: prefs.subtitleDelay,
     audioDelay: prefs.audioDelay,
     lastKnownTimeRef,
@@ -494,6 +517,76 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const pausedByName =
     room.hostPausedInfo?.username || syncManager.getRoomState()?.members.find((m) => m.isHost)?.username || 'Host';
 
+  const expectedHostTime = isViewer ? syncManager.getExpectedPlaybackTime() : null;
+  const viewerBehindSec =
+    isViewer && expectedHostTime !== null && !paused ? expectedHostTime - currentTime : 0;
+  const handleViewerResync = () => {
+    const target = syncManager.getExpectedPlaybackTime();
+    if (target === null) return;
+    playback.handleSeek(target);
+    prefs.triggerOsdToast(t('Sincronizado com o Host'));
+  };
+
+  const syncQualitiesFromPlayer = () => {
+    const list = playerRef.current?.qualities;
+    if (!list) {
+      setVideoQualities([]);
+      return;
+    }
+    const byHeight = new Map<number, { height: number; label: string; selected: boolean }>();
+    for (const q of list) {
+      if (!q.height || q.height <= 0) continue;
+      const label = q.height >= 2160 ? '4K' : `${q.height}p`;
+      const prev = byHeight.get(q.height);
+      byHeight.set(q.height, { height: q.height, label, selected: Boolean(prev?.selected || q.selected) });
+    }
+    const sorted = Array.from(byHeight.values()).sort((a, b) => b.height - a.height);
+    setVideoQualities(sorted);
+    setAutoQuality(list.auto);
+    const active = list.selected;
+    if (active?.height) {
+      setLiveResolution(active.height >= 2160 ? '4K' : `${active.height}p`);
+    }
+  };
+
+  const handleQualitySelect = (choice: number | 'auto') => {
+    const list = playerRef.current?.qualities;
+    if (!list) return;
+    if (choice === 'auto') {
+      list.autoSelect();
+      setAutoQuality(true);
+      logger.setting('Qualidade', 'Auto');
+    } else {
+      let best: any = null;
+      for (const q of list) {
+        if (q.height === choice && (!best || (q.bitrate || 0) > (best.bitrate || 0))) {
+          best = q;
+        }
+      }
+      if (best) {
+        best.selected = true;
+        setAutoQuality(false);
+        const label = choice >= 2160 ? '4K' : `${choice}p`;
+        setLiveResolution(label);
+        logger.setting('Qualidade', label);
+      }
+    }
+    syncQualitiesFromPlayer();
+  };
+
+  const nextCatalogEpisode = (() => {
+    if (!seriesContext || !onSelectEpisodeStream || queueSize > 0 || isViewer) return null;
+    const idx = seriesContext.episodes.findIndex((e) => e.id === seriesContext.currentEpisodeId);
+    if (idx < 0 || idx + 1 >= seriesContext.episodes.length) return null;
+    return seriesContext.episodes[idx + 1];
+  })();
+  const showNextEpisodeCard =
+    Boolean(nextCatalogEpisode) &&
+    dismissedNextFor !== seriesContext?.currentEpisodeId &&
+    !controls.menuOpen &&
+    !screenCovering &&
+    shouldShowNextEpisodePrompt(currentTime, duration, normalizedChapters);
+
   return (
     <div
       id="video-player-root"
@@ -520,13 +613,28 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         // hls.js vem do próprio pacote (carregado só quando um áudio alternativo usa HLS), nunca de CDN
         onProviderChange={(provider) => {
           if (provider) providerReadyRef.current = true;
-          if (isHLSProvider(provider)) provider.library = () => import('hls.js');
+          if (isHLSProvider(provider)) {
+            provider.library = () => import('hls.js');
+            provider.config = {
+              capLevelToPlayerSize: false,
+              abrEwmaDefaultEstimate: 20_000_000,
+              startLevel: -1,
+            };
+          }
+          const videoEl = getVideoElement(playerRef);
+          if (videoEl) audioBoost.attachToElement(videoEl);
         }}
+        onQualitiesChange={syncQualitiesFromPlayer}
+        onQualityChange={syncQualitiesFromPlayer}
         // O MediaProvider do Vidstack (React) só carrega o provedor ao montar o <video>. Ao trocar de "video" para "hls"
-        // (e voltar) o elemento é o mesmo, então pedimos o carregamento do provedor novo à mão.
+        // (e voltar) o elemento é o mesmo, então pedimos o carregamento do provedor novo à mão (exceto YouTube iframe).
         onProviderLoaderChange={(loader) => {
           if (!loader || !providerReadyRef.current) return;
-          requestAnimationFrame(() => mediaProviderRef.current?.load(getVideoElement(playerRef)));
+          if (resolvedStreamUrl.startsWith('youtube/') || loader.name === 'youtube') return;
+          requestAnimationFrame(() => {
+            const videoEl = playerRef.current?.el?.querySelector('video') as HTMLVideoElement | null;
+            if (videoEl) mediaProviderRef.current?.load(videoEl);
+          });
         }}
         playsInline
         logLevel="warn"
@@ -537,6 +645,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onCanPlay={playerEvents.onCanPlay}
         onTimeUpdate={playerEvents.onTimeUpdate}
         onPlay={playerEvents.onPlay}
+        onPlaying={playerEvents.onPlaying}
         onPause={playerEvents.onPause}
         onDurationChange={playerEvents.onDurationChange}
         onProgress={playerEvents.onProgress}
@@ -585,6 +694,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           onBack={onBack}
           onReconnect={() => {
             setPlaybackError(null);
+            const ytId = getYouTubeId(source.src);
+            if (ytId) {
+              setResolvedStreamUrl(`youtube/${ytId}`);
+              return;
+            }
             setResolvedStreamUrl(`/api/proxy?url=${encodeURIComponent(source.src)}#.mp4`);
             const videoEl = playerRef.current?.el?.querySelector('video');
             if (videoEl) {
@@ -641,6 +755,53 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         />
       )}
 
+      {/* Cartão "Próximo episódio": aparece no capítulo de encerramento (ED/Ending) ou nos últimos 15 s se não houver capítulo */}
+      {showNextEpisodeCard && nextCatalogEpisode && (
+        <div
+          id="next-episode-prompt"
+          onClick={(e) => e.stopPropagation()}
+          className={`pointer-events-auto absolute right-4 sm:right-6 z-40 w-[min(340px,calc(100%-32px))] p-3.5 rounded-[16px] bg-lu-bg2/94 backdrop-blur-md border border-lu-border-strong shadow-[0_16px_40px_rgba(0,0,0,0.65)] flex flex-col gap-2.5 transition-[bottom] duration-200 ${
+            skippableChapter
+              ? showControls
+                ? 'bottom-[168px] sm:bottom-[176px]'
+                : 'bottom-[78px]'
+              : showControls
+              ? 'bottom-24 sm:bottom-28'
+              : 'bottom-6'
+          }`}
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-lu-accent">
+                {t('Próximo episódio')} · {episodeTag(nextCatalogEpisode.season, nextCatalogEpisode.episode)}
+              </div>
+              <div className="text-[14px] font-semibold text-lu-text truncate mt-0.5">
+                {nextCatalogEpisode.title || t('Episódio {v1}', { v1: nextCatalogEpisode.episode })}
+              </div>
+            </div>
+            <button
+              type="button"
+              aria-label={t('Fechar')}
+              onClick={() => setDismissedNextFor(seriesContext?.currentEpisodeId ?? '')}
+              className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-lu-muted hover:text-lu-text hover:bg-white/8 flex-none"
+            >
+              <X size={15} />
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              resetControlsTimer();
+              setNextEpisodeTarget(nextCatalogEpisode);
+            }}
+            className="w-full h-9 px-3 rounded-[10px] inline-flex items-center justify-center gap-2 bg-lu-accent text-lu-bg hover:bg-lu-accent-hover text-[13px] font-semibold transition-colors"
+          >
+            <Play size={14} className="fill-current" />
+            <span>{t('Escolher fonte do próximo')}</span>
+          </button>
+        </div>
+      )}
+
       {/* Controles (somem após 3 s de inatividade) */}
       <div
         className={`absolute inset-0 z-30 transition-opacity duration-300 ${
@@ -656,6 +817,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           bufferedRanges={bufferedRanges}
           isInspecting={isInspecting}
           parsedMetadata={parsedMetadata}
+          liveResolution={liveResolution}
+          qualities={videoQualities}
+          autoQuality={autoQuality}
+          onQualitySelect={handleQualitySelect}
+          isYouTube={isYouTubeSource}
           volume={volume}
           muted={muted}
           playbackRate={playbackRate}
@@ -684,6 +850,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           onSubtitleDelayChange={prefs.handleSubtitleDelayChange}
           subtitleFontSize={prefs.subtitleFontSize}
           onSubtitleFontSizeChange={prefs.handleSubtitleFontSizeChange}
+          subtitleBottomOffset={prefs.subtitleBottomOffset}
+          onSubtitleBottomOffsetChange={prefs.handleSubtitleBottomOffsetChange}
           onFullscreenToggle={fullscreen.handleFullscreenToggle}
           onPipToggle={fullscreen.handlePipToggle}
           onToggleAspect={prefs.handleToggleAspect}
@@ -698,8 +866,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           onAddSubtitle={onAddSubtitle}
           seriesContext={seriesContext}
           onSelectEpisodeStream={onSelectEpisodeStream}
+          externalEpisodesTarget={nextEpisodeTarget}
+          onExternalEpisodesTargetConsumed={() => setNextEpisodeTarget(null)}
           onNext={syncStatus.isConnected && syncStatus.isHost ? playNextInQueue : undefined}
           hasNext={queueSize > 0}
+          viewerBehindSec={viewerBehindSec}
+          onResync={isViewer ? handleViewerResync : undefined}
           onMenuOpenChange={handleMenuOpenChange}
         />
       </div>

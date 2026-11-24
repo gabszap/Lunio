@@ -47,6 +47,7 @@ const ROUTES: Record<string, { auth: AuthMode; rate: RateRule }> = {
   upload: { auth: 'host', rate: { max: 2500, windowMs: 10 * MIN } },
   uploads: { auth: 'any', rate: { max: 600, windowMs: MIN } },
   hls: { auth: 'any', rate: { max: 1200, windowMs: MIN } },
+  youtube: { auth: 'any', rate: { max: 2400, windowMs: MIN } },
 };
 
 export function apiGate(req: IncomingMessage, res: ServerResponse, next: (err?: unknown) => void) {
@@ -63,6 +64,15 @@ export function apiGate(req: IncomingMessage, res: ServerResponse, next: (err?: 
   if (waitSeconds !== null) {
     res.setHeader('Retry-After', String(waitSeconds));
     return sendApiError(res, 429, 'rate_limited');
+  }
+
+  // `/api/youtube/info` e `/api/youtube/master` disparam yt-dlp — têm teto bem menor que os segmentos `.ts`
+  if (match[1] === 'youtube' && /^\/api\/youtube\/(info|master)(?:\/|$)/.test(url.pathname)) {
+    const ytWait = checkRate(clientIp(req), 'youtube-resolve', { max: 25, windowMs: MIN });
+    if (ytWait !== null) {
+      res.setHeader('Retry-After', String(ytWait));
+      return sendApiError(res, 429, 'rate_limited');
+    }
   }
 
   if (route.auth === 'none') return next();

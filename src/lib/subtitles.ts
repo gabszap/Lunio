@@ -10,6 +10,7 @@ import {
 import { logger } from './logger';
 import { apiFetch } from './access';
 import { collectAssFontNames, selectFontsToLoad } from './assFonts';
+import { transformAssStyle } from './assStyle';
 import { srtToVtt } from './media';
 import { sessionManager } from './session';
 import { t } from './/i18n';
@@ -572,6 +573,9 @@ export class SubtitleManager {
   private subtitleDelaySec = 0; // -10.0s to +10.0s
   private fontSizePercent = 100; // 50% to 250%
   private bottomOffsetPercent = 5; // 0% to 30%
+  private appearanceGeneration = 0;
+  private appearanceTimer: ReturnType<typeof setTimeout> | null = null;
+  private nativeCuePositionModified = false;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -628,7 +632,7 @@ export class SubtitleManager {
     if (typeof window !== 'undefined') {
       localStorage.setItem('vidstack_player_subtitle_font_size', clamped.toString());
     }
-    this.applyCssVariables();
+    this.reapplySubtitleAppearance();
     logger.setting('Tamanho da legenda', `${clamped}%`);
   }
 
@@ -638,8 +642,84 @@ export class SubtitleManager {
     if (typeof window !== 'undefined') {
       localStorage.setItem('vidstack_player_subtitle_bottom_offset', clamped.toString());
     }
-    this.applyCssVariables();
+    this.reapplySubtitleAppearance();
     logger.setting('Posição da legenda', `${clamped}%`);
+  }
+
+  private reapplySubtitleAppearance() {
+    this.applyCssVariables();
+    this.applyNativeCuePosition();
+    const gen = ++this.appearanceGeneration;
+    if (this.appearanceTimer) {
+      clearTimeout(this.appearanceTimer);
+      this.appearanceTimer = null;
+    }
+    const instance = this.jassubInstance;
+    const track = this.currentTrack;
+    if (!instance || !track?.content || (track.type !== 'ass' && track.type !== 'ssa')) {
+      return;
+    }
+    this.appearanceTimer = setTimeout(() => {
+      this.appearanceTimer = null;
+      if (gen !== this.appearanceGeneration || this.jassubInstance !== instance || this.currentTrack !== track) return;
+      const styled = transformAssStyle(track.content!, this.fontSizePercent, this.bottomOffsetPercent);
+      void Promise.resolve(instance.ready)
+        .then(async () => {
+          if (gen !== this.appearanceGeneration || this.jassubInstance !== instance || this.currentTrack !== track) return;
+          if (instance.renderer && typeof instance.renderer.setTrack === 'function') {
+            await instance.renderer.setTrack(styled);
+          } else if (typeof instance.setTrack === 'function') {
+            await instance.setTrack(styled);
+          }
+          if (gen !== this.appearanceGeneration || this.jassubInstance !== instance) return;
+          await this.forceJassubRepaint(instance);
+        })
+        .catch(() => {
+          // fallback silencioso se o worker ainda estiver iniciando ou for descartado
+        });
+    }, 16);
+  }
+
+  private async forceJassubRepaint(instance: any) {
+    if (!instance || this.jassubInstance !== instance) return;
+    try {
+      await Promise.resolve(instance.ready);
+      if (this.jassubInstance !== instance) return;
+      const video: HTMLVideoElement | undefined = instance._video;
+      if (video && video.videoWidth > 0 && video.videoHeight > 0 && typeof instance.manualRender === 'function') {
+        await instance.manualRender(
+          {
+            mediaTime: video.currentTime || 0,
+            width: video.videoWidth,
+            height: video.videoHeight,
+            expectedDisplayTime: performance.now(),
+          },
+          true
+        );
+      } else if (instance._lastDemandTime && typeof instance._demandRender === 'function') {
+        await instance._demandRender(true);
+      } else if (typeof instance.resize === 'function') {
+        await instance.resize(true);
+      }
+    } catch {}
+  }
+
+  private applyNativeCuePosition() {
+    const track = this.nativeTrackEl?.track;
+    if (!track?.cues) return;
+    // No valor padrão (5%), preserva o posicionamento original definido pelo autor da legenda VTT (ex.: placas no topo)
+    if (this.bottomOffsetPercent === 5 && !this.nativeCuePositionModified) return;
+    this.nativeCuePositionModified = this.bottomOffsetPercent !== 5;
+    const line = Math.max(50, Math.min(98, 100 - this.bottomOffsetPercent));
+    for (const cue of Array.from(track.cues)) {
+      const vttCue = cue as VTTCue;
+      if ('line' in vttCue) {
+        try {
+          vttCue.snapToLines = false;
+          vttCue.line = line;
+        } catch {}
+      }
+    }
   }
 
   private applyCssVariables() {
@@ -753,7 +833,13 @@ export class SubtitleManager {
     const assertCurrent = () => {
       if (signal?.aborted || generation !== this.preparationGeneration) throw new DOMException('Aborted', 'AbortError');
     };
-    // Destrói instância anterior e limpa canvas residual
+    // Destrói instância anterior e limpa canvas residual (zera currentTrack para evitar race com reapplySubtitleAppearance)
+    this.currentTrack = null;
+    this.appearanceGeneration++;
+    if (this.appearanceTimer) {
+      clearTimeout(this.appearanceTimer);
+      this.appearanceTimer = null;
+    }
     if (this.jassubInstance) {
       const previous = this.jassubInstance;
       this.jassubInstance = null;
@@ -858,9 +944,13 @@ export class SubtitleManager {
       }));
       assertCurrent();
 
+      const appliedFontSize = this.fontSizePercent;
+      const appliedBottomOffset = this.bottomOffsetPercent;
+      const styledAssContent = transformAssStyle(subContent, appliedFontSize, appliedBottomOffset);
+
       const opts: any = {
         video,
-        subContent,
+        subContent: styledAssContent,
         debug: false,
         wasmUrl: '/jassub/wasm/jassub-worker.wasm',
         modernWasmUrl: '/jassub/wasm/jassub-worker-modern.wasm',
@@ -885,6 +975,9 @@ export class SubtitleManager {
       instance.timeOffset = effectiveSubtitleOffset(this.timelineOriginSec, this.subtitleDelaySec);
 
       this.currentTrack = track;
+      if (this.fontSizePercent !== appliedFontSize || this.bottomOffsetPercent !== appliedBottomOffset) {
+        this.reapplySubtitleAppearance();
+      }
 
       // Posiciona o canvas perfeitamente sobre a camada de vídeo com fundo 100% transparente
       const setupCanvas = () => {
@@ -997,6 +1090,7 @@ export class SubtitleManager {
       if (trackEl.track) {
         this.nativeOriginalCues = Array.from(trackEl.track.cues || []).map(cue => ({ cue, start: cue.startTime, end: cue.endTime }));
         this.applySubtitleOffset();
+        this.applyNativeCuePosition();
         trackEl.track.mode = 'showing';
       }
 
@@ -1012,6 +1106,8 @@ export class SubtitleManager {
   public destroyNativeTrack() {
     this.cancelNativeLoad?.();
     this.nativeOriginalCues = [];
+    this.nativeCuePositionModified = false;
+    if (!this.jassubInstance) this.currentTrack = null;
     if (this.nativeTrackEl) {
       try {
         if (this.nativeTrackEl.track) {
@@ -1061,7 +1157,7 @@ export class SubtitleManager {
     if (this.jassubInstance) {
       try {
         this.jassubInstance.timeOffset = offset;
-        this.jassubInstance.resize(true);
+        void this.forceJassubRepaint(this.jassubInstance);
       } catch {}
     }
     const track = this.nativeTrackEl?.track;
@@ -1082,6 +1178,12 @@ export class SubtitleManager {
   }
 
   public destroyDirectJassub() {
+    this.appearanceGeneration++;
+    if (this.appearanceTimer) {
+      clearTimeout(this.appearanceTimer);
+      this.appearanceTimer = null;
+    }
+    if (!this.nativeTrackEl) this.currentTrack = null;
     if (this.jassubInstance) {
       this.disposeJassub(this.jassubInstance);
       this.jassubInstance = null;

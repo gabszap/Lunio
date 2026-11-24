@@ -1,4 +1,5 @@
-import React, { useEffect, useId, useRef } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, X } from 'lucide-react';
 import { t } from '../lib/i18n';
 
@@ -108,7 +109,7 @@ export const TextButton: React.FC<ButtonProps & { tone?: 'muted' | 'accent' | 't
     {...rest}
     className={cx(
       baseBtn,
-      'justify-center gap-1.5 rounded-[10px] bg-transparent hover:bg-white/8 disabled:opacity-40',
+      'justify-center gap-1.5 rounded-[10px] bg-transparent hover:bg-white/8 transition-[background-color,color,transform] duration-150 active:scale-[0.97] disabled:opacity-40 disabled:active:scale-100',
       size === 'md' ? 'h-11 px-3 text-[14px]' : 'h-9 px-2.5 text-[13px]',
       tone === 'accent' ? 'text-lu-accent font-semibold' : tone === 'text' ? 'text-lu-text font-medium' : 'text-lu-muted font-medium',
       className
@@ -130,8 +131,8 @@ export const PrimaryButton: React.FC<ButtonProps & { size?: 'md' | 'lg'; block?:
     {...rest}
     className={cx(
       baseBtn,
-      'justify-center gap-2 px-5 rounded-[10px] bg-lu-accent text-lu-bg text-[14px] font-semibold hover:bg-lu-accent-hover',
-      'disabled:opacity-45 disabled:hover:bg-lu-accent',
+      'justify-center gap-2 px-5 rounded-[10px] bg-lu-accent text-lu-bg text-[14px] font-semibold hover:bg-lu-accent-hover transition-[background-color,transform] duration-150 active:scale-[0.97]',
+      'disabled:opacity-45 disabled:hover:bg-lu-accent disabled:active:scale-100',
       size === 'lg' ? 'h-12' : 'h-11',
       block && 'w-full',
       className
@@ -153,8 +154,8 @@ export const GhostButton: React.FC<ButtonProps & { size?: 'md' | 'lg'; block?: b
     {...rest}
     className={cx(
       baseBtn,
-      'justify-center gap-2 px-4 rounded-[10px] bg-lu-surface border border-lu-border-strong text-lu-text text-[14px] font-medium hover:bg-lu-elevated',
-      'disabled:opacity-45',
+      'justify-center gap-2 px-4 rounded-[10px] bg-lu-surface border border-lu-border-strong text-lu-text text-[14px] font-medium hover:bg-lu-elevated transition-[background-color,border-color,transform] duration-150 active:scale-[0.97]',
+      'disabled:opacity-45 disabled:active:scale-100',
       size === 'lg' ? 'h-12' : 'h-11',
       block && 'w-full',
       className
@@ -274,6 +275,59 @@ export function Segmented<T extends string>({
   );
 }
 
+/** Calcula `clip-path: inset(...)` do indicador deslizante acompanhando o botão ativo e redimensionamentos. */
+export function useSlidingPill<T extends string>(activeKey: T, radius: number, layoutKey?: string | number) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const buttonRefs = useRef<Map<T, HTMLButtonElement>>(new Map());
+  const refCallbacks = useRef<Map<T, (el: HTMLButtonElement | null) => void>>(new Map());
+  const [clipPath, setClipPath] = useState<string | null>(null);
+  const [animated, setAnimated] = useState(false);
+
+  const measure = useCallback(() => {
+    const list = listRef.current;
+    const activeBtn = buttonRefs.current.get(activeKey);
+    if (!list || !activeBtn) return;
+    const w = list.clientWidth;
+    const h = list.clientHeight;
+    if (w <= 0 || h <= 0) return;
+    const top = Math.max(0, activeBtn.offsetTop);
+    const left = Math.max(0, activeBtn.offsetLeft);
+    const right = Math.max(0, w - (left + activeBtn.offsetWidth));
+    const bottom = Math.max(0, h - (top + activeBtn.offsetHeight));
+    setClipPath(`inset(${top}px ${right}px ${bottom}px ${left}px round ${radius}px)`);
+  }, [activeKey, radius]);
+
+  useLayoutEffect(() => {
+    measure();
+    if (!animated) {
+      const id = requestAnimationFrame(() => setAnimated(true));
+      return () => cancelAnimationFrame(id);
+    }
+  }, [measure, animated, layoutKey]);
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(list);
+    return () => ro.disconnect();
+  }, [measure]);
+
+  const setButtonRef = useCallback((key: T) => {
+    let cb = refCallbacks.current.get(key);
+    if (!cb) {
+      cb = (el: HTMLButtonElement | null) => {
+        if (el) buttonRefs.current.set(key, el);
+        else buttonRefs.current.delete(key);
+      };
+      refCallbacks.current.set(key, cb);
+    }
+    return cb;
+  }, []);
+
+  return { listRef, clipPath, animated, setButtonRef };
+}
+
 /** Abas em "pílula" do cabeçalho (Catálogo / Sala / Status) e filtros (Temporadas, Tudo/Filmes/Séries). */
 export function PillTabs<T extends string>({
   value,
@@ -288,29 +342,46 @@ export function PillTabs<T extends string>({
   size?: 'lg' | 'sm';
   label: string;
 }) {
+  const radius = size === 'lg' ? 10 : 8;
+  const layoutKey = options
+    .map((o) => `${o.value}:${typeof o.label === 'string' || typeof o.label === 'number' ? o.label : ''}`)
+    .join('|');
+  const { listRef, clipPath, animated, setButtonRef } = useSlidingPill(value, radius, layoutKey);
+
   return (
     <div
+      ref={listRef}
       role="tablist"
       aria-label={label}
       className={cx(
-        'flex gap-1 p-1 bg-lu-bg2 border border-lu-border',
+        'relative flex gap-1 p-1 bg-lu-bg2 border border-lu-border',
         size === 'lg' ? 'rounded-[14px]' : 'rounded-xl'
       )}
     >
+      {clipPath && (
+        <span
+          aria-hidden="true"
+          className={cx('lu-pill-indicator', animated && 'lu-pill-indicator-animated')}
+          style={{ clipPath }}
+        />
+      )}
       {options.map((opt) => {
         const selected = opt.value === value;
         return (
           <button
             key={opt.value}
+            ref={setButtonRef(opt.value)}
             type="button"
             role="tab"
             aria-selected={selected}
             onClick={() => onChange(opt.value)}
             className={cx(
               baseBtn,
-              'justify-center gap-2 font-semibold',
+              'lu-pill-btn relative z-10 justify-center gap-2 font-semibold',
               size === 'lg' ? 'h-11 px-[18px] rounded-[10px] text-[14px]' : 'h-9 px-3.5 rounded-lg text-[13px]',
-              selected ? 'bg-lu-tint text-lu-accent' : 'bg-transparent text-lu-muted hover:bg-white/8'
+              selected
+                ? cx('text-lu-accent', !clipPath && 'bg-lu-tint')
+                : 'bg-transparent text-lu-muted'
             )}
           >
             {opt.icon}
@@ -454,15 +525,18 @@ export const Slider: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = ({ 
  * (o botão que abre o painel: sem isso o mousedown fecha e o click reabre).
  */
 export function useDismiss(open: boolean, onClose: () => void, ref: React.RefObject<HTMLElement | null>, alsoInside?: React.RefObject<HTMLElement | null>) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (alsoInside?.current?.contains(target)) return;
-      if (ref.current && !ref.current.contains(target)) onClose();
+      if (ref.current && !ref.current.contains(target)) onCloseRef.current();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -470,7 +544,7 @@ export function useDismiss(open: boolean, onClose: () => void, ref: React.RefObj
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open, onClose, ref, alsoInside]);
+  }, [open, ref, alsoInside]);
 }
 
 // ───────────────────────── Form fields ─────────────────────────
@@ -570,6 +644,23 @@ export const ClearButton: React.FC<{ onClick: () => void; label?: string }> = ({
 
 // ───────────────────────── Modal ─────────────────────────
 
+/** Alvo de portal seguro para `:fullscreen` nativo (elementos no `document.body` ficam atrás da top layer). */
+export function usePortalTarget(): Element | null {
+  const [target, setTarget] = useState<Element | null>(() =>
+    typeof document !== 'undefined' ? document.fullscreenElement ?? document.body : null
+  );
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const sync = () => setTarget(document.fullscreenElement ?? document.body);
+    sync();
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, []);
+
+  return target;
+}
+
 export const Modal: React.FC<{
   open: boolean;
   onClose?: () => void;
@@ -580,34 +671,40 @@ export const Modal: React.FC<{
   className?: string;
 }> = ({ open, onClose, label, width = 480, alert, children, className }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const portalTarget = usePortalTarget();
 
   useEffect(() => {
     if (!open) return;
     const prev = document.activeElement as HTMLElement | null;
-    const first = dialogRef.current?.querySelector<HTMLElement>(
-      'input:not([disabled]), button:not([disabled]), [href], select, textarea'
-    );
-    first?.focus();
+    if (dialogRef.current && !dialogRef.current.contains(document.activeElement)) {
+      const preferred = dialogRef.current.querySelector<HTMLElement>(
+        '[autofocus]:not([disabled]), input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled])'
+      );
+      const fallback = dialogRef.current.querySelector<HTMLElement>('button:not([disabled]), [href]');
+      (preferred || fallback)?.focus();
+    }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || !onClose) return;
+      if (e.key !== 'Escape' || !onCloseRef.current) return;
       // Quando há modais aninhados (ex.: SubtitleModal sobre MediaPickerModal), apenas o modal do topo responde ao Escape
       const dialogs = document.querySelectorAll('[role="dialog"], [role="alertdialog"]');
       if (dialogs.length > 0 && dialogs[dialogs.length - 1] !== dialogRef.current) return;
-      onClose();
+      onCloseRef.current();
     };
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
       prev?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
-  return (
+  const modalNode = (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-[rgba(3,4,7,0.92)]"
+      className="lu-modal-backdrop-enter fixed inset-0 z-[100] flex items-center justify-center p-4 bg-[rgba(3,4,7,0.92)]"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget && onClose) onClose();
+        if (e.target === e.currentTarget && onCloseRef.current) onCloseRef.current();
       }}
     >
       <div
@@ -617,7 +714,7 @@ export const Modal: React.FC<{
         aria-label={label}
         style={{ width }}
         className={cx(
-          'max-w-full max-h-[calc(100vh-32px)] overflow-y-auto box-border p-7 rounded-[18px] bg-lu-surface border border-lu-border shadow-[0_24px_64px_rgba(0,0,0,0.55)] flex flex-col gap-5 text-lu-text',
+          'lu-modal-enter max-w-full max-h-[calc(100vh-32px)] overflow-y-auto box-border p-7 rounded-[18px] bg-lu-surface border border-lu-border shadow-[0_24px_64px_rgba(0,0,0,0.55)] flex flex-col gap-5 text-lu-text',
           className
         )}
       >
@@ -625,6 +722,7 @@ export const Modal: React.FC<{
       </div>
     </div>
   );
+  return portalTarget ? createPortal(modalNode, portalTarget) : modalNode;
 };
 
 export const ModalHeader: React.FC<{ title: string; description?: React.ReactNode; onClose?: () => void }> = ({

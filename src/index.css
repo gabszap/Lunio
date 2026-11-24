@@ -25,6 +25,8 @@
   --color-lu-video: #05070b;
 
   --animate-lu-spin: spin 1s linear infinite;
+  --ease-lu-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-lu-in-out: cubic-bezier(0.77, 0, 0.175, 1);
 }
 
 @layer base {
@@ -245,6 +247,17 @@ media-player.object-cover video,
   object-fit: cover !important;
 }
 
+/* O base.css do Vidstack coloca height: 1000% no iframe do YouTube para tentar cortar a barra interna,
+   o que distorce/estica o vídeo fora de 16:9 fixo. Mantendo 100% × 100%, o próprio YouTube preserva a proporção exata. */
+[data-media-provider] iframe.vds-youtube,
+[data-media-provider] iframe.vds-youtube[data-no-controls],
+:fullscreen [data-media-provider] iframe.vds-youtube,
+.window-fullscreen [data-media-provider] iframe.vds-youtube {
+  width: 100% !important;
+  height: 100% !important;
+  aspect-ratio: unset !important;
+}
+
 canvas.JASSUB,
 :fullscreen canvas.JASSUB,
 .window-fullscreen canvas.JASSUB {
@@ -314,7 +327,181 @@ html.is-fullscreen .player-menu-panel {
   line-height: 1.4 !important;
 }
 
+.vds-captions {
+  --cue-font-size: calc(1em * var(--subtitle-font-size, 100%) / 100);
+  padding-bottom: var(--subtitle-bottom-offset, 5%);
+}
 
+/* Indicador deslizante dos PillTabs (Home: Catálogo / Sala / Status e filtros) */
+.lu-pill-indicator {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-color: var(--color-lu-tint);
+  will-change: clip-path;
+}
+
+.lu-pill-indicator-animated {
+  transition: clip-path 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.lu-pill-btn {
+  transition:
+    color 180ms ease,
+    background-color 150ms ease,
+    transform 160ms var(--ease-lu-out);
+}
+
+.lu-pill-btn:active {
+  transform: scale(0.97);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lu-pill-btn[aria-selected='false']:hover {
+    background-color: rgb(255 255 255 / 0.06);
+    color: var(--color-lu-text);
+  }
+}
+
+@keyframes lu-tab-enter-right {
+  from {
+    opacity: 0;
+    transform: translate3d(22px, 0, 0) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes lu-tab-enter-left {
+  from {
+    opacity: 0;
+    transform: translate3d(-22px, 0, 0) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.lu-tab-panel-right {
+  animation: lu-tab-enter-right 260ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.lu-tab-panel-left {
+  animation: lu-tab-enter-left 260ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@keyframes lu-view-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(0.988);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.lu-view-enter {
+  animation: lu-view-enter 250ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@keyframes lu-modal-backdrop-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes lu-modal-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.lu-modal-backdrop-enter {
+  animation: lu-modal-backdrop-enter 180ms ease backwards;
+}
+
+.lu-modal-enter {
+  animation: lu-modal-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.lu-source-card {
+  transition:
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 180ms ease;
+}
+
+.lu-source-card:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+.lu-source-card-icon {
+  transition:
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 160ms ease;
+}
+
+.lu-action-btn {
+  transition:
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    box-shadow 160ms ease;
+}
+
+.lu-action-btn:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lu-source-card:not(:disabled):hover {
+    transform: translateY(-2px);
+    background-color: rgb(255 255 255 / 0.055);
+    border-color: rgb(167 139 250 / 0.32);
+    box-shadow: 0 10px 24px rgb(0 0 0 / 0.28);
+  }
+  .lu-source-card:not(:disabled):hover .lu-source-card-icon {
+    transform: scale(1.07);
+    background-color: var(--color-lu-tint);
+  }
+  .lu-action-btn:not(:disabled):hover {
+    transform: translateY(-1px);
+    border-color: rgb(167 139 250 / 0.35);
+  }
+}
+
+
+
+@media (prefers-reduced-motion: reduce) {
+  .lu-pill-indicator-animated,
+  .lu-pill-btn,
+  .lu-source-card,
+  .lu-source-card-icon,
+  .lu-action-btn {
+    transition: none;
+  }
+  .lu-tab-panel-right,
+  .lu-tab-panel-left,
+  .lu-view-enter,
+  .lu-modal-backdrop-enter,
+  .lu-modal-enter {
+    animation: none;
+  }
+}
 
 /* Enquanto a transmissão de tela cobre o vídeo da sala, a legenda do filme não aparece por cima da tela transmitida */
 .screen-covering canvas.JASSUB,

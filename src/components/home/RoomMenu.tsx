@@ -55,11 +55,11 @@ export const RoomMenu: React.FC<RoomMenuProps> = ({ onPick, onJoin, onRejoin, on
             title={s.needsScreen && screenState === 'unavailable' ? t('Precisa do Chrome, Edge ou Brave no computador e da transmissão ligada no servidor.') : undefined}
             onClick={() => onPick(s.step)}
             className={cx(
-              'flex items-center justify-start gap-3.5 min-h-[76px] px-4 rounded-[14px] bg-lu-bg2 border border-lu-border text-left w-full transition-colors',
-              blocked ? 'cursor-not-allowed opacity-60' : 'hover:bg-white/6'
+              'lu-source-card flex items-center justify-start gap-3.5 min-h-[76px] px-4 rounded-[14px] bg-lu-bg2 border border-lu-border text-left w-full',
+              blocked && 'cursor-not-allowed opacity-60'
             )}
           >
-            <span className="w-10 h-10 rounded-[10px] bg-lu-elevated text-lu-accent flex items-center justify-center flex-none">
+            <span className="lu-source-card-icon w-10 h-10 rounded-[10px] bg-lu-elevated text-lu-accent flex items-center justify-center flex-none">
               {s.icon}
             </span>
             <span className="flex flex-col gap-0.5 min-w-0">
@@ -83,13 +83,13 @@ export const RoomMenu: React.FC<RoomMenuProps> = ({ onPick, onJoin, onRejoin, on
       </div>
 
       <div className="flex items-center justify-between gap-3 mt-5 pt-5 border-t border-lu-border flex-wrap">
-        <GhostButton onClick={onJoin} className="!border-lu-border">
+        <GhostButton onClick={onJoin} className="lu-action-btn !border-lu-border">
           <LogIn size={18} />
           <span>{t('Entrar na sala')}</span>
         </GhostButton>
-        <TextButton tone="accent" onClick={onCatalog}>
+        <TextButton tone="accent" onClick={onCatalog} className="group lu-action-btn">
           <span>{t('Ou olhe o catálogo')}</span>
-          <ArrowRight size={16} />
+          <ArrowRight size={16} className="transition-transform duration-150 group-hover:translate-x-0.5" />
         </TextButton>
       </div>
     </HomeCard>

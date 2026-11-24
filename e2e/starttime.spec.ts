@@ -26,8 +26,9 @@ test('link com ?t=: o Host abre o vídeo naquele instante, uma vez, e o endereç
   expect((await state(host.page)).t).toBeLessThan(75);
 
   // Usou o ?t= e tirou do endereço: copiar o link ou recarregar não volta àquele ponto
-  expect(new URL(host.page.url()).searchParams.has('t')).toBe(false);
-  expect(new URL(host.page.url()).searchParams.get('room')).toBe(code);
+  const currentUrl = new URL(host.page.url());
+  expect(currentUrl.searchParams.has('t')).toBe(false);
+  expect(/^\/room\/([A-Z0-9]+)/i.exec(currentUrl.pathname)?.[1] || currentUrl.searchParams.get('room')).toBe(code);
 
   await host.context.close();
 });
@@ -63,7 +64,7 @@ test('Compartilhar > "Link neste instante" copia o link da sala com o ?t= do pon
   await expect(host.page.getByRole('button', { name: 'Link copiado' })).toBeVisible();
 
   const link = new URL(await host.page.evaluate(() => navigator.clipboard.readText()));
-  expect(link.searchParams.get('room')).toBe(code);
+  expect(/^\/room\/([A-Z0-9]+)/i.exec(link.pathname)?.[1] || link.searchParams.get('room')).toBe(code);
   const t = Number(link.searchParams.get('t'));
   expect(t).toBeGreaterThanOrEqual(49);
   expect(t).toBeLessThan(60);

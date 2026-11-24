@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Play,
   Pause,
@@ -12,7 +12,8 @@ import {
   RotateCw,
   Plus,
   SkipForward,
-  Tv,
+  ListVideo,
+  RefreshCw,
 } from 'lucide-react';
 import { Chapter, SubtitleTrack, AudioTrackOption, CatalogSeriesContext } from '../types/media';
 import type { CatalogEpisode } from '../lib/catalog';
@@ -20,7 +21,7 @@ import type { StreamOption } from '../lib/streams';
 import { formatTime } from '../lib/chapters';
 import { SeekButtons } from './SeekButtons';
 import { VolumeDisplay } from './VolumeDisplay';
-import { SettingsMenu, formatMs } from './SettingsMenu';
+import { SettingsMenu, formatMs, type VideoQualityOption } from './SettingsMenu';
 import { ChapterTimeline } from './ChapterTimeline';
 import { ChapterList } from './ChapterList';
 import { EpisodesOverlay } from './EpisodesMenu';
@@ -35,6 +36,7 @@ import {
   MenuItem,
   MenuPanel,
   MenuSection,
+  Slider,
   Spinner,
   cx,
   useDismiss,
@@ -49,6 +51,13 @@ interface PlayerControlsProps {
   bufferedRanges?: { start: number; end: number }[];
   isInspecting?: boolean;
   parsedMetadata?: any;
+  /** Resolução detectada ao vivo (ex.: YouTube playbackQuality ou videoHeight real). */
+  liveResolution?: string | null;
+  qualities?: VideoQualityOption[];
+  autoQuality?: boolean;
+  onQualitySelect?: (height: number | 'auto') => void;
+  /** Vídeo do YouTube: oculta o botão "+90 s" (pular abertura). */
+  isYouTube?: boolean;
   volume: number;
   muted: boolean;
   playbackRate: number;
@@ -75,6 +84,8 @@ interface PlayerControlsProps {
   onSubtitleDelayChange?: (delay: number) => void;
   subtitleFontSize?: number;
   onSubtitleFontSizeChange?: (size: number) => void;
+  subtitleBottomOffset?: number;
+  onSubtitleBottomOffsetChange?: (offset: number) => void;
   aspectCover?: boolean;
   aspectMode?: 'fit' | 'fill' | 'stretch';
   onToggleAspect?: () => void;
@@ -91,9 +102,15 @@ interface PlayerControlsProps {
   onAddSubtitle?: () => void;
   seriesContext?: CatalogSeriesContext | null;
   onSelectEpisodeStream?: (episode: CatalogEpisode, stream: StreamOption) => void;
+  /** Abre o overlay de episódios diretamente em um episódio alvo (ex.: cartão "Próximo episódio"). */
+  externalEpisodesTarget?: CatalogEpisode | null;
+  onExternalEpisodesTargetConsumed?: () => void;
   /** Próximo da fila da sala (só existe dentro de uma sala, para o Host). Sem itens na fila o botão fica desativado. */
   onNext?: () => void;
   hasNext?: boolean;
+  /** Diferença (s) do espectador para o Host (positivo = atrasado); clicando no selo sincroniza na hora. */
+  viewerBehindSec?: number;
+  onResync?: () => void;
   /** Avisado quando algum menu abre/fecha, para o player não esconder os controles com menu aberto. */
   onMenuOpenChange?: (open: boolean) => void;
 }
@@ -201,6 +218,11 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   bufferedRanges,
   isInspecting,
   parsedMetadata,
+  liveResolution,
+  qualities,
+  autoQuality,
+  onQualitySelect,
+  isYouTube = false,
   volume,
   muted,
   playbackRate,
@@ -227,6 +249,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   onSubtitleDelayChange,
   subtitleFontSize = 100,
   onSubtitleFontSizeChange,
+  subtitleBottomOffset = 5,
+  onSubtitleBottomOffsetChange,
   aspectMode = 'fit',
   onToggleAspect,
   onFullscreenToggle,
@@ -242,11 +266,16 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   onAddSubtitle,
   seriesContext,
   onSelectEpisodeStream,
+  externalEpisodesTarget,
+  onExternalEpisodesTargetConsumed,
   onNext,
   hasNext = false,
+  viewerBehindSec = 0,
+  onResync,
   onMenuOpenChange,
 }) => {
   const [openMenu, setOpenMenuState] = useState<MenuId>(null);
+  const [episodesTarget, setEpisodesTarget] = useState<CatalogEpisode | null>(null);
   const subMenuRef = useRef<HTMLDivElement>(null);
   const audioMenuRef = useRef<HTMLDivElement>(null);
   const episodesToggleRef = useRef<HTMLDivElement>(null);
@@ -254,10 +283,19 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   const setOpenMenu = useCallback(
     (id: MenuId) => {
       setOpenMenuState(id);
+      if (id !== 'episodes') setEpisodesTarget(null);
       onMenuOpenChange?.(id !== null);
     },
     [onMenuOpenChange]
   );
+
+  useEffect(() => {
+    if (!externalEpisodesTarget) return;
+    setEpisodesTarget(externalEpisodesTarget);
+    setOpenMenu('episodes');
+    onExternalEpisodesTargetConsumed?.();
+  }, [externalEpisodesTarget, setOpenMenu, onExternalEpisodesTargetConsumed]);
+
   const toggleMenu = (id: Exclude<MenuId, null>) => setOpenMenu(openMenu === id ? null : id);
   const closeMenu = useCallback(() => setOpenMenu(null), [setOpenMenu]);
 
@@ -311,7 +349,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         </div>
 
         <div className="hidden sm:flex items-center gap-1.5 flex-none">
-          {parsedMetadata?.resolution && <Badge>{parsedMetadata.resolution}</Badge>}
+          {(liveResolution || parsedMetadata?.resolution) && <Badge>{liveResolution || parsedMetadata.resolution}</Badge>}
           {codecBadge && <Badge>{codecBadge}</Badge>}
           {volumeBoost > 100 && <Badge className="text-lu-success">Boost {volumeBoost}%</Badge>}
         </div>
@@ -325,6 +363,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           onClose={closeMenu}
           toggleRef={episodesToggleRef}
           onSelectEpisodeStream={onSelectEpisodeStream}
+          initialTargetEpisode={episodesTarget}
           isViewer={isViewer}
         />
       )}
@@ -345,7 +384,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               </IconButton>
               <button
                 type="button"
-                aria-label={paused ? 'Reproduzir' : 'Pausar'}
+                aria-label={paused ? t('Reproduzir') : t('Pausar')}
                 onClick={onPlayToggle}
                 className="w-16 h-16 rounded-full inline-flex items-center justify-center bg-lu-surface/72 border border-white/12 backdrop-blur-md text-lu-text"
               >
@@ -393,14 +432,32 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         <div className="flex items-center justify-between gap-1.5 flex-wrap sm:flex-nowrap">
           <div className="flex items-center gap-0.5 @[980px]:gap-1 min-w-0 flex-none">
             {isViewer ? (
-              <span
+              <button
                 id="viewer-sync-badge"
-                title={t('Sua reprodução é sincronizada automaticamente com o Host da sala.')}
-                className="inline-flex items-center gap-2 h-9 @[980px]:h-11 px-3 @[980px]:px-3.5 box-border rounded-[10px] bg-lu-success/10 border border-lu-success/28 text-lu-success text-[12px] @[980px]:text-[13px] font-semibold flex-none"
+                type="button"
+                onClick={onResync}
+                title={t('Clique para re-sincronizar imediatamente com o Host da sala.')}
+                className={cx(
+                  'inline-flex items-center gap-2 h-9 @[980px]:h-11 px-3 @[980px]:px-3.5 box-border rounded-[10px] border text-[12px] @[980px]:text-[13px] font-semibold flex-none transition-colors',
+                  Math.abs(viewerBehindSec) >= 1.5
+                    ? 'bg-lu-warning/12 border-lu-warning/35 text-lu-warning hover:bg-lu-warning/20'
+                    : 'bg-lu-success/10 border-lu-success/28 text-lu-success hover:bg-lu-success/18'
+                )}
               >
-                <Dot tone="success" />
-                {t('Ao vivo')}
-              </span>
+                {Math.abs(viewerBehindSec) >= 1.5 ? (
+                  <>
+                    <RefreshCw size={13} />
+                    <span className="tabular">
+                      {viewerBehindSec > 0 ? `−${Math.round(viewerBehindSec)}s` : `+${Math.round(Math.abs(viewerBehindSec))}s`} · {t('Sincronizar')}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Dot tone="success" />
+                    <span>{t('Ao vivo')}</span>
+                  </>
+                )}
+              </button>
             ) : (
               <>
                 <button
@@ -413,7 +470,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                 >
                   {paused ? <Play size={18} /> : <Pause size={18} />}
                 </button>
-                <SeekButtons currentTime={currentTime} duration={duration} onSeek={onSeek} />
+                <SeekButtons currentTime={currentTime} duration={duration} onSeek={onSeek} showSkipIntro={!isYouTube} />
                 {onNext && (
                   <IconButton
                     id="btn-next-in-queue"
@@ -467,9 +524,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                 <MenuPanel
                   id="subtitles-popover-menu"
                   title={t('Legendas')}
-                  meta={`${subtitles.length} ${subtitles.length === 1 ? 'faixa' : 'faixas'}`}
+                  meta={`${subtitles.length} ${subtitles.length === 1 ? t('faixa') : t('faixas')}`}
                   onClose={closeMenu}
-                  className="right-[-96px] w-[320px]"
+                  className="right-0 w-[368px]"
                 >
                   <div role="radiogroup" aria-label={t('Faixa de legenda')} className="flex flex-col gap-0.5">
                     <MenuItem
@@ -498,12 +555,23 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                     <>
                       <MenuDivider />
                       <MenuSection title={t('Sincronia')} value={formatMs(subtitleDelay)}>
-                        <ChipRow>
-                          <Chip onClick={() => onSubtitleDelayChange(Number((subtitleDelay - 0.05).toFixed(2)))}>{t('−50 ms')}</Chip>
-                          <Chip selected={subtitleDelay === 0} onClick={() => onSubtitleDelayChange(0)}>
+                        <Slider
+                          id="slider-subtitle-delay"
+                          min="-5"
+                          max="5"
+                          step="0.05"
+                          value={Math.max(-5, Math.min(5, subtitleDelay))}
+                          aria-label={t('Sincronia')}
+                          onChange={(e) => onSubtitleDelayChange(parseFloat(e.target.value))}
+                        />
+                        <ChipRow gap="tight">
+                          <Chip dense className="!flex-auto px-2" onClick={() => onSubtitleDelayChange(Number((subtitleDelay - 0.25).toFixed(2)))}>−250 ms</Chip>
+                          <Chip dense className="!flex-auto px-2" onClick={() => onSubtitleDelayChange(Number((subtitleDelay - 0.05).toFixed(2)))}>{t('−50 ms')}</Chip>
+                          <Chip dense className="!flex-auto px-2" selected={subtitleDelay === 0} onClick={() => onSubtitleDelayChange(0)}>
                             {t('Redefinir')}
                           </Chip>
-                          <Chip onClick={() => onSubtitleDelayChange(Number((subtitleDelay + 0.05).toFixed(2)))}>{t('+50 ms')}</Chip>
+                          <Chip dense className="!flex-auto px-2" onClick={() => onSubtitleDelayChange(Number((subtitleDelay + 0.05).toFixed(2)))}>{t('+50 ms')}</Chip>
+                          <Chip dense className="!flex-auto px-2" onClick={() => onSubtitleDelayChange(Number((subtitleDelay + 0.25).toFixed(2)))}>+250 ms</Chip>
                         </ChipRow>
                       </MenuSection>
                     </>
@@ -512,11 +580,26 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   {activeSubtitle && onSubtitleFontSizeChange && (
                     <>
                       <MenuDivider />
-                      <MenuSection title={t('Tamanho da fonte')} value={`${subtitleFontSize}%`} last>
-                        <ChipRow>
-                          {[75, 100, 125, 150].map((sz) => (
-                            <Chip key={sz} selected={subtitleFontSize === sz} onClick={() => onSubtitleFontSizeChange(sz)}>
+                      <MenuSection title={t('Tamanho da fonte')} value={`${subtitleFontSize}%`}>
+                        <ChipRow gap="tight">
+                          {[75, 100, 125, 150, 175].map((sz) => (
+                            <Chip key={sz} dense selected={subtitleFontSize === sz} onClick={() => onSubtitleFontSizeChange(sz)}>
                               {sz}%
+                            </Chip>
+                          ))}
+                        </ChipRow>
+                      </MenuSection>
+                    </>
+                  )}
+
+                  {activeSubtitle && onSubtitleBottomOffsetChange && (
+                    <>
+                      <MenuDivider />
+                      <MenuSection title={t('Altura da legenda')} value={`${subtitleBottomOffset}%`} last={!onAddSubtitle}>
+                        <ChipRow gap="tight">
+                          {[0, 5, 10, 15, 20].map((off) => (
+                            <Chip key={off} dense selected={subtitleBottomOffset === off} onClick={() => onSubtitleBottomOffsetChange(off)}>
+                              {off}%
                             </Chip>
                           ))}
                         </ChipRow>
@@ -561,9 +644,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   <MenuPanel
                     id="audio-tracks-popover-menu"
                     title={t('Faixas de áudio')}
-                    meta={`${audioTracks.length} ${audioTracks.length === 1 ? 'faixa' : 'faixas'}`}
+                    meta={`${audioTracks.length} ${audioTracks.length === 1 ? t('faixa') : t('faixas')}`}
                     onClose={closeMenu}
-                    className="right-[-96px] w-[320px]"
+                    className="right-0 w-[320px]"
                   >
                     <div role="radiogroup" aria-label={t('Faixa de áudio')} className="flex flex-col gap-0.5 pb-1">
                       {audioTracks.map((trk) => (
@@ -594,7 +677,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                   onClick={() => toggleMenu('episodes')}
                   className="!w-8 !h-8 @[880px]:!w-9 @[880px]:!h-9 @[1060px]:!w-11 @[1060px]:!h-11"
                 >
-                  <Tv size={18} />
+                  <ListVideo size={18} />
                 </IconButton>
               </div>
             )}
@@ -604,14 +687,13 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               onPlaybackRateChange={onPlaybackRateChange}
               volumeBoost={volumeBoost}
               onVolumeBoostChange={onVolumeBoostChange}
+              qualities={qualities}
+              autoQuality={autoQuality}
+              onQualitySelect={onQualitySelect}
               autoSkipIntro={autoSkipIntro}
               onAutoSkipIntroChange={isViewer ? undefined : onAutoSkipIntroChange}
               audioDelay={audioDelay}
               onAudioDelayChange={onAudioDelayChange}
-              subtitleDelay={subtitleDelay}
-              onSubtitleDelayChange={onSubtitleDelayChange}
-              subtitleFontSize={subtitleFontSize}
-              onSubtitleFontSizeChange={onSubtitleFontSizeChange}
               canChangeRate={!isViewer}
               open={openMenu === 'settings'}
               onOpenChange={(o) => setOpenMenu(o ? 'settings' : null)}

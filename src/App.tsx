@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
-import { Ban, UserX } from 'lucide-react';
+import { Ban, Lock, UserX } from 'lucide-react';
 // Player (Vidstack, legendas, hooks) e Catálogo saem do pacote inicial: a Home abre sem baixá-los.
 const loadVideoPlayer = () => import('./components/VideoPlayer').then((m) => ({ default: m.VideoPlayer }));
 const VideoPlayer = lazy(loadVideoPlayer);
@@ -9,7 +9,7 @@ import type { RoomSidebarTab } from './components/room/RoomSidebar';
 import { RoomLobbyModal } from './components/RoomLobbyModal';
 import { UsernameModal, getLastUsername, shouldSkipNamePrompt } from './components/UsernameModal';
 import { SubtitleModal } from './components/SubtitleModal';
-import { Modal, PrimaryButton, Spinner } from './components/ui';
+import { Modal, ModalHeader, PrimaryButton, Spinner, TextButton, TextInput } from './components/ui';
 import { readDetailFromUrl, readSearchFromUrl, readSeasonFromUrl } from './lib/searchUrl';
 import { canonicalizeCatalogUrl, pushTabUrl, tabFromPath } from './lib/homeRoute';
 import { HomeLayout, HomeTab } from './components/home/HomeLayout';
@@ -32,7 +32,7 @@ import { describeSourceForLog } from './lib/mediaLog';
 import { shareableFingerprint } from './lib/media';
 import { discordManager, DiscordContextState } from './lib/discord';
 import { syncManager } from './lib/sync';
-import { generateRoomCode, roomCodeFrom } from './lib/roomCode';
+import { generateRoomCode, readRoomFromUrl, setRoomInUrl } from './lib/roomCode';
 import { RecentStream, loadRecentStreams, pushRecentStream, saveRecentStreams } from './lib/recent';
 import { t, useLang } from './lib/i18n';
 import { ScreenShareProvider } from './components/player/ScreenShareContext';
@@ -56,14 +56,6 @@ const EMPTY_PAYLOAD: MediaPayload = {
   audioTracks: [],
 };
 
-function setRoomInUrl(code: string | null) {
-  const url = new URL(window.location.href);
-  if (code) url.searchParams.set('room', code);
-  else url.searchParams.delete('room');
-  // A sala vive na raiz: o link não carrega a aba de onde foi criada (/home, /catalog...)
-  window.history.replaceState(null, '', (code ? '/' : url.pathname) + url.search);
-}
-
 export default function App() {
   // Trocar o idioma remonta a árvore inteira (a troca só existe na Home, sem vídeo tocando)
   const lang = useLang();
@@ -76,7 +68,7 @@ export default function App() {
   const [homeTab, setHomeTab] = useState<HomeTab>(() => {
     const fromPath = tabFromPath(window.location.pathname);
     if (fromPath !== 'room') return fromPath;
-    const hasRoom = new URLSearchParams(window.location.search).has('room');
+    const hasRoom = Boolean(readRoomFromUrl());
     return (initialSearch.current || initialDetail.current) && !hasRoom ? 'catalog' : 'room';
   });
   const [homeStep, setHomeStep] = useState<HomeStep>('menu');
@@ -103,7 +95,9 @@ export default function App() {
   const [sidebarTab, setSidebarTab] = useState<RoomSidebarTab>('chat');
   const [autoOpenScreenPicker, setAutoOpenScreenPicker] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
-  const [kickBanAlert, setKickBanAlert] = useState<{ title: string; message: string; type: 'kicked' | 'banned' } | null>(null);
+  const [kickBanAlert, setKickBanAlert] = useState<{ title: string; message: string; type: 'kicked' | 'banned' | 'locked' } | null>(null);
+  const [passwordPrompt, setPasswordPrompt] = useState<{ roomCode: string; error?: string } | null>(null);
+  const [passwordDraft, setPasswordDraft] = useState('');
   const [seriesContext, setSeriesContext] = useState<CatalogSeriesContext | null>(() => loadActiveSeriesContext());
 
   // Com a Home aberta e a rede livre, já baixa o player: entrar numa sala fica instantâneo
@@ -118,6 +112,13 @@ export default function App() {
 
   // Já recebeu o estado da sala nesta conexão? (entrada recusada por ban nunca chega a recebê-lo)
   const wasInRoomRef = useRef(false);
+  const activeRoomIdRef = useRef<string | null>(null);
+  const initialRoomPendingRef = useRef<boolean>(
+    typeof window !== 'undefined' && !discordManager.isDiscordActivity() && Boolean(readRoomFromUrl())
+  );
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const leaveToHomeRef = useRef<() => void>(() => {});
   const isWatchPartyOpenRef = useRef(isWatchPartyOpen);
   isWatchPartyOpenRef.current = isWatchPartyOpen;
   const sidebarTabRef = useRef(sidebarTab);
@@ -145,6 +146,8 @@ export default function App() {
   // A aba vai para a rota. Dentro do Discord a Activity roda sob o proxy do Discord: ali o endereço não muda.
   useEffect(() => {
     if (view !== 'home' || discordManager.getState().isEmbedded) return;
+    // Preserva /room/:code (ou ?room=...) apenas enquanto o check inicial de auto-entrada está em andamento
+    if (homeTab === 'room' && initialRoomPendingRef.current && readRoomFromUrl()) return;
     if (homeTab === 'catalog' && tabFromPath(window.location.pathname) !== 'catalog') canonicalizeCatalogUrl();
     else pushTabUrl(homeTab);
     // Sair do catálogo (para a Sala ou o Status) e voltar abre o catálogo limpo, não a busca ou o título do endereço da abertura
@@ -155,9 +158,12 @@ export default function App() {
     }
   }, [homeTab, view]);
 
-  // Voltar/avançar do navegador entre as abas
+  // Voltar/avançar do navegador entre as abas (e sair do player ao voltar de /room/:code)
   useEffect(() => {
     const onPop = () => {
+      if (viewRef.current === 'player' && !readRoomFromUrl()) {
+        leaveToHomeRef.current();
+      }
       const tab = tabFromPath(window.location.pathname);
       setHomeTab((current) => (current === tab ? current : tab));
     };
@@ -202,8 +208,10 @@ export default function App() {
     saveActiveSeriesContext(ctx);
   }, []);
 
-  /** Sai da sala de verdade: desconecta, limpa ?room=, descarrega o vídeo e volta para a tela inicial. */
+  /** Sai da sala de verdade: desconecta, limpa /room/:code, descarrega o vídeo e volta para a tela inicial. */
   const leaveToHome = useCallback(() => {
+    initialRoomPendingRef.current = false;
+    activeRoomIdRef.current = null;
     const leftCode = syncManager.getRoomState()?.roomId;
     if (leftCode && !discordManager.isDiscordActivity()) saveLastRoom(leftCode, Date.now(), true); // a hora de agora é a de sair
     if (!discordManager.isDiscordActivity()) syncManager.leaveRoom();
@@ -214,6 +222,7 @@ export default function App() {
     setUnreadChatCount(0);
     goHome('room');
   }, [goHome, updateSeriesContext]);
+  leaveToHomeRef.current = leaveToHome;
 
   /** Entra numa sala, pedindo o apelido antes se for preciso. */
   const requestJoin = useCallback(
@@ -254,12 +263,16 @@ export default function App() {
 
     discordManager.initialize();
 
-    // No navegador: ?room=CODE entra direto na sala (ou mostra o erro na tela "Entrar na sala")
+    let cancelled = false;
+
+    // No navegador: /room/CODE (ou ?room=CODE legado) entra direto na sala (ou mostra erro em "Entrar na sala")
     if (!discordManager.isDiscordActivity()) {
-      const queryRoom = new URLSearchParams(window.location.search).get('room');
-      const validCode = queryRoom ? roomCodeFrom(queryRoom) : null;
+      const validCode = readRoomFromUrl();
       if (validCode) {
         checkRoom(validCode).then((info) => {
+          initialRoomPendingRef.current = false;
+          // Se o usuário já trocou de aba ou saiu da URL da sala enquanto verificávamos, não sequestra a navegação
+          if (cancelled || readRoomFromUrl() !== validCode) return;
           if (info && !info.exists) {
             setRoomInUrl(null);
             setJoinPrefill({ code: validCode, error: info.closed ? 'closed' : 'not_found' });
@@ -270,6 +283,8 @@ export default function App() {
             requestJoin(validCode);
           }
         });
+      } else {
+        initialRoomPendingRef.current = false;
       }
     }
 
@@ -277,9 +292,37 @@ export default function App() {
       setSyncStatus(syncManager.getStatus());
       const room = syncManager.getRoomState();
       if (room) {
+        const switchedRoom = Boolean(activeRoomIdRef.current && activeRoomIdRef.current !== room.roomId);
+        activeRoomIdRef.current = room.roomId;
         wasInRoomRef.current = true;
-        // "Voltar à sala" na Home: lembra a sala (no Discord a sala é a da atividade, não precisa)
-        if (!discordManager.isDiscordActivity()) saveLastRoom(room.roomId);
+        setPasswordPrompt(null);
+        setPasswordDraft('');
+        if (!discordManager.isDiscordActivity()) {
+          if (readRoomFromUrl() !== room.roomId) setRoomInUrl(room.roomId);
+          // "Voltar à sala" na Home: lembra a sala (no Discord a sala é a da atividade, não precisa)
+          saveLastRoom(room.roomId);
+        }
+        // Ao trocar de sala pelo painel ("Trocar sala"), limpa vídeo/episódio/chat não lido da sala anterior
+        if (switchedRoom) {
+          updateSeriesContext(null);
+          setPendingSubtitles([]);
+          setUnreadChatCount(0);
+          if (room.media?.url) {
+            currentUrlRef.current = room.media.url;
+            setCurrentPayload({
+              url: room.media.url,
+              title: room.media.title,
+              mimeType: 'video/x-matroska',
+              chapters: room.media.chapters || [],
+              subtitles: room.media.subtitles || [],
+              audioTracks: room.media.audioTracks || [],
+              fingerprint: room.media.fingerprint,
+            });
+          } else {
+            currentUrlRef.current = '';
+            setCurrentPayload(EMPTY_PAYLOAD);
+          }
+        }
       }
       // Player vazio numa sala que já tem vídeo (ex.: o Host recarregou a página): carrega o vídeo da sala.
       // O listener de mídia só cobre espectadores, porque assume que o Host já está com o vídeo aberto.
@@ -354,10 +397,38 @@ export default function App() {
           message: t('O Host removeu você da sala. Você voltou para a tela inicial.'),
           type: 'kicked',
         });
+      } else if (code === 'password_required' || code === 'wrong_password' || code === 'rate_limited') {
+        const targetRoom = syncManager.getStatus().roomId;
+        if (targetRoom) {
+          setPasswordPrompt({
+            roomCode: targetRoom,
+            error:
+              code === 'wrong_password'
+                ? t('Senha incorreta. Tente novamente.')
+                : code === 'rate_limited'
+                ? t('Muitas tentativas de senha. Aguarde um momento.')
+                : undefined,
+          });
+        }
+      } else if (code === 'room_locked') {
+        const currentRoom = syncManager.getRoomState();
+        if (!currentRoom) {
+          syncManager.leaveRoom();
+          setRoomInUrl(null);
+          setView('home');
+          setHomeTab('room');
+          setHomeStep('menu');
+        }
+        setKickBanAlert({
+          title: t('Sala trancada'),
+          message: t('Esta sala está trancada pelo Host e não aceita novos participantes agora.'),
+          type: 'locked',
+        });
       }
     });
 
     return () => {
+      cancelled = true;
       unsubDiscord();
       unsubSync();
       unsubMedia();
@@ -628,6 +699,7 @@ export default function App() {
       {view === 'home' ? (
         <HomeLayout
           tab={homeTab}
+          stepKey={homeTab === 'room' ? homeStep : undefined}
           onTabChange={(tab) => {
             setHomeTab(tab);
             setWatchIntent(null);
@@ -760,10 +832,69 @@ export default function App() {
         }}
       />
 
-      {/* Aviso · Expulso / Banido */}
+      {/* Senha para entrar em sala privada */}
+      <Modal
+        open={passwordPrompt !== null}
+        onClose={() => {
+          setPasswordPrompt(null);
+          setPasswordDraft('');
+          if (!syncManager.getRoomState()) leaveToHome();
+        }}
+        label={t('Sala privada')}
+        width={400}
+        className="!p-6 !gap-4"
+      >
+        <ModalHeader
+          title={t('Sala privada')}
+          description={t('Digite a senha para entrar na sala {code}.', { code: passwordPrompt?.roomCode || '' })}
+          onClose={() => {
+            setPasswordPrompt(null);
+            setPasswordDraft('');
+            if (!syncManager.getRoomState()) leaveToHome();
+          }}
+        />
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!passwordPrompt || !passwordDraft.trim()) return;
+            syncManager.joinRoom(passwordPrompt.roomCode, passwordDraft.trim());
+          }}
+          className="flex flex-col gap-3"
+        >
+          <TextInput
+            type="password"
+            maxLength={64}
+            placeholder={t('Senha da sala')}
+            value={passwordDraft}
+            onChange={(e) => setPasswordDraft(e.target.value)}
+            autoFocus
+          />
+          {passwordPrompt?.error && (
+            <p role="alert" className="m-0 text-[12.5px] text-lu-error">
+              {passwordPrompt.error}
+            </p>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <TextButton
+              onClick={() => {
+                setPasswordPrompt(null);
+                setPasswordDraft('');
+                if (!syncManager.getRoomState()) leaveToHome();
+              }}
+            >
+              {t('Cancelar')}
+            </TextButton>
+            <PrimaryButton type="submit" disabled={!passwordDraft.trim()}>
+              {t('Entrar na sala')}
+            </PrimaryButton>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Aviso · Expulso / Banido / Trancada */}
       <Modal open={kickBanAlert !== null} onClose={() => setKickBanAlert(null)} label={kickBanAlert?.title || ''} width={400} alert className="items-center text-center !gap-4">
         <div className="w-14 h-14 rounded-full bg-lu-error/12 border border-lu-error/30 flex items-center justify-center text-lu-error">
-          {kickBanAlert?.type === 'banned' ? <Ban size={26} /> : <UserX size={26} />}
+          {kickBanAlert?.type === 'banned' ? <Ban size={26} /> : kickBanAlert?.type === 'locked' ? <Lock size={26} /> : <UserX size={26} />}
         </div>
         <div>
           <h2 className="m-0 text-[20px] font-semibold tracking-[-0.01em]">{kickBanAlert?.title}</h2>

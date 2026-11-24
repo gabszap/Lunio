@@ -55,7 +55,7 @@ const playEpisodeOne = async (page: Page) => {
   await page.goto('/detail/series/tt2/tt2%3A1%3A1');
   await page.getByRole('button', { name: /Filme\.1080p\.H264\.mkv/ }).click();
   await submitName(page, 'Ana');
-  await expect(page).toHaveURL(/\?room=[A-Z0-9]+/);
+  await expect(page).toHaveURL(/\/room\/[A-Z0-9]+|\?room=[A-Z0-9]+/);
   await waitReady(page);
 };
 const seekAndPlay = (page: Page, seconds: number) =>
@@ -94,7 +94,7 @@ test.describe('Continuar assistindo', () => {
     await expect(page.getByText(/Retoma em \d{2}:\d{2}/)).toBeVisible(); // avisa antes de escolher o stream
     await page.getByRole('button', { name: /Filme\.1080p\.H264\.mkv/ }).click();
     await submitName(page, 'Ana');
-    await expect(page).toHaveURL(/\?room=[A-Z0-9]+/);
+    await expect(page).toHaveURL(/\/room\/[A-Z0-9]+|\?room=[A-Z0-9]+/);
     await waitReady(page);
     await expect.poll(async () => (await state(page)).t, { timeout: 30_000 }).toBeGreaterThanOrEqual(35);
     await page.close();
@@ -153,7 +153,7 @@ test.describe('Continuar assistindo', () => {
 
     await page.getByRole('button', { name: /Filme\.1080p\.H264\.mkv/ }).click();
     await submitName(page, 'Ana');
-    await expect(page).toHaveURL(/\?room=[A-Z0-9]+/);
+    await expect(page).toHaveURL(/\/room\/[A-Z0-9]+|\?room=[A-Z0-9]+/);
     await waitReady(page);
     await page.waitForTimeout(1500);
     expect((await state(page)).t).toBeLessThan(10);

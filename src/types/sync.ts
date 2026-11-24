@@ -3,6 +3,8 @@ import type { RoomScreen, ScreenQualityId } from './screen';
 
 export type MemberPlaybackState = 'waiting' | 'loading' | 'ready' | 'playing' | 'paused' | 'stalled';
 
+export type RoomVisibility = 'public' | 'private';
+
 export interface RoomMember {
   id: string;
   username: string;
@@ -86,6 +88,14 @@ export interface BannedMember {
 export interface RoomState {
   roomId: string;
   hostId: string;
+  /** Nome personalizável definido pelo Host (opcional). */
+  name?: string;
+  /** Sala pública (entra com o link) ou privada (trancada ou com senha). */
+  visibility?: RoomVisibility;
+  /** Se a sala privada exige senha para entrar (o hash nunca vai ao cliente). */
+  hasPassword?: boolean;
+  /** Pausa automaticamente para todos se algum membro travar (buffering) e retoma quando voltar. */
+  autoPauseOnBuffer?: boolean;
   /** Timestamp (ms) de criação da sala no servidor (para o cronômetro de duração). */
   createdAt?: number;
   media: RoomMedia | null;
@@ -116,12 +126,23 @@ export type ClientMessage =
   | {
       type: 'room:join';
       roomId: string;
+      password?: string;
+      /** Token assinado da sala emitido anteriormente (prova reconexão legítima em salas privadas/trancadas). */
+      accessToken?: string;
       user: {
         id: string;
         username: string;
         avatarUrl?: string;
         platform?: 'discord' | 'web';
       };
+    }
+  | {
+      type: 'room:settings';
+      name?: string;
+      visibility?: RoomVisibility;
+      /** String não vazia define/altera a senha; `null` remove a senha; `undefined` mantém a atual. */
+      password?: string | null;
+      autoPauseOnBuffer?: boolean;
     }
   | {
       type: 'room:leave';
@@ -166,12 +187,13 @@ export type ClientMessage =
       ready: boolean;
       state: MemberPlaybackState;
       currentTime: number;
+      /** Geração da mídia do player. Clientes anteriores podem omitir o campo. */
+      generation?: number;
     }
   | {
       type: 'client:heartbeat';
       clientTime: number;
       currentTime: number;
-      state: MemberPlaybackState;
       /** Ida e volta até o servidor medida por quem envia (ms); só vai depois da primeira medição. */
       rtt?: number;
     }
@@ -393,7 +415,14 @@ export type ServerMessage =
       viewers: Array<{ id: string; username: string }>;
     }
   | {
+      type: 'room:settings_update';
+      name?: string;
+      visibility: RoomVisibility;
+      hasPassword: boolean;
+      autoPauseOnBuffer: boolean;
+    }
+  | {
       type: 'error';
       message: string;
-      code?: 'kicked' | 'banned' | string;
+      code?: 'kicked' | 'banned' | 'password_required' | 'wrong_password' | 'room_locked' | 'rate_limited' | string;
     };

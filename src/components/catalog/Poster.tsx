@@ -35,7 +35,7 @@ export const Poster: React.FC<{ item: CatalogItem; className?: string; iconSize?
       style={{ background: gradientFor(item.id) }}
     >
       {item.poster && !failed ? (
-        <img key={item.poster} src={item.poster} alt="" loading="lazy" onError={() => setFailed(true)} className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300" />
+        <img key={item.poster} src={item.poster} alt="" loading="lazy" onError={() => setFailed(true)} className="absolute inset-0 w-full h-full object-cover transition-[opacity,transform] duration-300 group-hover:scale-[1.03]" />
       ) : (
         <Film size={iconSize} />
       )}
@@ -54,10 +54,10 @@ export const PosterCard: React.FC<{
   <button
     type="button"
     onClick={() => onOpen(item)}
-    className={cx('group flex flex-col items-start gap-2 text-left rounded-xl flex-none', fluid ? 'w-full' : 'w-[128px] sm:w-[152px]')}
+    className={cx('group flex flex-col items-start gap-2 text-left rounded-xl flex-none transition-transform duration-150 active:scale-[0.97]', fluid ? 'w-full' : 'w-[128px] sm:w-[152px]')}
   >
     <span className="relative block w-full">
-      <Poster item={item} className="w-full aspect-[2/3] transition-transform group-hover:-translate-y-0.5" />
+      <Poster item={item} className="w-full aspect-[2/3] transition-[transform,border-color,box-shadow] duration-200 group-hover:-translate-y-1 group-hover:border-lu-accent/40 group-hover:shadow-[0_12px_28px_rgba(0,0,0,0.45)]" />
       {progress !== undefined && progress > 0 && (
         <span
           role="progressbar"

@@ -1,6 +1,7 @@
 import { useEffect, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type { AudioTrackOption, Chapter, SubtitleTrack, VideoInfo } from '../../types/media';
 import { formatTime } from '../../lib/chapters';
+import { apiFetch } from '../../lib/access';
 import { logger } from '../../lib/logger';
 import { isRemoteSource } from '../../lib/linkId';
 import { getYouTubeId, resolveMediaRef } from '../../lib/media';
@@ -80,15 +81,48 @@ export function useMediaInspection(args: {
 
     const ytId = getYouTubeId(source.src);
     if (ytId) {
-      setResolvedStreamUrl(`youtube/${ytId}`);
-      setIsInspecting(false);
+      setResolvedStreamUrl('');
+      setIsInspecting(true);
       setDetectedChapters(initialChapters);
       setDetectedSubtitles(initialSubtitles);
       setDetectedAudioTracks([]);
       setActiveAudioTrack(null);
-      logger.info(`[Mídia] Vídeo do YouTube: ${ytId}`);
+      const controller = new AbortController();
+      apiFetch(`/api/youtube/info?id=${encodeURIComponent(ytId)}`, { signal: controller.signal })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then((info) => {
+          if (isCancelled) return;
+          if (info?.mode === 'hls' && typeof info.masterUrl === 'string') {
+            if (info.title) setMediaTitle(info.title);
+            if (typeof info.duration === 'number' && info.duration > 0) {
+              totalDurationRef.current = info.duration;
+              setDuration(info.duration);
+            }
+            const chaps: Chapter[] = Array.isArray(info.chapters) ? info.chapters : [];
+            if (chaps.length > 0) setDetectedChapters(chaps);
+            const ytSubs: SubtitleTrack[] = Array.isArray(info.subtitles) ? info.subtitles : [];
+            const allSubs = [...initialSubtitles, ...ytSubs];
+            applyLocalSubtitles(allSubs);
+            setResolvedStreamUrl(info.masterUrl);
+            logger.info(`[Mídia] YouTube via yt-dlp/HLS: ${info.title || ytId}`);
+          } else {
+            throw new Error('no_hls');
+          }
+        })
+        .catch(() => {
+          if (isCancelled) return;
+          setResolvedStreamUrl(`youtube/${ytId}`);
+          logger.info(`[Mídia] YouTube via embed (fallback): ${ytId}`);
+        })
+        .finally(() => {
+          if (!isCancelled) setIsInspecting(false);
+        });
       return () => {
         isCancelled = true;
+        controller.abort();
       };
     }
 

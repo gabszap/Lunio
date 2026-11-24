@@ -6,6 +6,7 @@ import { apiFetch } from '../../lib/access';
 import { logger } from '../../lib/logger';
 import { describeSourceForLog } from '../../lib/mediaLog';
 import { isRemoteSource } from '../../lib/linkId';
+import { getYouTubeId } from '../../lib/media';
 import { sessionManager } from '../../lib/session';
 import { getVideoElement } from './dom';
 import { t } from '../../lib/i18n';
@@ -48,6 +49,7 @@ export function usePlayerEventHandlers(args: {
 
   const onCanPlay = () => {
     setPlaybackError(null);
+    setIsBuffering(false);
     logger.info('[Player] Pronto para tocar');
     setReadiness((prev) => ({ ...prev, video: true, audio: true }));
 
@@ -109,6 +111,9 @@ export function usePlayerEventHandlers(args: {
     if (isSwitchingAudioRef.current) return;
     const t = typeof detail === 'number' ? detail : detail?.currentTime;
     if (t !== undefined && isFinite(t)) {
+      if (t > lastKnownTimeRef.current + 0.05) {
+        setIsBuffering(false);
+      }
       lastKnownTimeRef.current = t;
       setCurrentTime(t);
     }
@@ -118,6 +123,10 @@ export function usePlayerEventHandlers(args: {
     setIsBuffering(false);
     sessionManager.updateRunStatus('running');
     logger.action(`[Player] Play em ${formatTime(lastKnownTimeRef.current)}${isSwitchingAudioRef.current ? ' · áudio alternativo' : ''}`);
+  };
+  const onPlaying = () => {
+    setPaused(false);
+    setIsBuffering(false);
   };
   const onPause = () => {
     const videoEl = getVideoElement(playerRef);
@@ -180,6 +189,16 @@ export function usePlayerEventHandlers(args: {
       fallbackToRemux();
       return;
     }
+    if (resolvedStreamUrl.startsWith('/api/youtube/master/')) {
+      const ytId = getYouTubeId(source.src);
+      if (ytId) {
+        logger.warn('[Player] Stream HLS do YouTube falhou; alternando para embed');
+        setIsBuffering(false);
+        setPlaybackError(null);
+        setResolvedStreamUrl(`youtube/${ytId}`);
+        return;
+      }
+    }
     if (isSwitchingAudioRef.current) {
       // Ignora erro transitório durante a reconexão da dublagem
       return;
@@ -226,5 +245,5 @@ export function usePlayerEventHandlers(args: {
     }
   };
 
-  return { onCanPlay, onTimeUpdate, onPlay, onPause, onDurationChange, onProgress, onWaiting, onError };
+  return { onCanPlay, onTimeUpdate, onPlay, onPlaying, onPause, onDurationChange, onProgress, onWaiting, onError };
 }

@@ -15,6 +15,8 @@ export function usePlayerShortcuts(a: {
   isFullscreen: boolean;
   syncStatus: { isConnected: boolean; isHost: boolean };
   skippableChapter: { targetTime: number; label: string } | null;
+  /** Vídeo do YouTube: desativa o atalho de pular +90 s (N/S/O). */
+  isYouTube?: boolean;
   /** Espectador: N vota para pular o capítulo de agora. */
   onSkipVote?: () => void;
   subtitleDelay: number;
@@ -34,7 +36,7 @@ export function usePlayerShortcuts(a: {
   handleAudioDelayChange: (delay: number) => void;
 }) {
   const {
-    currentTime, duration, volume, muted, paused, activeSubtitle, detectedSubtitles, isFullscreen, syncStatus, skippableChapter, onSkipVote,
+    currentTime, duration, volume, muted, paused, activeSubtitle, detectedSubtitles, isFullscreen, syncStatus, skippableChapter, isYouTube = false, onSkipVote,
     subtitleDelay, audioDelay, lastKnownTimeRef, setSyncToast, setActiveSubtitle, triggerFullscreenVisuals,
     handlePlayToggle, handleSeek, handleVolumeChange, handleMuteToggle, handleFullscreenToggle, handleToggleAspect,
     handleToggleWatchParty, handleSubtitleDelayChange, handleAudioDelayChange,
@@ -99,6 +101,7 @@ export function usePlayerShortcuts(a: {
         case 'KeyN':
         case 'KeyS':
         case 'KeyO':
+          if (isYouTube) break;
           e.preventDefault();
           if (isViewer) break;
           handleSeek(Math.min(duration || Infinity, currentTime + 90));
@@ -168,6 +171,7 @@ export function usePlayerShortcuts(a: {
     isFullscreen,
     syncStatus,
     skippableChapter,
+    isYouTube,
     onSkipVote,
     handleToggleWatchParty,
     subtitleDelay,

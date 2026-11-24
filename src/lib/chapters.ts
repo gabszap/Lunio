@@ -61,6 +61,32 @@ export function isOpeningChapter(chapter: Chapter | null): boolean {
   );
 }
 
+export function isEndingChapter(chapter: Chapter | null): boolean {
+  if (!chapter || !chapter.title) return false;
+  const title = chapter.title.trim().toLowerCase();
+  return (
+    /^(ed|ending|encerramento|outro)(\s*\d+)?$/i.test(title) ||
+    /\b(ending\s+theme|tema\s+de\s+encerramento|encerramento|outro\s+(theme|song|music))\b/i.test(title) ||
+    title === 'ed' ||
+    title.startsWith('ed ') ||
+    title.startsWith('ed:') ||
+    title.startsWith('ed-')
+  );
+}
+
+/**
+ * Decide quando mostrar o cartão de "Próximo episódio":
+ * - Se existir capítulo de encerramento (ED/Ending/Encerramento/Outro), mostra a partir do início dele.
+ * - Caso contrário, usa o padrão dos últimos 15 s (para vídeos com mais de 30 s).
+ */
+export function shouldShowNextEpisodePrompt(currentTime: number, duration: number, chapters: Chapter[]): boolean {
+  const endingChapter = chapters.find((c) => isEndingChapter(c));
+  if (endingChapter) {
+    return currentTime >= endingChapter.startTime;
+  }
+  return duration > 30 && duration - currentTime <= 15;
+}
+
 export function getSkippableChapter(currentTime: number, chapters: Chapter[]): SkippableChapterInfo | null {
   if (!chapters || chapters.length === 0) return null;
 
@@ -76,14 +102,7 @@ export function getSkippableChapter(currentTime: number, chapters: Chapter[]): S
   const title = current.title.trim().toLowerCase();
 
   // Abertura / Opening
-  if (
-    /^(op|opening|abertura|intro)(\s*\d+)?$/i.test(title) ||
-    /\b(opening\s+theme|tema\s+de\s+abertura|abertura|intro)\b/i.test(title) ||
-    title === 'op' ||
-    title.startsWith('op ') ||
-    title.startsWith('op:') ||
-    title.startsWith('op-')
-  ) {
+  if (isOpeningChapter(current)) {
     return {
       canSkip: true,
       label: t('Pular abertura'),
@@ -94,14 +113,7 @@ export function getSkippableChapter(currentTime: number, chapters: Chapter[]): S
   }
 
   // Encerramento / Ending
-  if (
-    /^(ed|ending|encerramento|outro)(\s*\d+)?$/i.test(title) ||
-    /\b(ending\s+theme|tema\s+de\s+encerramento|encerramento|outro)\b/i.test(title) ||
-    title === 'ed' ||
-    title.startsWith('ed ') ||
-    title.startsWith('ed:') ||
-    title.startsWith('ed-')
-  ) {
+  if (isEndingChapter(current)) {
     return {
       canSkip: true,
       label: t('Pular encerramento'),

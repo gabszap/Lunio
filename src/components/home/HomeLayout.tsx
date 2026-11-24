@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Activity, Github, LayoutGrid, Users } from 'lucide-react';
 import { Logo, PillTabs, cx } from '../ui';
 import { LANGS, setLang, t, msg, useLang } from '../../lib/i18n';
 
 export type HomeTab = 'catalog' | 'room' | 'status';
+
+const TAB_ORDER: Record<HomeTab, number> = { catalog: 0, room: 1, status: 2 };
 
 export const REPO_URL = 'https://github.com/gabszap/Lunio';
 
@@ -12,6 +14,8 @@ export const COMMIT = typeof __APP_COMMIT__ === 'string' ? __APP_COMMIT__ : 'dev
 
 interface HomeLayoutProps {
   tab: HomeTab;
+  /** Sub-etapa dentro da aba (ex.: 'menu' -> 'stream'/'upload'/'join') para animar avançar/voltar. */
+  stepKey?: string;
   onTabChange: (tab: HomeTab) => void;
   onLogo: () => void;
   children: React.ReactNode;
@@ -50,8 +54,26 @@ const LanguageSwitch: React.FC = () => {
   );
 };
 
-export const HomeLayout: React.FC<HomeLayoutProps> = ({ tab, onTabChange, onLogo, children, centered }) => (
-  <div className={cx('relative min-h-screen flex flex-col', tab === 'catalog' ? 'lu-catalog-bg' : 'lu-home-bg')}>
+export const HomeLayout: React.FC<HomeLayoutProps> = ({ tab, stepKey, onTabChange, onLogo, children, centered }) => {
+  const [nav, setNav] = useState<{ tab: HomeTab; stepKey?: string; dir: 'right' | 'left' | null }>({
+    tab,
+    stepKey,
+    dir: null,
+  });
+  if (nav.tab !== tab) {
+    setNav({ tab, stepKey, dir: TAB_ORDER[tab] >= TAB_ORDER[nav.tab] ? 'right' : 'left' });
+  } else if (nav.stepKey !== stepKey) {
+    setNav({ tab, stepKey, dir: stepKey === 'menu' ? 'left' : 'right' });
+  }
+  const panelAnimClass =
+    nav.dir === 'right'
+      ? 'lu-tab-panel-right'
+      : nav.dir === 'left'
+      ? 'lu-tab-panel-left'
+      : undefined;
+
+  return (
+  <div className={cx('relative min-h-screen flex flex-col overflow-x-clip', tab === 'catalog' ? 'lu-catalog-bg' : 'lu-home-bg')}>
     <header className="relative z-10 grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_auto_1fr] items-center gap-y-3 px-4 sm:px-8 pt-4 sm:pt-0 sm:h-20">
       <Logo onClick={onLogo} />
 
@@ -83,12 +105,15 @@ export const HomeLayout: React.FC<HomeLayoutProps> = ({ tab, onTabChange, onLogo
     </header>
 
     <main
+      key={`${tab}:${stepKey ?? ''}`}
       className={cx(
         'relative flex-1 flex flex-col',
-        centered ? 'items-center justify-center gap-7 px-4 sm:px-8 pt-6 pb-12' : 'px-4 sm:px-12 pt-6 pb-16'
+        centered ? 'items-center justify-center gap-7 px-4 sm:px-8 pt-6 pb-12' : 'px-4 sm:px-12 pt-6 pb-16',
+        panelAnimClass
       )}
     >
       {children}
     </main>
   </div>
-);
+  );
+};

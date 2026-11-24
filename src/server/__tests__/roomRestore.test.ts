@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
 import { RoomManager } from '../roomServer';
-import { parsePersistedRoom, type PersistedRoom, type RoomStore } from '../roomStore';
+import { NullRoomStore, parsePersistedRoom, type PersistedRoom, type RoomStore } from '../roomStore';
 import { config } from '../config';
 
 vi.mock('../media/resolver', () => ({ warmUpMedia: vi.fn() }));
@@ -74,6 +74,18 @@ afterEach(() => {
 });
 
 describe('restauração das salas depois de um restart', () => {
+  it('sem armazenamento, um servidor novo começa sem a sala anterior', async () => {
+    const first = new RoomManager(new NullRoomStore());
+    const host = connect(first, 'SALA', 'host');
+    send(first, host, { type: 'media:set', media: { url: 'https://exemplo.test/a.mkv', title: 'Filme', duration: 100 } });
+    await first.flushPersistence();
+    expect(first.getRoomInfo('SALA')).toMatchObject({ exists: true, hasMedia: true });
+
+    const restarted = new RoomManager(new NullRoomStore());
+    expect(await restarted.restore()).toBe(0);
+    expect(restarted.getRoomInfo('SALA')).toMatchObject({ exists: false, hasMedia: false });
+  });
+
   it('Host, mídia, fila e banidos voltam', async () => {
     await restartWithRoom();
     const state = stateOf(rm, 'SALA');

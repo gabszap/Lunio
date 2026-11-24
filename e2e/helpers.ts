@@ -46,8 +46,9 @@ export async function createRoom(page: Page, name: string, url = FIXTURE_URL): P
   await page.getByRole('textbox', { name: 'URL do stream' }).fill(url);
   await page.getByRole('button', { name: 'Criar sala' }).click();
   await submitName(page, name);
-  await expect(page).toHaveURL(/\?room=[A-Z0-9]+/);
-  const code = new URL(page.url()).searchParams.get('room')!;
+  await expect(page).toHaveURL(/\/room\/[A-Z0-9]+|\?room=[A-Z0-9]+/);
+  const u = new URL(page.url());
+  const code = /^\/room\/([A-Z0-9]+)/i.exec(u.pathname)?.[1] || u.searchParams.get('room')!;
   await expect(page.locator('video')).toBeAttached();
   return code;
 }

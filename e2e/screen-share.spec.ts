@@ -291,8 +291,9 @@ test.describe('transmissão de tela (motor falso)', () => {
     await expect(option).toContainText('Beta');
     await option.click();
     await submitName(host.page, 'Ana');
-    await expect(host.page).toHaveURL(/\?room=[A-Z0-9]+/);
-    const code = new URL(host.page.url()).searchParams.get('room')!;
+    await expect(host.page).toHaveURL(/\/room\/[A-Z0-9]+|\?room=[A-Z0-9]+/);
+    const hostUrl = new URL(host.page.url());
+    const code = /^\/room\/([A-Z0-9]+)/i.exec(hostUrl.pathname)?.[1] || hostUrl.searchParams.get('room')!;
     await expect(host.page.locator('#room-member-grid')).toBeVisible();
 
     // sem vídeo, o Host transmite pela dock (o menu já abre automaticamente ou pelo botão da dock)

@@ -6,6 +6,7 @@ import { logger } from '../../lib/logger';
 import { syncManager } from '../../lib/sync';
 import { clearStartTime, readStartTime } from '../../lib/startTime';
 import { getVideoElement } from './dom';
+import type { PlayerSeek } from './usePlaybackControls';
 
 /**
  * Autoplay só quando vídeo + áudio + legenda obrigatória estão prontos. Também alinha o espectador à posição
@@ -16,12 +17,21 @@ export function usePlaybackReadiness(args: {
   autoPlay: boolean;
   paused: boolean;
   setPaused: Dispatch<SetStateAction<boolean>>;
+  setPlaybackRate: Dispatch<SetStateAction<number>>;
   playerRef: RefObject<MediaPlayerInstance | null>;
   source: { src: string };
-  handleSeekRef: MutableRefObject<(time: number) => void>;
+  handleSeekRef: MutableRefObject<PlayerSeek>;
+  lastKnownTimeRef: MutableRefObject<number>;
   pendingPlayRef: MutableRefObject<boolean>;
+  syncStatus: ReturnType<typeof syncManager.getStatus>;
 }) {
-  const { readiness, autoPlay, paused, setPaused, playerRef, source, handleSeekRef, pendingPlayRef } = args;
+  const {
+    readiness, autoPlay, paused, setPaused, setPlaybackRate, playerRef, source,
+    handleSeekRef, lastKnownTimeRef, pendingPlayRef, syncStatus,
+  } = args;
+  const { isConnected, isHost, roomId } = syncStatus;
+  const confirmedPlayback = syncManager.getConfirmedPlayback(source.src);
+  const alignedMediaRef = useRef<typeof confirmedPlayback>(null);
   // Vídeo para o qual o Host já retomou a posição da sala (evita repetir a cada mudança de readiness)
   const hostResumedSrcRef = useRef<string>('');
   // O autoplay vale uma vez por vídeo: sem isso, pausar disparava o play de novo (loop) e o usuário não conseguia pausar
@@ -29,6 +39,9 @@ export function usePlaybackReadiness(args: {
 
   // PlaybackReadiness (v8): Autoplay inicia SOMENTE quando vídeo + áudio + legenda obrigatória estiverem prontos
   useEffect(() => {
+    if (!isConnected || isHost) alignedMediaRef.current = null;
+    if (roomId && !isConnected) return;
+
     const isSubtitleReady =
       !readiness.selectedSubtitle.enabled ||
       !readiness.selectedSubtitle.required ||
@@ -36,23 +49,31 @@ export function usePlaybackReadiness(args: {
 
     if (!readiness.video || !readiness.audio || !isSubtitleReady) return;
 
-    // Se for espectador em Watch Party ativa e o Host estiver com o vídeo em reprodução
-    if (!syncManager.isRoomHost()) {
+    // Aplica o estado recebido ao entrar ou reconectar, inclusive quando o Host está pausado.
+    if (!isHost) {
       const roomState = syncManager.getRoomState();
-      if (roomState && roomState.playback.playing) {
-        const expected = syncManager.getExpectedPosition();
-        const videoEl = getVideoElement(playerRef);
-        if (videoEl) {
-          if (Math.abs((videoEl.currentTime || 0) - expected) > 0.5) {
-            videoEl.currentTime = expected;
-          }
-          if (videoEl.paused) {
-            videoEl.play().catch(() => {});
-          }
-        }
-        setPaused(false);
-        return;
+      const videoEl = getVideoElement(playerRef);
+      if (!videoEl || !roomState || !confirmedPlayback || alignedMediaRef.current === confirmedPlayback) return;
+      if (syncManager.getConfirmedPlayback(source.src) !== confirmedPlayback) return;
+      alignedMediaRef.current = confirmedPlayback;
+
+      const { playing, rate } = roomState.playback;
+      const expected = syncManager.getExpectedPosition();
+      if (!playing) {
+        pendingPlayRef.current = false;
+        videoEl.pause();
       }
+      if (Math.abs(lastKnownTimeRef.current - expected) > 0.5) {
+        handleSeekRef.current(expected, { playing });
+      }
+      videoEl.playbackRate = rate;
+      setPlaybackRate(rate);
+      if (!playing || !videoEl.paused) {
+        setPaused(!playing);
+      } else {
+        videoEl.play().catch(() => {});
+      }
+      return;
     }
 
     // Link com `?t=`: quem tem o controle (sozinho ou Host) abre o vídeo naquele instante, uma vez. Vale mais que a
@@ -110,5 +131,6 @@ export function usePlaybackReadiness(args: {
       }
       setPaused(false);
     }
-  }, [readiness, autoPlay, paused]);
+  }, [readiness, autoPlay, paused, isConnected, isHost, roomId, confirmedPlayback, source.src,
+    playerRef, handleSeekRef, lastKnownTimeRef, pendingPlayRef, setPaused, setPlaybackRate]);
 }

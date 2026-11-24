@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
+import type { RoomMember } from '../../types/sync';
 import { RoomManager } from '../roomServer';
 import type { PersistedRoom, RoomStore } from '../roomStore';
 
@@ -46,7 +47,7 @@ const send = (s: FakeSocket, msg: object) => rm.handleClientMessage(asWs(s), JSO
 const heartbeat = (s: FakeSocket, currentTime: number, extra: object = {}) =>
   send(s, { type: 'client:heartbeat', clientTime: Date.now(), currentTime, state: 'ready', ...extra });
 /** Os membros da última lista que o Host recebeu. */
-const members = (host: FakeSocket) => host.of('members:update').at(-1)?.members as Array<{ id: string; behindMs?: number }> | undefined;
+const members = (host: FakeSocket) => host.of('members:update').at(-1)?.members as RoomMember[] | undefined;
 const behindOf = (host: FakeSocket, id: string) => members(host)?.find((m) => m.id === id)?.behindMs;
 
 /** Sala tocando desde a posição 100 s, com o Host e um espectador pronto. */
@@ -71,6 +72,56 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe('estado do player na sala', () => {
+  it('preserva o buffering em heartbeats de clientes antigos e atualiza a telemetria', () => {
+    const { host, guest } = playing();
+    const guestMember = () => members(host)?.find((m) => m.id === 'guest');
+    send(guest, { type: 'client:readiness', ready: true, state: 'playing', currentTime: 100 });
+    expect(guestMember()).toMatchObject({ state: 'playing', ready: true });
+    send(guest, { type: 'client:readiness', ready: false, state: 'stalled', currentTime: 102 });
+    expect(guestMember()).toMatchObject({ state: 'stalled', ready: false });
+
+    vi.advanceTimersByTime(5000);
+    const clientTime = Date.now() - 500;
+    heartbeat(guest, 103, { clientTime, rtt: 80 });
+    expect(guest.of('server:heartbeat_ack').at(-1)).toMatchObject({ clientTime, serverTime: Date.now() });
+
+    // A entrada de outra pessoa faz o servidor publicar a lista atualizada.
+    connect('ATRASO', 'late');
+    expect(guestMember()).toMatchObject({ state: 'stalled', ready: false, currentTime: 103, ping: 40 });
+
+    send(guest, { type: 'client:readiness', ready: true, state: 'playing', currentTime: 103 });
+    heartbeat(guest, 104, { rtt: 0 });
+    expect(guestMember()).toMatchObject({ state: 'playing', ready: true });
+
+    send(guest, { type: 'client:readiness', ready: true, state: 'paused', currentTime: 104 });
+    heartbeat(guest, 104, { rtt: 0 });
+    connect('ATRASO', 'other');
+    expect(guestMember()).toMatchObject({ state: 'paused', ready: true });
+  });
+
+  it('reinicia a prontidão dos membros a cada troca de mídia', () => {
+    const { host, guest } = playing();
+    send(guest, { type: 'client:readiness', ready: false, state: 'stalled', currentTime: 102 });
+    send(host, { type: 'media:set', media: { url: 'https://cdn.test/next.mp4', title: 'Próximo' } });
+
+    const state = host.of('room:state').at(-1)?.state;
+    expect(state.media.generation).toBe(2);
+    expect(state.members.find((m: RoomMember) => m.id === 'guest')).toMatchObject({
+      ready: false,
+      state: 'waiting',
+      currentTime: 0,
+    });
+
+    host.clear();
+    send(guest, { type: 'client:readiness', ready: true, state: 'playing', currentTime: 102, generation: 1 });
+    expect(host.of('members:update')).toHaveLength(0);
+
+    send(guest, { type: 'client:readiness', ready: true, state: 'paused', currentTime: 0, generation: 2 });
+    expect(members(host)?.find((m) => m.id === 'guest')).toMatchObject({ state: 'paused', ready: true });
+  });
 });
 
 describe('quanto cada pessoa está atrás do Host', () => {
