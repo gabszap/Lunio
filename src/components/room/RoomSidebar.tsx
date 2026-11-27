@@ -148,7 +148,7 @@ export const RoomSidebar: React.FC<RoomSidebarProps> = ({
             <Users size={22} />
           </span>
           <div>
-            <h3 className="m-0 text-[15px] font-semibold">{t('Você está assistindo sozinho')}</h3>
+            <h3 className="m-0 text-[15px] font-semibold">{t('Fora de uma sala')}</h3>
             <p className="mt-1.5 mb-0 max-w-[260px] text-[13px] text-lu-muted">
               {t('Crie uma sala pros amigos ou entre em uma com o código que te mandaram.')}
             </p>

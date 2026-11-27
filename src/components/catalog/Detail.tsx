@@ -172,9 +172,9 @@ export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, cale
     };
   }, [currentMalId, hasCurrentScore]);
 
-  const watchTitle = (preferSolo: boolean) => {
+  const watchTitle = () => {
     const title = isSeries && firstEpisode ? `${data.name} · ${episodeTag(firstEpisode.season, firstEpisode.episode)}` : data.name;
-    onWatch({ title, preferSolo });
+    onWatch({ title });
   };
 
   // "Onde assistir": filme direto no detalhe; série, no episódio aberto (`/detail/<tipo>/<id>/<videoId>`)
@@ -318,14 +318,10 @@ export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, cale
               ) : null}
               {error && <p className="m-0 text-[14px] text-lu-error">{t('Não deu pra carregar os detalhes desse título.')}</p>}
               <div className="flex flex-wrap gap-3 mt-2">
-                <PrimaryButton size="lg" onClick={() => watchTitle(false)}>
+                <PrimaryButton size="lg" onClick={watchTitle}>
                   <Users size={18} />
                   <span>{t('Assistir com amigos')}</span>
                 </PrimaryButton>
-                <GhostButton size="lg" onClick={() => watchTitle(true)}>
-                  <Play size={16} />
-                  <span>{t('Assistir sozinho')}</span>
-                </GhostButton>
                 <GhostButton
                   size="lg"
                   aria-label={saved ? t('Tirar da minha lista') : t('Salvar na lista')}
@@ -380,7 +376,7 @@ export const Detail: React.FC<DetailProps> = ({ item, initialSeason = null, cale
           </div>
           {!discordManager.isDiscordActivity() && resumeHint}
           {streamsList}
-          <GhostButton className="self-start" onClick={() => onWatch({ title: episodeTitle, preferSolo: false })}>
+          <GhostButton className="self-start" onClick={() => onWatch({ title: episodeTitle })}>
             {t('Colar o link do vídeo')}
           </GhostButton>
         </section>

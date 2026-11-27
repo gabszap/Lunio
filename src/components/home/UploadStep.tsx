@@ -86,16 +86,6 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
     setPhase(file.size > MAX_BYTES ? { kind: 'too_large', file } : { kind: 'chosen', file });
   };
 
-  const playLocally = (file: File) => {
-    const url = URL.createObjectURL(file);
-    const title = file.name.replace(/\.[a-z0-9]+$/i, '');
-    logger.info(`[Mídia] Tocando arquivo local, sem enviar: ${file.name}`);
-    onCommit(
-      { url, mimeType: file.type || 'video/mp4', title, chapters: [], subtitles: [], audioTracks: [] },
-      'solo'
-    );
-  };
-
   const startUpload = async (file: File) => {
     const roomCode = ensureRoom();
     const attempt = ++attemptRef.current;
@@ -185,18 +175,15 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
 
   const openPlayer = () => {
     if (phase.kind !== 'done') return;
-    onCommit(
-      {
-        url: phase.url,
-        mimeType: phase.file.type || 'video/mp4',
-        title: phase.file.name.replace(/\.[a-z0-9]+$/i, ''),
-        chapters: [],
-        subtitles: [],
-        audioTracks: [],
-        isMkv: /\.mkv$/i.test(phase.file.name),
-      },
-      'room'
-    );
+    onCommit({
+      url: phase.url,
+      mimeType: phase.file.type || 'video/mp4',
+      title: phase.file.name.replace(/\.[a-z0-9]+$/i, ''),
+      chapters: [],
+      subtitles: [],
+      audioTracks: [],
+      isMkv: /\.mkv$/i.test(phase.file.name),
+    });
   };
 
   /** Reabrir um envio de antes: entra na sala (como host) e apresenta o `claim` de dono ao servidor. */
@@ -553,12 +540,6 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
         </>
       )}
 
-      {phase.kind === 'chosen' && (
-        <p className="mt-3 mb-0 text-[12px] text-lu-muted">
-          {t('Pra assistir com amigos o arquivo sobe pro servidor. Sozinho, ele toca direto daqui, sem enviar nada.')}
-        </p>
-      )}
-
       <CardFooter>
         <TextButton onClick={onBack} className="!pl-2">
           <ChevronLeft size={18} />
@@ -566,16 +547,10 @@ export const UploadStep: React.FC<UploadStepProps> = ({ onBack, onCommit, ensure
         </TextButton>
         <div className="flex flex-wrap gap-2 justify-end">
           {phase.kind === 'chosen' ? (
-            <>
-              <GhostButton onClick={() => playLocally(phase.file)}>
-                <Play size={16} />
-                <span>{t('Assistir sozinho')}</span>
-              </GhostButton>
-              <PrimaryButton onClick={() => requireName(() => startUpload(phase.file))}>
-                <Users size={18} />
-                <span>{t('Enviar e criar sala')}</span>
-              </PrimaryButton>
-            </>
+            <PrimaryButton onClick={() => requireName(() => startUpload(phase.file))}>
+              <Users size={18} />
+              <span>{t('Enviar e criar sala')}</span>
+            </PrimaryButton>
           ) : phase.kind === 'error' ? (
             <PrimaryButton onClick={() => requireName(() => startUpload(phase.file))}>
               <Upload size={18} />

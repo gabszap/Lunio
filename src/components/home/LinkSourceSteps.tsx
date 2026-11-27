@@ -3,18 +3,18 @@ import { ChevronLeft, CircleAlert, CircleCheck, ExternalLink, FileVideo, FolderO
 import { apiFetch } from '../../lib/access';
 import { getYouTubeId } from '../../lib/media';
 import { formatBytes } from '../../lib/recent';
-import { BigInput, CardFooter, ClearButton, FieldLabel, GhostButton, Hint, HomeCard, HomeCardTitle, PrimaryButton, Spinner, TextButton } from '../ui';
-import type { CommitMode, SourceCommit } from './types';
+import { BigInput, CardFooter, ClearButton, FieldLabel, Hint, HomeCard, HomeCardTitle, PrimaryButton, Spinner, TextButton } from '../ui';
+import type { SourceCommit } from './types';
 import { t } from '../../lib/i18n';
 
 interface LinkStepProps {
   onBack: () => void;
   onCommit: SourceCommit;
-  /** Quando `true` (dentro de uma sala conectada), oculta "Assistir sozinho" para não desconectar o Host. */
+  /** Quando `true` (dentro de uma sala conectada), ajusta o rótulo do botão principal para "Tocar na sala". */
   inRoom?: boolean;
 }
 
-const StepActions: React.FC<{ onBack: () => void; onCommit: (mode: CommitMode) => void; disabled?: boolean; inRoom?: boolean }> = ({
+const StepActions: React.FC<{ onBack: () => void; onCommit: () => void; disabled?: boolean; inRoom?: boolean }> = ({
   onBack,
   onCommit,
   disabled,
@@ -26,13 +26,7 @@ const StepActions: React.FC<{ onBack: () => void; onCommit: (mode: CommitMode) =
       <span>{t('Voltar')}</span>
     </TextButton>
     <div className="flex flex-wrap gap-2 justify-end">
-      {!inRoom && (
-        <GhostButton disabled={disabled} onClick={() => onCommit('solo')}>
-          <Play size={16} />
-          <span>{t('Assistir sozinho')}</span>
-        </GhostButton>
-      )}
-      <PrimaryButton disabled={disabled} onClick={() => onCommit('room')}>
+      <PrimaryButton disabled={disabled} onClick={onCommit}>
         {inRoom ? <Play size={16} /> : <Users size={18} />}
         <span>{inRoom ? t('Tocar na sala') : t('Criar sala')}</span>
       </PrimaryButton>
@@ -77,19 +71,16 @@ export const YouTubeStep: React.FC<LinkStepProps> = ({ onBack, onCommit, inRoom 
 
   const invalid = link.trim().length > 8 && !videoId;
 
-  const commit = (mode: CommitMode) => {
+  const commit = () => {
     if (!videoId) return;
-    onCommit(
-      {
-        url: `https://www.youtube.com/watch?v=${videoId}`,
-        mimeType: 'video/youtube',
-        title: info?.title || t('Vídeo do YouTube'),
-        chapters: [],
-        subtitles: [],
-        audioTracks: [],
-      },
-      mode
-    );
+    onCommit({
+      url: `https://www.youtube.com/watch?v=${videoId}`,
+      mimeType: 'video/youtube',
+      title: info?.title || t('Vídeo do YouTube'),
+      chapters: [],
+      subtitles: [],
+      audioTracks: [],
+    });
   };
 
   return (
@@ -98,7 +89,7 @@ export const YouTubeStep: React.FC<LinkStepProps> = ({ onBack, onCommit, inRoom 
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          commit('room');
+          commit();
         }}
       >
         <FieldLabel htmlFor="yt-link">{t('Link do YouTube')}</FieldLabel>
@@ -208,21 +199,18 @@ export const DriveStep: React.FC<LinkStepProps> = ({ onBack, onCommit, inRoom })
     };
   }, [link, attempt]);
 
-  const commit = (mode: CommitMode) => {
+  const commit = () => {
     if (state.kind !== 'ok') return;
     const { file } = state;
-    onCommit(
-      {
-        url: file.url,
-        mimeType: file.mimeType || 'video/mp4',
-        title: file.name.replace(/\.[a-z0-9]+$/i, ''),
-        chapters: [],
-        subtitles: [],
-        audioTracks: [],
-        isMkv: /\.mkv$/i.test(file.name),
-      },
-      mode
-    );
+    onCommit({
+      url: file.url,
+      mimeType: file.mimeType || 'video/mp4',
+      title: file.name.replace(/\.[a-z0-9]+$/i, ''),
+      chapters: [],
+      subtitles: [],
+      audioTracks: [],
+      isMkv: /\.mkv$/i.test(file.name),
+    });
   };
 
   const blocked = state.kind === 'no_access' || state.kind === 'invalid' || state.kind === 'error';
@@ -233,7 +221,7 @@ export const DriveStep: React.FC<LinkStepProps> = ({ onBack, onCommit, inRoom })
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          commit('room');
+          commit();
         }}
       >
         <FieldLabel htmlFor="gd-link">{t('Link do Drive')}</FieldLabel>

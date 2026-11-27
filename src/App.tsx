@@ -22,7 +22,7 @@ import { RoomsTab } from './components/home/RoomsTab';
 import { StatusTab } from './components/home/StatusTab';
 import type { WatchIntent } from './components/catalog/CatalogTab';
 import type { StreamOption } from './lib/streams';
-import type { CommitMode, CommitOptions } from './components/home/types';
+import type { CommitOptions } from './components/home/types';
 import { MediaPayload, SubtitleTrack, CatalogSeriesContext } from './types/media';
 import { CatalogEpisode, episodeTag, loadActiveSeriesContext, saveActiveSeriesContext } from './lib/catalog';
 import type { PlaylistItem, RoomInitialSettings } from './types/sync';
@@ -470,9 +470,9 @@ export default function App() {
     return (st.isConnected || st.isConnecting) && st.isHost && Boolean(st.roomId);
   };
 
-  const commitMedia = (payload: MediaPayload, mode: CommitMode, options: CommitOptions = {}, named = false) => {
-    if (mode === 'room' && !named && !isHostingRoom()) {
-      withName(() => commitMedia(payload, mode, options, true), t('Criar sala'));
+  const commitMedia = (payload: MediaPayload, options: CommitOptions = {}, named = false) => {
+    if (!named && !isHostingRoom()) {
+      withName(() => commitMedia(payload, options, true), t('Criar sala'));
       return;
     }
     const merged: MediaPayload = { ...payload, subtitles: [...(payload.subtitles || []), ...pendingSubtitles] };
@@ -486,21 +486,11 @@ export default function App() {
     if (options.recent) setRecentStreams((prev) => pushRecentStream(prev, merged.url, merged.title || ''));
     logger.info(`[Mídia] Abrindo "${merged.title}" (${describeSourceForLog(merged.url)})`);
 
-    if (mode === 'room') {
-      // Cria a sala e já abre o player; o código fica no cabeçalho do player para compartilhar
-      ensureRoom(options.initialRoomSettings);
-      emitCurrentMedia(merged);
-      setIsWatchPartyOpen(typeof window !== 'undefined' ? window.innerWidth >= 1024 : true);
-      setView('player');
-    } else {
-      const st = syncManager.getStatus();
-      if ((st.isConnected || st.isConnecting) && !discordManager.isDiscordActivity()) {
-        syncManager.leaveRoom();
-        setRoomInUrl(null);
-      }
-      setIsWatchPartyOpen(false);
-      setView('player');
-    }
+    // Cria (ou reaproveita) a sala como Host e já abre o player; o código fica no cabeçalho para compartilhar
+    ensureRoom(options.initialRoomSettings);
+    emitCurrentMedia(merged);
+    setIsWatchPartyOpen(typeof window !== 'undefined' ? window.innerWidth >= 1024 : true);
+    setView('player');
   };
 
   /** Um stream escolhido no detalhe do catálogo ("Onde assistir"): cria a sala e abre o player. */
@@ -517,7 +507,6 @@ export default function App() {
         audioTracks: [],
         isMkv,
       },
-      'room',
       {
         seriesContext: context,
         continueRef: context ? refFromSeriesContext(context) : movie,
@@ -590,12 +579,6 @@ export default function App() {
     joinRoom(code);
   };
 
-  const handleSoloMode = () => {
-    setShowRoomModal(false);
-    setRoomInUrl(null);
-    syncManager.leaveRoom();
-  };
-
   const addSubtitle = (track: SubtitleTrack) => {
     if (subtitleModal === 'pending') {
       setPendingSubtitles((prev) => [...prev, track]);
@@ -653,7 +636,6 @@ export default function App() {
             saveRecentStreams([]);
           }}
           intentTitle={watchIntent?.title}
-          preferSolo={watchIntent?.preferSolo}
           pendingSubtitles={pendingSubtitles.length}
           onAddSubtitle={() => setSubtitleModal('pending')}
           onBack={() => goHome('catalog')}
@@ -798,7 +780,6 @@ export default function App() {
         onClose={() => setShowRoomModal(false)}
         onJoinRoom={handleJoinRoomFromLobby}
         onCreateRoom={handleCreateRoom}
-        onSoloMode={handleSoloMode}
         currentUsername={syncManager.hasCustomUsername() ? syncManager.getUser().username : ''}
       />
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Crown, Link as LinkIcon, LogIn, Play, Users, CircleAlert } from 'lucide-react';
+import { Crown, Link as LinkIcon, LogIn, Users, CircleAlert } from 'lucide-react';
 import { generateRoomCode, roomCodeFrom } from '../lib/roomCode';
 import { BigInput, FieldLabel, Hint, Modal, ModalHeader, PrimaryButton, Segmented, TextInput } from './ui';
 import { t } from '../lib/i18n';
@@ -10,7 +10,6 @@ interface RoomLobbyModalProps {
   initialRoomId?: string | null;
   onJoinRoom: (roomId: string, username: string) => void;
   onCreateRoom: (roomId: string, username: string) => void;
-  onSoloMode: () => void;
   currentUsername?: string;
 }
 
@@ -23,7 +22,6 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
   initialRoomId,
   onJoinRoom,
   onCreateRoom,
-  onSoloMode,
   currentUsername = '',
 }) => {
   const [activeTab, setActiveTab] = useState<'create' | 'join'>('create');
@@ -126,16 +124,6 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
           <span>{activeTab === 'create' ? t('Criar sala e iniciar') : t('Entrar na sala')}</span>
         </PrimaryButton>
       </form>
-
-      <div className="h-px bg-lu-border -mx-7" />
-      <button
-        type="button"
-        onClick={onSoloMode}
-        className="w-full inline-flex items-center justify-center gap-2 h-11 -my-1.5 rounded-[10px] text-[14px] font-medium text-lu-muted hover:bg-white/6"
-      >
-        <Play size={16} />
-        {t('Assistir sozinho')}
-      </button>
     </Modal>
   );
 };

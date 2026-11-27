@@ -4,9 +4,6 @@ import type { ContinueRef } from '../../lib/continueWatching';
 
 export type SourceStep = 'upload' | 'torrent' | 'youtube' | 'drive' | 'screen' | 'stream';
 
-/** "room" cria (ou reaproveita) uma sala como Host; "solo" só toca aqui. */
-export type CommitMode = 'room' | 'solo';
-
 export interface CommitOptions {
   /** Guarda o link em "Recentes". */
   recent?: boolean;
@@ -18,4 +15,4 @@ export interface CommitOptions {
   initialRoomSettings?: RoomInitialSettings;
 }
 
-export type SourceCommit = (payload: MediaPayload, mode: CommitMode, options?: CommitOptions) => void;
+export type SourceCommit = (payload: MediaPayload, options?: CommitOptions) => void;
