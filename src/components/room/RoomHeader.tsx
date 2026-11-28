@@ -174,7 +174,7 @@ export const RoomHeader: React.FC<RoomHeaderProps> = ({
           </div>
         )
       ) : (
-        <span className="text-[14px] font-semibold truncate">{t('Modo Solo')}</span>
+        <span className="text-[14px] font-semibold truncate">{t('Sem sala')}</span>
       )}
       {connected && (
         <span

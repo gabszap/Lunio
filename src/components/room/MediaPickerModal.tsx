@@ -4,7 +4,7 @@ import { ChevronLeft, Compass, FolderOpen, Link, Upload, X, Youtube } from 'luci
 import { StreamStep } from '../home/StreamStep';
 import { UploadStep } from '../home/UploadStep';
 import { DriveStep, YouTubeStep } from '../home/LinkSourceSteps';
-import type { CommitMode, CommitOptions, SourceCommit, SourceStep } from '../home/types';
+import type { CommitOptions, SourceCommit, SourceStep } from '../home/types';
 import type { WatchIntent } from '../catalog/CatalogTab';
 import type { RecentStream } from '../../lib/recent';
 import type { StreamOption } from '../../lib/streams';
@@ -85,7 +85,6 @@ const MediaPickerPage: React.FC<Omit<MediaPickerModalProps, 'open'>> = ({
 
   const handleCommit = (
     payload: MediaPayload,
-    mode: CommitMode,
     options?: CommitOptions
   ) => {
     if (isViewerSuggesting && onSuggestMedia) {
@@ -94,7 +93,7 @@ const MediaPickerPage: React.FC<Omit<MediaPickerModalProps, 'open'>> = ({
       onClose();
       return;
     }
-    onCommit(payload, inRoom ? 'room' : mode, options);
+    onCommit(payload, options);
     setWatchIntent(null);
     onClose();
   };
@@ -209,7 +208,6 @@ const MediaPickerPage: React.FC<Omit<MediaPickerModalProps, 'open'>> = ({
             onRemoveRecent={onRemoveRecent}
             onClearRecent={onClearRecent}
             intentTitle={watchIntent?.title}
-            preferSolo={watchIntent?.preferSolo}
             inRoom={inRoom}
             pendingSubtitles={pendingSubtitles}
             onAddSubtitle={onAddSubtitle}

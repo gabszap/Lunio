@@ -5,7 +5,7 @@ import { detectMimeType, validateAndFormatUrl, getYouTubeId } from '../../lib/me
 import { RecentStream, extractCleanTitleFromUrl, formatRecentTitle } from '../../lib/recent';
 import { logger } from '../../lib/logger';
 import { BigInput, CardFooter, FieldLabel, GhostButton, Hint, HomeCard, HomeCardTitle, PrimaryButton, TextButton } from '../ui';
-import type { CommitMode, SourceCommit } from './types';
+import type { SourceCommit } from './types';
 import { t } from '../../lib/i18n';
 
 const FORMATS = [
@@ -21,8 +21,7 @@ interface StreamStepProps {
   onClearRecent: () => void;
   /** Título vindo do catálogo ("Série · S01E02"). */
   intentTitle?: string;
-  preferSolo?: boolean;
-  /** Quando `true` (dentro de uma sala conectada), oculta "Assistir sozinho" para não desconectar o Host. */
+  /** Quando `true` (dentro de uma sala conectada), ajusta o rótulo do botão principal para "Tocar na sala". */
   inRoom?: boolean;
   pendingSubtitles: number;
   onAddSubtitle: () => void;
@@ -35,7 +34,6 @@ export const StreamStep: React.FC<StreamStepProps> = ({
   onRemoveRecent,
   onClearRecent,
   intentTitle,
-  preferSolo,
   inRoom,
   pendingSubtitles,
   onAddSubtitle,
@@ -79,7 +77,7 @@ export const StreamStep: React.FC<StreamStepProps> = ({
     }
   };
 
-  const commit = (mode: CommitMode, targetUrl = formatted, recentTitle?: string) => {
+  const commit = (targetUrl = formatted, recentTitle?: string) => {
     if (!/^https?:\/\//i.test(targetUrl)) {
       setError(t('Cole uma URL completa, começando com http:// ou https://'));
       return;
@@ -99,12 +97,9 @@ export const StreamStep: React.FC<StreamStepProps> = ({
         audioTracks: [],
         isMkv: /\.mkv|torrentio/i.test(targetUrl),
       },
-      mode,
       { recent: true }
     );
   };
-
-  const primaryMode: CommitMode = inRoom ? 'room' : preferSolo ? 'solo' : 'room';
 
   return (
     <HomeCard wide>
@@ -125,7 +120,7 @@ export const StreamStep: React.FC<StreamStepProps> = ({
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          commit(primaryMode);
+          commit();
         }}
       >
         <FieldLabel htmlFor="st-url">{t('URL do stream')}</FieldLabel>
@@ -203,7 +198,7 @@ export const StreamStep: React.FC<StreamStepProps> = ({
                     <button
                       type="button"
                       title={`${item.title}\n${item.url}`}
-                      onClick={() => commit(primaryMode, item.url, item.title)}
+                      onClick={() => commit(item.url, item.title)}
                       className="flex-1 min-w-0 h-full flex items-center gap-3 pl-3.5 text-left"
                     >
                       <span className="w-14 flex-none text-[11px] font-semibold tracking-[0.03em] text-lu-accent">{epTag}</span>
@@ -239,28 +234,11 @@ export const StreamStep: React.FC<StreamStepProps> = ({
                 <Play size={16} />
                 <span>{t('Tocar na sala')}</span>
               </PrimaryButton>
-            ) : primaryMode === 'room' ? (
-              <>
-                <GhostButton onClick={() => commit('solo')}>
-                  <Play size={16} />
-                  <span>{t('Assistir sozinho')}</span>
-                </GhostButton>
-                <PrimaryButton type="submit">
-                  <Users size={18} />
-                  <span>{t('Criar sala')}</span>
-                </PrimaryButton>
-              </>
             ) : (
-              <>
-                <GhostButton onClick={() => commit('room')}>
-                  <Users size={18} />
-                  <span>{t('Criar sala')}</span>
-                </GhostButton>
-                <PrimaryButton type="submit">
-                  <Play size={16} />
-                  <span>{t('Assistir sozinho')}</span>
-                </PrimaryButton>
-              </>
+              <PrimaryButton type="submit">
+                <Users size={18} />
+                <span>{t('Criar sala')}</span>
+              </PrimaryButton>
             )}
           </div>
         </CardFooter>

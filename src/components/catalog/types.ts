@@ -1,5 +1,4 @@
-/** O que a pessoa quer fazer com o título aberto (o App cria a sala ou abre sozinho). */
+/** O título que a pessoa quer assistir (o App abre o fluxo de link na sala). */
 export interface WatchIntent {
   title: string;
-  preferSolo: boolean;
 }

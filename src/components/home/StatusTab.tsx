@@ -328,7 +328,7 @@ export const StatusTab: React.FC<StatusTabProps> = ({ environment, room }) => {
         {' · '}
         {room.connected
           ? t('{code} · {n} {people} · você é {role}', { code: room.code, n: room.members, people: room.members === 1 ? t('pessoa') : t('pessoas'), role: room.isHost ? t('o Host') : t('espectador') })
-          : t('Nenhuma. Você está no Modo Solo.')}
+          : t('Nenhuma sala ativa.')}
       </p>
     </div>
   );
