@@ -319,14 +319,14 @@ test('modal de senha mantém o foco ao digitar e permite entrar em sala privada'
     await hostSidebar.locator('#room-settings-password').fill('segredo42');
     await hostSidebar.getByRole('button', { name: 'Salvar' }).click();
     await expect(hostSidebar.getByText('Salvo')).toBeVisible();
+    await expect(hostSidebar.getByRole('button', { name: 'Remover senha' })).toBeVisible();
 
     // Convidado entra pelo link direto /room/:code e digita a senha caractere a caractere (não pode perder foco pro X)
     await guest.page.goto(`/room/${code}`);
     const nameDialog = guest.page.getByRole('dialog', { name: 'Escolha seu apelido' });
-    if (await nameDialog.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await nameDialog.getByRole('textbox').fill('Bia');
-      await nameDialog.getByRole('button', { name: 'Entrar na sala' }).click();
-    }
+    await expect(nameDialog).toBeVisible();
+    await nameDialog.getByRole('textbox').fill('Bia');
+    await nameDialog.getByRole('button', { name: 'Entrar na sala' }).click();
 
     const pwDialog = guest.page.getByRole('dialog', { name: 'Sala privada' });
     await expect(pwDialog).toBeVisible();
